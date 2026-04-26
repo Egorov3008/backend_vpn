@@ -1,7 +1,38 @@
+# FastAPI core
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
 pydantic-settings>=2.0.0
+
+# Database
 asyncpg>=0.31.0
+
+# HTTP client
 httpx>=0.27.0
+
+# 3x-UI panel client
+py3xui>=0.1.0
+
+# Payments
+yookassa>=3.10.0
+
+# Aiogram (used for exception types in services/core/payment, services/core/referral)
+aiogram>=3.23.0
+
+# Logging
+loguru>=0.7.0
+
+# Background tasks
+apscheduler>=3.10.0
+
+# Retry logic (used in client.py XUISession)
+tenacity>=8.0.0
+
+# Prometheus metrics
+prometheus-client>=0.20.0
+
+# DI container (used in some service constructors)
+punq>=0.6.1
+
+# Testing
 pytest>=8.0.0
 pytest-asyncio>=0.24.0
