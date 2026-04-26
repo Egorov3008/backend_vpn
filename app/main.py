@@ -4,6 +4,7 @@ import asyncpg
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from api.v1.router import api_router
 from background.scheduler import create_scheduler
 from config import settings  # noqa: F401
 from database.base import create_db_pool
@@ -54,6 +55,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="VPN Platform Backend", lifespan=lifespan)
+app.include_router(api_router)
 
 
 @app.get("/health")
