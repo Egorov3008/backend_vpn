@@ -55,7 +55,7 @@ logger = StructuredLogger()
 
 
 def with_context(**ctx_kwargs: Any):
-    """Decorator for adding log context to async functions (aiogram-agnostic)."""
+    """Decorator for adding log context to async functions."""
     def decorator(func):
         @wraps(func)
         async def wrapper(*args, **kwargs):
