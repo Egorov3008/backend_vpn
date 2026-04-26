@@ -1,13 +1,51 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
 
-from app.config import settings  # noqa: F401
+import asyncpg
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+
+from background.scheduler import create_scheduler
+from config import settings  # noqa: F401
+from database.base import create_db_pool
+from database.service import DataService
+from services.cache.loader import LoadingService
+from services.cache.service import CacheService
+from services.cache.storage import CacheStorage
+from services.core.data.service import ServiceDataModel
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Stage 1: here will be DB pool, CacheService, APScheduler init
+    # 1. Database pool
+    pool = await create_db_pool()
+    app.state.pool = pool
+
+    # 2. Cache layer
+    storage = CacheStorage()
+    await storage.start()
+    cache_service = CacheService(storage)
+    app.state.cache = cache_service
+
+    # 3. Load initial data from DB into cache
+    data_service = DataService()
+    loader = LoadingService(cache=cache_service, data_service=data_service, pool=pool)
+    await loader.loading()
+
+    # 4. High-level service data model
+    service_data = ServiceDataModel(cache_service=cache_service, data_service=data_service)
+    app.state.service_data = service_data
+
+    # 5. Background scheduler
+    scheduler = create_scheduler(service_data=service_data, pool=pool)
+    scheduler.start()
+    app.state.scheduler = scheduler
+
     yield
+
+    # Teardown (reverse order)
+    scheduler.shutdown()
+    await storage.stop()
+    await pool.close()
 
 
 app = FastAPI(title="VPN Platform Backend", lifespan=lifespan)
@@ -16,3 +54,16 @@ app = FastAPI(title="VPN Platform Backend", lifespan=lifespan)
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "backend"}
+
+
+@app.get("/readiness")
+async def readiness(request: Request):
+    try:
+        pool: asyncpg.Pool = request.app.state.pool
+        await pool.fetchval("SELECT 1")
+        return {"status": "ready", "db": "connected"}
+    except Exception as e:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "not ready", "error": str(e)},
+        )
