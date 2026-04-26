@@ -1,0 +1,71 @@
+from typing import Optional
+
+import py3xui
+
+from config import DEFAULT_PRICING_PLAN
+from logger import logger
+from models import Tariff
+from services.core.data.service import ServiceDataModel
+
+
+class TariffMatcher:
+    """Определяет тариф клиента по параметрам, сравнивая с тарифами из кеша."""
+
+    SPECIAL_INBOUND_TARIFF = {6: 1}
+
+    def __init__(self, model_data: ServiceDataModel) -> None:
+        self.model_data = model_data
+
+    async def match(self, client: py3xui.Client) -> int:
+        """Определяет tariff_id для клиента XUI."""
+        # 1. Специальное правило для inbound_id
+        if client.inbound_id in self.SPECIAL_INBOUND_TARIFF and not client.total_gb:
+            return self.SPECIAL_INBOUND_TARIFF[client.inbound_id]
+
+        # 2. Точное совпадение по limit_ip + traffic
+        tariffs = await self.model_data.tariffs.get_all()
+        exact = self._find_exact_match(tariffs, client)
+        if exact:
+            return exact.id
+
+        # 3. Совпадение только по limit_ip
+        by_ip = self._find_by_limit_ip(tariffs, client)
+        if by_ip:
+            logger.warning(
+                "Тариф определен только по limit_ip",
+                email=client.email,
+                limit_ip=client.limit_ip,
+                tariff_id=by_ip.id,
+            )
+            return by_ip.id
+
+        # 4. Fallback
+        logger.warning(
+            "Тариф не найден, используется DEFAULT_PRICING_PLAN",
+            email=client.email,
+            limit_ip=client.limit_ip,
+            total_gb=client.total_gb,
+        )
+        return int(DEFAULT_PRICING_PLAN)
+
+    def _find_exact_match(
+        self, tariffs: list[Tariff], client: py3xui.Client
+    ) -> Optional[Tariff]:
+        """Точное совпадение: limit_ip + traffic_limit."""
+        client_traffic_gb = client.total_gb / (1024**3) if client.total_gb else 0
+        for tariff in tariffs:
+            if (
+                tariff.limit_ip == client.limit_ip
+                and tariff.traffic_limit == client_traffic_gb
+            ):
+                return tariff
+        return None
+
+    def _find_by_limit_ip(
+        self, tariffs: list[Tariff], client: py3xui.Client
+    ) -> Optional[Tariff]:
+        """Совпадение по limit_ip (первый найденный)."""
+        for tariff in tariffs:
+            if tariff.limit_ip == client.limit_ip:
+                return tariff
+        return None
