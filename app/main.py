@@ -26,19 +26,24 @@ async def lifespan(app: FastAPI):
     cache_service = CacheService(storage)
     app.state.cache = cache_service
 
-    # 3. Load initial data from DB into cache
-    data_service = DataService()
-    loader = LoadingService(cache=cache_service, data_service=data_service, pool=pool)
-    await loader.loading()
+    try:
+        # 3. Load initial data from DB into cache
+        data_service = DataService()
+        loader = LoadingService(cache=cache_service, data_service=data_service, pool=pool)
+        await loader.loading()
 
-    # 4. High-level service data model
-    service_data = ServiceDataModel(cache_service=cache_service, data_service=data_service)
-    app.state.service_data = service_data
+        # 4. High-level service data model
+        service_data = ServiceDataModel(cache_service=cache_service, data_service=data_service)
+        app.state.service_data = service_data
 
-    # 5. Background scheduler
-    scheduler = create_scheduler(service_data=service_data, pool=pool)
-    scheduler.start()
-    app.state.scheduler = scheduler
+        # 5. Background scheduler
+        scheduler = create_scheduler(service_data=service_data, pool=pool)
+        scheduler.start()
+        app.state.scheduler = scheduler
+    except Exception:
+        await storage.stop()
+        await pool.close()
+        raise
 
     yield
 
@@ -63,7 +68,9 @@ async def readiness(request: Request):
         await pool.fetchval("SELECT 1")
         return {"status": "ready", "db": "connected"}
     except Exception as e:
+        from logger import logger
+        logger.error("Readiness check failed", error=str(e))
         return JSONResponse(
             status_code=503,
-            content={"status": "not ready", "error": str(e)},
+            content={"status": "not ready", "error": "database unavailable"},
         )
