@@ -56,6 +56,7 @@ async def get_key(
         total_gb=key.total_gb,
         used_traffic=key.used_traffic,
         inbound_id=key.inbound_id,
+        client_id=key.client_id,
         status_text=detail["status_text"],
         days_left=detail["days_left"],
         hours_left=detail["hours_left"],
