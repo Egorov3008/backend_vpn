@@ -5,6 +5,7 @@ from typing import Optional
 class KeyResponse(BaseModel):
     email: str
     tg_id: int
+    client_id: str
     expiry_time: int
     key: str
     tariff_id: Optional[int] = None
@@ -18,6 +19,7 @@ class KeyResponse(BaseModel):
         return cls(
             email=k.email,
             tg_id=k.tg_id,
+            client_id=k.client_id,
             expiry_time=k.expiry_time,
             key=k.key,
             tariff_id=k.tariff_id,
@@ -39,3 +41,10 @@ class KeyDetailResponse(KeyResponse):
 
 class KeyCreateRequest(BaseModel):
     tg_id: int
+    tariff_id: int
+
+
+class KeyRenewRequest(BaseModel):
+    tg_id: int
+    tariff_id: int
+    number_of_months: int
