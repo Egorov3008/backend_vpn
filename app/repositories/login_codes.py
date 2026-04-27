@@ -1,7 +1,7 @@
 """Login code repository for typed database access."""
 import logging
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 import asyncpg
 
@@ -53,7 +53,7 @@ class LoginCodeRepository:
         """
 
         try:
-            now = datetime.now()
+            now = datetime.now(timezone.utc)
             if conn:
                 row = await conn.fetchrow(query, code, tg_id, expires_at, now)
             else:
