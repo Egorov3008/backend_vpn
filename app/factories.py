@@ -18,12 +18,18 @@ from services.core.payment.renewal_service import KeyRenewalService
 from services.core.payment.router import PaymentRouter
 
 
-def build_payment_router(
+def build_key_services(
     pool: asyncpg.Pool,
     service_data: ServiceDataModel,
     cache: CacheService,
     data_service: DataService,
-) -> PaymentRouter:
+) -> tuple:
+    """
+    Builds key services (CreateKey, KeyRenewal, XUISession).
+
+    Returns:
+        (create_key, key_renewal, xui) tuple
+    """
     expiry = ExpiryCalculator()
     loading = LoadingService(cache=cache, data_service=data_service, pool=pool)
     xui = XUISession(model_service=service_data, loading=loading)
@@ -46,6 +52,17 @@ def build_payment_router(
         refresh_key=updater,
         resetter=resetter,
     )
+
+    return (create_key, key_renewal, xui)
+
+
+def build_payment_router(
+    pool: asyncpg.Pool,
+    service_data: ServiceDataModel,
+    cache: CacheService,
+    data_service: DataService,
+) -> PaymentRouter:
+    create_key, key_renewal, xui = build_key_services(pool, service_data, cache, data_service)
 
     processor = PaymentProcessor(conn=pool, model_service=service_data, cache=cache)
     creation_svc = KeyCreationService(processor=processor, create_key=create_key)
