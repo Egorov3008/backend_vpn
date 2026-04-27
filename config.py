@@ -21,7 +21,8 @@ class Settings(BaseSettings):
     # Core
     database_url: str = ""
     bot_secret_key: str = "changeme"
-    invite_token: str = "web_invite_2026"
+    # Single-use registration token for web form registration invites
+    invite_token: str = "changeme"
     admin_api_key: str = "changeme"
     log_level: str = "INFO"
 
