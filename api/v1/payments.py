@@ -95,7 +95,6 @@ async def create_payment(
             idempotency_key,
         )
     except Exception as e:
-        from logger import logger
         logger.error("YooKassa payment creation failed", error=str(e))
         raise HTTPException(status_code=502, detail="Payment provider error")
 
