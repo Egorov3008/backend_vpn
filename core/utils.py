@@ -1,4 +1,6 @@
 import inspect
+import random
+import string
 from functools import wraps
 from typing import Callable, Any
 
@@ -13,6 +15,12 @@ def filter_by_method_signature(method: Callable) -> Callable:
         return method(*args, **filtered_kwargs)
 
     return wrapper
+
+
+def generate_random_email(length: int = 6) -> str:
+    """Generate random email with specified length."""
+    random_str = ''.join(random.choices(string.ascii_lowercase + string.digits, k=length))
+    return f"{random_str}@vpn.local"
 
 
 def sorted_keys(data: list) -> dict:
