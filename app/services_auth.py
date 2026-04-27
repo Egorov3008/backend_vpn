@@ -3,17 +3,20 @@ Service functions for authentication and user registration from invites.
 """
 from datetime import datetime, timedelta
 
+import asyncpg
+
 from models import User, LoginCode
 from app.schemas.auth import RegisterFromInviteRequest, RegisterFromInviteResponse
+from app.repositories.users import UserRepository
+from app.repositories.login_codes import LoginCodeRepository
 from core.utils import generate_login_code
 from config import settings
-from services.core.data.service import ServiceDataModel
-import asyncpg
 
 
 async def register_from_invite(
     request: RegisterFromInviteRequest,
-    service_data: ServiceDataModel,
+    user_repo: UserRepository,
+    login_code_repo: LoginCodeRepository,
     pool: asyncpg.Pool
 ) -> RegisterFromInviteResponse:
     """
@@ -21,7 +24,8 @@ async def register_from_invite(
 
     Args:
         request: RegisterFromInviteRequest with user data and invite token
-        service_data: ServiceDataModel with database repositories
+        user_repo: UserRepository for user operations
+        login_code_repo: LoginCodeRepository for login code operations
         pool: asyncpg pool for database operations
 
     Returns:
@@ -36,7 +40,7 @@ async def register_from_invite(
         raise ValueError("Invalid invite token")
 
     # Check if user already exists
-    existing_user = await service_data.users.get_data(request.tg_id)
+    existing_user = await user_repo.get_by_tg_id(request.tg_id)
     if existing_user:
         raise ValueError(f"User {request.tg_id} already exists")
 
@@ -53,13 +57,30 @@ async def register_from_invite(
         is_admin=False,
         is_blocked=False
     )
-    await service_data.users.save_data(pool, new_user, tg_id=new_user.tg_id)
+    # Save user using pool connection
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO users (tg_id, username, first_name, last_name, language_code, server_id, balance, trial, is_admin, is_blocked)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            """,
+            new_user.tg_id,
+            new_user.username,
+            new_user.first_name,
+            new_user.last_name,
+            new_user.language_code,
+            new_user.server_id,
+            new_user.balance,
+            new_user.trial,
+            new_user.is_admin,
+            new_user.is_blocked
+        )
 
     # Generate login code
     code = generate_login_code()
     expires_at = datetime.utcnow() + timedelta(hours=24)
 
-    # Save login code directly to database (bypasses cache as codes are temporary)
+    # Save login code directly to database
     async with pool.acquire() as conn:
         await conn.execute(
             """
