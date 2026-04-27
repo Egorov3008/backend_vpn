@@ -1,5 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import datetime
+from models import PaymentModel
 
 
 @pytest.mark.asyncio
@@ -53,3 +55,104 @@ async def test_create_payment_missing_tariff_returns_404(api_client, mock_servic
         "operation": "create_key",
     })
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_payment_history_empty(api_client, mock_service_data):
+    """Test getting payment history when no payments exist"""
+    mock_service_data.payments.get_by = AsyncMock(return_value=None)
+
+    response = await api_client.get("/api/v1/payments/?tg_id=123")
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+@pytest.mark.asyncio
+async def test_get_payment_history_multiple(api_client, mock_service_data):
+    """Test getting payment history with multiple payments"""
+    payments = [
+        PaymentModel(
+            payment_id="pay_001",
+            tg_id=123,
+            amount=99.99,
+            status="succeeded",
+            payment_type="create_key|1",
+            created_at=datetime(2026, 4, 27, 10, 0, 0),
+        ),
+        PaymentModel(
+            payment_id="pay_002",
+            tg_id=123,
+            amount=199.99,
+            status="succeeded",
+            payment_type="renew_key|user@example.com",
+            created_at=datetime(2026, 4, 26, 15, 30, 0),
+        ),
+        PaymentModel(
+            payment_id="pay_003",
+            tg_id=123,
+            amount=49.99,
+            status="pending",
+            payment_type="create_key|2",
+            created_at=datetime(2026, 4, 25, 12, 0, 0),
+        ),
+    ]
+    mock_service_data.payments.get_by = AsyncMock(return_value=payments)
+
+    response = await api_client.get("/api/v1/payments/?tg_id=123")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 3
+    assert data[0]["payment_id"] == "pay_001"
+    assert data[0]["status"] == "succeeded"
+    assert data[0]["amount"] == 99.99
+    assert data[1]["payment_id"] == "pay_002"
+    assert data[2]["status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_get_payment_status_success(api_client, mock_service_data):
+    """Test getting status of a valid payment"""
+    payment = PaymentModel(
+        payment_id="pay_123",
+        tg_id=456,
+        amount=99.99,
+        status="succeeded",
+        payment_type="create_key|1",
+        created_at=datetime(2026, 4, 27, 10, 0, 0),
+    )
+    mock_service_data.payments.get_data = AsyncMock(return_value=payment)
+
+    response = await api_client.get("/api/v1/payments/pay_123/status?tg_id=456")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["payment_id"] == "pay_123"
+    assert data["status"] == "succeeded"
+    assert data["tg_id"] == 456
+
+
+@pytest.mark.asyncio
+async def test_get_payment_status_not_found(api_client, mock_service_data):
+    """Test getting status of a non-existent payment"""
+    mock_service_data.payments.get_data = AsyncMock(return_value=None)
+
+    response = await api_client.get("/api/v1/payments/pay_nonexistent/status?tg_id=456")
+    assert response.status_code == 404
+    assert "Payment not found" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_get_payment_status_unauthorized(api_client, mock_service_data):
+    """Test getting status of a payment that belongs to a different user"""
+    payment = PaymentModel(
+        payment_id="pay_123",
+        tg_id=789,
+        amount=99.99,
+        status="succeeded",
+        payment_type="create_key|1",
+        created_at=datetime(2026, 4, 27, 10, 0, 0),
+    )
+    mock_service_data.payments.get_data = AsyncMock(return_value=payment)
+
+    response = await api_client.get("/api/v1/payments/pay_123/status?tg_id=456")
+    assert response.status_code == 403
+    assert "does not belong to this user" in response.json()["detail"]

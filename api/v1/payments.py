@@ -1,6 +1,7 @@
 import uuid
+from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.auth import verify_bot_secret
 from app.dependencies import get_service_data, get_pool, get_cache
@@ -9,14 +10,26 @@ from app.schemas.payments import (
     PaymentWebhookBody,
     PaymentCreateRequest,
     PaymentCreateResponse,
+    PaymentHistoryItem,
+    PaymentStatusResponse,
 )
 from config import settings
 from database.service import DataService
 from models import PaymentModel
 from services.cache.service import CacheService
 from services.core.data.service import ServiceDataModel
+from logger import logger
 
 router = APIRouter(prefix="/payments", tags=["payments"])
+
+
+def _normalize_get_by(result) -> list:
+    """BaseData.get_by() returns list | object | None — normalize to list."""
+    if result is None:
+        return []
+    if isinstance(result, list):
+        return result
+    return [result]
 
 
 @router.post("/webhook")
@@ -103,4 +116,54 @@ async def create_payment(
         payment_id=payment_id,
         confirmation_url=confirmation_url,
         amount=amount,
+    )
+
+
+@router.get("/", response_model=List[PaymentHistoryItem])
+async def get_payment_history(
+    tg_id: int = Query(..., description="Telegram user ID"),
+    _: None = Depends(verify_bot_secret),
+    service_data: ServiceDataModel = Depends(get_service_data),
+) -> List[PaymentHistoryItem]:
+    """Get payment history for a user"""
+    logger.info(f"Fetching payment history for tg_id={tg_id}")
+    result = await service_data.payments.get_by(tg_id=tg_id)
+    payments = _normalize_get_by(result)
+    logger.info(f"Found {len(payments)} payments for tg_id={tg_id}")
+    return [
+        PaymentHistoryItem(
+            payment_id=p.payment_id,
+            tg_id=p.tg_id,
+            amount=p.amount,
+            status=p.status,
+            payment_type=p.payment_type,
+            created_at=p.created_at,
+        )
+        for p in payments
+    ]
+
+
+@router.get("/{payment_id}/status", response_model=PaymentStatusResponse)
+async def get_payment_status(
+    payment_id: str,
+    tg_id: int = Query(..., description="Telegram user ID"),
+    _: None = Depends(verify_bot_secret),
+    service_data: ServiceDataModel = Depends(get_service_data),
+) -> PaymentStatusResponse:
+    """Get status of a specific payment"""
+    logger.info(f"Fetching payment status for payment_id={payment_id}, tg_id={tg_id}")
+    payment = await service_data.payments.get_data(payment_id)
+    if not payment:
+        logger.warning(f"Payment not found: payment_id={payment_id}")
+        raise HTTPException(status_code=404, detail="Payment not found")
+
+    if payment.tg_id != tg_id:
+        logger.warning(f"Payment belongs to different user: payment_id={payment_id}, expected_tg_id={tg_id}, actual_tg_id={payment.tg_id}")
+        raise HTTPException(status_code=403, detail="Payment does not belong to this user")
+
+    logger.info(f"Payment status for payment_id={payment_id}: {payment.status}")
+    return PaymentStatusResponse(
+        payment_id=payment.payment_id,
+        status=payment.status,
+        tg_id=payment.tg_id,
     )

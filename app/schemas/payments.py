@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 from typing import Optional, Literal
+from datetime import datetime
 
 
 class PaymentWebhookBody(BaseModel):
@@ -20,3 +21,18 @@ class PaymentCreateResponse(BaseModel):
     payment_id: str
     confirmation_url: str
     amount: float
+
+
+class PaymentHistoryItem(BaseModel):
+    payment_id: str
+    tg_id: int
+    amount: float
+    status: str
+    payment_type: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+
+class PaymentStatusResponse(BaseModel):
+    payment_id: str
+    status: str
+    tg_id: int
