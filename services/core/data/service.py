@@ -1,5 +1,5 @@
 from database import DataService
-from models import User, Key, Server, Inbound, PaymentModel, GiftLink, Tariff, ReferralLink
+from models import User, Key, Server, Inbound, PaymentModel, GiftLink, Tariff, ReferralLink, LoginCode
 from models.stocks.stock import Stock
 from services.cache.service import CacheService
 from services.core.data.base import BaseData
@@ -41,4 +41,7 @@ class ServiceDataModel:
         )
         self.referral_links: DataProtocol[ReferralLink] = BaseData[ReferralLink](
             ReferralLink, self.cache_service, self.data_service.referral_links
+        )
+        self.login_codes: DataProtocol[LoginCode] = BaseData[LoginCode](
+            LoginCode, self.cache_service, self.data_service.login_codes
         )

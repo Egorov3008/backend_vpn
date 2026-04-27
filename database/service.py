@@ -1,6 +1,6 @@
 from database.base import BaseRepository
 from database.protocols import DatabaseProtocol
-from models import User, Key, Server, PaymentModel, Tariff, Inbound, GiftLink
+from models import User, Key, Server, PaymentModel, Tariff, Inbound, GiftLink, LoginCode
 from models import ReferralLink, ReferralRedemption, ReferralReward
 from models.stocks.stock import Stock
 
@@ -42,4 +42,7 @@ class DataService:
         )
         self.referral_rewards: DatabaseProtocol[ReferralReward] = BaseRepository[ReferralReward](
             table_name="referral_rewards", model=ReferralReward
+        )
+        self.login_codes: DatabaseProtocol[LoginCode] = BaseRepository[LoginCode](
+            table_name="login_codes", model=LoginCode
         )

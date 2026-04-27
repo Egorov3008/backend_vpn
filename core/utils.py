@@ -38,3 +38,8 @@ def sorted_keys(data: list) -> dict:
     if group:
         result[group_num] = group
     return result
+
+
+def generate_login_code(length: int = 8) -> str:
+    """Generate random 8-character alphanumeric login code."""
+    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=length))

@@ -13,6 +13,7 @@ from .referrals.referral_link import ReferralLink
 from .referrals.referral_redemption import ReferralRedemption
 from .referrals.referral_reward import ReferralReward
 from .gifts.gift_link import GiftLink
+from .login_code import LoginCode
 
 # GiftRedemption удален, его функциональность интегрирована в GiftLink
 from .cache import CacheItem, REGISTRATE_USER
