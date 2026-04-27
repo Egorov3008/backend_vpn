@@ -251,3 +251,89 @@ async def test_renew_key_wrong_user(api_client, mock_service_data):
 
     assert response.status_code == 403
     assert "Key does not belong to this user" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_list_keys_empty(api_client, mock_service_data):
+    """List keys should return empty list when no keys exist."""
+    mock_service_data.keys.get_by = AsyncMock(return_value=None)
+
+    response = await api_client.get(
+        "/api/v1/keys/",
+        params={"tg_id": 123},
+    )
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+@pytest.mark.asyncio
+async def test_list_keys_multiple(api_client, mock_service_data):
+    """List keys should return multiple keys for user."""
+    mock_service_data.keys.get_by = AsyncMock(return_value=[
+        MagicMock(
+            client_id="abc1",
+            email="test1@example.com",
+            tg_id=123,
+            expiry_time=9999999,
+            key="vless://1",
+            tariff_id=1,
+            name_tariff="Free",
+            total_gb=50 * (1024 ** 3),
+            used_traffic=1.0,
+            inbound_id=11,
+        ),
+        MagicMock(
+            client_id="abc2",
+            email="test2@example.com",
+            tg_id=123,
+            expiry_time=9999999,
+            key="vless://2",
+            tariff_id=1,
+            name_tariff="Free",
+            total_gb=50 * (1024 ** 3),
+            used_traffic=1.0,
+            inbound_id=11,
+        ),
+    ])
+
+    response = await api_client.get(
+        "/api/v1/keys/",
+        params={"tg_id": 123},
+    )
+    assert response.status_code == 200
+    assert len(response.json()) == 2
+
+
+@pytest.mark.asyncio
+async def test_get_key_detail(api_client, mock_service_data):
+    """Get key detail should return full key information."""
+    mock_key = MagicMock(
+        client_id="abc1",
+        email="test@example.com",
+        tg_id=123,
+        expiry_time=9999999,
+        key="vless://abc",
+        tariff_id=1,
+        name_tariff="Free",
+        total_gb=50 * (1024 ** 3),
+        used_traffic=1.0,
+        inbound_id=11,
+    )
+    mock_service_data.keys.get_data = AsyncMock(return_value=mock_key)
+
+    response = await api_client.get(
+        "/api/v1/keys/test@example.com",
+    )
+    assert response.status_code == 200
+    assert response.json()["email"] == "test@example.com"
+
+
+@pytest.mark.asyncio
+async def test_get_key_not_found(api_client, mock_service_data):
+    """Get non-existent key should fail."""
+    mock_service_data.keys.get_data = AsyncMock(return_value=None)
+
+    response = await api_client.get(
+        "/api/v1/keys/missing@example.com",
+    )
+    assert response.status_code == 404

@@ -19,7 +19,9 @@ def mock_service_data():
     sd.keys.get_by = AsyncMock(return_value=None)
     sd.keys.get_data = AsyncMock(return_value=None)
     sd.keys.get_all = AsyncMock(return_value=[])
+    sd.keys.delete = AsyncMock(return_value=True)
     sd.payments.save_data = AsyncMock(return_value=None)
+    sd.servers.get_data = AsyncMock(return_value=None)
     return sd
 
 
