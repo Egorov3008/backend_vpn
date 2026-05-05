@@ -1,7 +1,8 @@
 import uuid
 from typing import List
+from ipaddress import ip_address, ip_network
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.auth import verify_bot_secret
 from app.dependencies import get_service_data, get_pool, get_cache
@@ -32,13 +33,48 @@ def _normalize_get_by(result) -> list:
     return [result]
 
 
+def _check_webhook_ip(request: Request) -> bool:
+    """Проверяет, что webhook приходит с одного из разрешённых IP YooKassa."""
+    if settings.disable_webhook_ip_check:
+        logger.info("IP проверка для webhook отключена (DEV MODE)")
+        return True
+
+    # IP адреса YooKassa: 185.71.76.0/27 и 185.109.44.0/27
+    allowed_networks = [
+        ip_network("185.71.76.0/27"),
+        ip_network("185.109.44.0/27"),
+    ]
+
+    client_ip_str = request.client.host if request.client else None
+    if not client_ip_str:
+        logger.warning("Webhook: не удалось определить IP клиента")
+        return False
+
+    try:
+        client_ip = ip_address(client_ip_str)
+        for network in allowed_networks:
+            if client_ip in network:
+                logger.info(f"Webhook IP валиден: {client_ip}")
+                return True
+
+        logger.warning(f"Webhook отклонён: IP {client_ip} не в списке разрешённых YooKassa")
+        return False
+    except ValueError as e:
+        logger.error(f"Ошибка при парсинге IP: {client_ip_str}, error={str(e)}")
+        return False
+
+
 @router.post("/webhook")
 async def payment_webhook(
+    request: Request,
     body: PaymentWebhookBody,
     pool=Depends(get_pool),
     service_data: ServiceDataModel = Depends(get_service_data),
     cache: CacheService = Depends(get_cache),
 ):
+    if not _check_webhook_ip(request):
+        raise HTTPException(status_code=403, detail="Webhook IP not allowed")
+
     if body.event != "payment.succeeded":
         return {"ok": True}
 
@@ -70,7 +106,13 @@ async def create_payment(
     else:
         payment_type = f"create_key|{body.tariff_id}"
 
-    amount = tariff.amount * body.number_of_months
+    base = tariff.amount * body.number_of_months
+    discount_percent = 0
+    if body.number_of_months >= 2 and settings.discounts > 0:
+        discount_percent = settings.discounts
+        amount = round(base * (1 - settings.discounts / 100), 2)
+    else:
+        amount = base
 
     import yookassa
     yookassa.Configuration.account_id = settings.yookassa_shop_id
@@ -108,6 +150,7 @@ async def create_payment(
         payment_type=payment_type,
         status="pending",
         number_of_months=body.number_of_months,
+        discount_percent=discount_percent,
     )
     await service_data.payments.save_data(pool, payment, payment_id=payment_id)
 
