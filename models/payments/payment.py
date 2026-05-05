@@ -21,7 +21,7 @@ class PaymentModel:
 
     # Поля, реально существующие в таблице payments; id исключён — он SERIAL/генерируется БД
     _DB_FIELDS: ClassVar[frozenset] = frozenset(
-        {"payment_id", "tg_id", "amount", "payment_type", "status", "created_at", "number_of_months"}
+        {"payment_id", "tg_id", "amount", "payment_type", "status", "created_at", "number_of_months", "discount_percent", "referral_discount"}
     )
 
     def __post_init__(self):
