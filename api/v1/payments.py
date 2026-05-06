@@ -260,7 +260,7 @@ async def get_payment_status(
                         payment_router = build_payment_router(pool, service_data, cache, data_service)
                         await payment_router.route(payment_id)
                     except Exception as e:
-                        logger.warning("Ошибка при обработке платежа после YooKassa подтверждения", extra={"payment_id": payment_id, "error": str(e)})
+                        logger.error("Ошибка при обработке платежа после YooKassa подтверждения", extra={"payment_id": payment_id, "error": str(e), "error_type": type(e).__name__}, exc_info=True)
 
                     # Перезагружаем платёж из БД (с DB-fallback) чтобы получить актуальный статус
                     payment = await service_data.payments.get_data(payment_id, conn=pool)

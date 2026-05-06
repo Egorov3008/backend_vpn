@@ -79,11 +79,13 @@ class PaymentRouter:
                 )
                 raise ValueError(f"Неизвестный тип операции: {operation}")
         except Exception as e:
-            logger.warning(
+            logger.error(
                 "Ошибка при обработке платежа (статус остается pending для retry)",
                 payment_id=payment_id,
                 operation=operation,
+                error_type=type(e).__name__,
                 error=str(e),
+                exc_info=True,
             )
             raise
 
