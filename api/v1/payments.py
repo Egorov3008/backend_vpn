@@ -118,17 +118,6 @@ async def create_payment(
         if not body.email:
             logger.warning("Email не указан для renew_key операции")
             raise HTTPException(status_code=422, detail="email required for renew_key operation")
-
-        # Validate that the key exists before creating payment
-        try:
-            key = await service_data.keys.get_data(body.email, conn=pool)
-            if not key:
-                logger.warning("Ключ не найден для renew", extra={"email": body.email})
-                raise HTTPException(status_code=404, detail="Key not found")
-        except ValueError as e:
-            logger.warning("Ключ не найден для renew", extra={"email": body.email, "error": str(e)})
-            raise HTTPException(status_code=404, detail="Key not found")
-
         payment_type = f"renew_key|{body.email}"
     else:
         payment_type = f"create_key|{body.tariff_id}"
