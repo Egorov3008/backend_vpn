@@ -96,7 +96,7 @@ async def test_get_payment_history_multiple(api_client, mock_service_data):
             created_at=datetime(2026, 4, 25, 12, 0, 0),
         ),
     ]
-    mock_service_data.payments.get_by = AsyncMock(return_value=payments)
+    mock_service_data.data_service.payments.filter = AsyncMock(return_value=payments)
 
     response = await api_client.get("/api/v1/payments/?tg_id=123")
     assert response.status_code == 200

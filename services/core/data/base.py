@@ -163,10 +163,20 @@ class BaseData(Generic[T]):
         if not getattr(data, key):
             raise ValueError(f"{self.__class__.__name__}: {key} is required")
 
-        await self.service.create(conn, **data.to_dict())
+        from logger import logger
+        logger.debug(f"Сохранение {self.model_name} в БД", identifier=value, data_dict=data.to_dict())
+
+        try:
+            await self.service.create(conn, **data.to_dict())
+            logger.debug(f"{self.model_name} успешно сохранен в БД", identifier=value)
+        except Exception as e:
+            logger.error(f"Ошибка при сохранении {self.model_name} в БД", identifier=value, error=str(e))
+            raise
+
         # Используем CacheKeyManager для единообразного ключа
         cache_key = self._generate_key(value)
         await self._get_cache_model().set(cache_key, data)
+        logger.debug(f"{self.model_name} сохранен в кеше", cache_key=cache_key)
 
     async def delete_data(self, conn: asyncpg.Pool, data: T) -> None:
         """Удалить данные из БД и кеша"""

@@ -134,7 +134,6 @@ async def test_delete_key(api_client, mock_service_data):
     """Test deleting a key calls delete_client and removes from DB"""
     key = make_key()
     mock_service_data.keys.get_data = AsyncMock(return_value=key)
-    mock_service_data.keys.delete = AsyncMock(return_value=True)
 
     with patch("api.v1.keys.build_key_services") as mock_build:
         mock_xui = AsyncMock()
@@ -145,7 +144,8 @@ async def test_delete_key(api_client, mock_service_data):
 
     assert response.status_code == 204
     mock_xui.delete_client.assert_called_once_with("test@vpn.ru", 11, "abc123")
-    mock_service_data.keys.delete.assert_called_once()
+    mock_service_data.data_service.keys.delete.assert_called_once()
+    mock_service_data.cache_service.keys.delete.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -256,7 +256,7 @@ async def test_renew_key_wrong_user(api_client, mock_service_data):
 @pytest.mark.asyncio
 async def test_list_keys_empty(api_client, mock_service_data):
     """List keys should return empty list when no keys exist."""
-    mock_service_data.keys.get_by = AsyncMock(return_value=None)
+    mock_service_data.data_service.keys.filter = AsyncMock(return_value=[])
 
     response = await api_client.get(
         "/api/v1/keys/",
@@ -269,7 +269,7 @@ async def test_list_keys_empty(api_client, mock_service_data):
 @pytest.mark.asyncio
 async def test_list_keys_multiple(api_client, mock_service_data):
     """List keys should return multiple keys for user."""
-    mock_service_data.keys.get_by = AsyncMock(return_value=[
+    mock_service_data.data_service.keys.filter = AsyncMock(return_value=[
         MagicMock(
             client_id="abc1",
             email="test1@example.com",

@@ -2,6 +2,7 @@ import uuid
 from typing import Optional
 
 from core.utils import generate_random_email
+from logger import logger
 from models import Tariff, Key
 from services.cache.service import CacheService
 from services.core.connect_module.repositories.form_data import FormConnectionData

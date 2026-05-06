@@ -7,6 +7,7 @@ from app.auth import verify_bot_secret
 from app.dependencies import get_service_data, get_pool, get_cache
 from app.factories import build_key_services
 from app.schemas.keys import KeyResponse, KeyDetailResponse, KeyCreateRequest, KeyRenewRequest
+from services.cache.key_manager import CacheKeyManager
 from services.core.data.service import ServiceDataModel
 from services.core.keys.service import KeyService
 from database.service import DataService
@@ -29,9 +30,13 @@ async def list_keys(
     tg_id: int = Query(..., description="Telegram user ID"),
     _: None = Depends(verify_bot_secret),
     service_data: ServiceDataModel = Depends(get_service_data),
+    pool: asyncpg.Pool = Depends(get_pool),
 ) -> List[KeyResponse]:
-    result = await service_data.keys.get_by(tg_id=tg_id)
-    keys = _normalize_get_by(result)
+    # Always read from DB — cache can be stale when key was created outside the
+    # backend request cycle (e.g., via the bot's own YooKassa webhook handler).
+    keys = await service_data.data_service.keys.filter(pool, tg_id=tg_id)
+    for k in keys:
+        await service_data.cache_service.keys.set(CacheKeyManager.key(k.email), k)
     return [KeyResponse.from_key(k) for k in keys]
 
 
@@ -40,8 +45,13 @@ async def get_key(
     email: str,
     _: None = Depends(verify_bot_secret),
     service_data: ServiceDataModel = Depends(get_service_data),
+    pool: asyncpg.Pool = Depends(get_pool),
 ) -> KeyDetailResponse:
     key = await service_data.keys.get_data(email)
+    if not key:
+        key = await service_data.data_service.keys.get(pool, email=email)
+        if key:
+            await service_data.cache_service.keys.set(CacheKeyManager.key(email), key)
     if not key:
         raise HTTPException(status_code=404, detail="Key not found")
 
@@ -79,23 +89,19 @@ async def create_key(
     cache: CacheService = Depends(get_cache),
 ) -> KeyResponse:
     """Create a free VPN key for a user"""
-    # Check tariff exists and is free
     tariff = await service_data.tariffs.get_data(body.tariff_id)
     if not tariff:
         raise HTTPException(status_code=404, detail="Tariff not found")
     if tariff.amount != 0:
         raise HTTPException(status_code=402, detail="Only free tariffs are allowed")
 
-    # Check user exists
     user = await service_data.users.get_data(body.tg_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Build key services
     data_service = DataService()
     create_key_svc, _, _ = build_key_services(pool, service_data, cache, data_service)
 
-    # Create key (default server_id=2, number_of_months=1)
     result = await create_key_svc.proces(
         tg_id=body.tg_id,
         tariff=tariff,
@@ -107,7 +113,6 @@ async def create_key(
     if not result:
         raise HTTPException(status_code=500, detail="Failed to create key")
 
-    # Fetch and return created key
     key = await service_data.keys.get_data(result["email"])
     if not key:
         raise HTTPException(status_code=500, detail="Created key not found in database")
@@ -125,24 +130,31 @@ async def delete_key(
     cache: CacheService = Depends(get_cache),
 ):
     """Delete a VPN key"""
-    # Check key exists and belongs to user
     key = await service_data.keys.get_data(email)
+    if not key:
+        key = await service_data.data_service.keys.get(pool, email=email)
+        if key:
+            await service_data.cache_service.keys.set(CacheKeyManager.key(email), key)
+    # Fallback: treat the path param as client_id if not found by email
+    if not key:
+        key = await service_data.data_service.keys.get(pool, client_id=email)
+        if key:
+            email = key.email
+            await service_data.cache_service.keys.set(CacheKeyManager.key(email), key)
     if not key:
         raise HTTPException(status_code=404, detail="Key not found")
     if key.tg_id != tg_id:
         raise HTTPException(status_code=403, detail="Key does not belong to this user")
 
-    # Build key services to get XUI session
     data_service = DataService()
     _, _, xui = build_key_services(pool, service_data, cache, data_service)
 
-    # Delete from 3x-UI
     deleted = await xui.delete_client(email, key.inbound_id, key.client_id)
     if not deleted:
         raise HTTPException(status_code=500, detail="Failed to delete key from server")
 
-    # Delete from database
-    await service_data.keys.delete(pool, email=email)
+    await service_data.data_service.keys.delete(pool, email=email)
+    await service_data.cache_service.keys.delete(CacheKeyManager.key(email))
 
     return None
 
@@ -157,30 +169,33 @@ async def renew_key(
     cache: CacheService = Depends(get_cache),
 ) -> KeyResponse:
     """Renew a VPN key"""
-    # Check key exists and belongs to user
     key = await service_data.keys.get_data(email)
+    if not key:
+        key = await service_data.data_service.keys.get(pool, email=email)
+        if key:
+            await service_data.cache_service.keys.set(CacheKeyManager.key(email), key)
     if not key:
         raise HTTPException(status_code=404, detail="Key not found")
     if key.tg_id != body.tg_id:
         raise HTTPException(status_code=403, detail="Key does not belong to this user")
 
-    # Check tariff exists and is free
     tariff = await service_data.tariffs.get_data(body.tariff_id)
     if not tariff:
         raise HTTPException(status_code=404, detail="Tariff not found")
     if tariff.amount != 0:
         raise HTTPException(status_code=402, detail="Only free tariffs are allowed")
 
-    # Get server
-    server = await service_data.servers.get_data(key.inbound_id)
+    user = await service_data.users.get_data(body.tg_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    server = await service_data.servers.get_data(user.server_id)
     if not server:
         raise HTTPException(status_code=500, detail="Server not found")
 
-    # Build key services
     data_service = DataService()
     _, key_renewal_svc, _ = build_key_services(pool, service_data, cache, data_service)
 
-    # Renew key
     await key_renewal_svc.extension_key(
         key=key,
         conn=pool,
@@ -189,7 +204,6 @@ async def renew_key(
         number_of_months=body.number_of_months,
     )
 
-    # Fetch and return renewed key
     renewed_key = await service_data.keys.get_data(email)
     if not renewed_key:
         raise HTTPException(status_code=500, detail="Renewed key not found in database")

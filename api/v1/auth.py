@@ -3,31 +3,28 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
 from app.auth import verify_bot_secret
-from app.dependencies import get_pool
+from app.dependencies import get_pool, get_service_data
 from app.repositories.users import UserRepository
 from app.repositories.login_codes import LoginCodeRepository
 from app.schemas.auth import RegisterFromInviteRequest, RegisterFromInviteResponse
 from app.services_auth import register_from_invite
+from services.core.data.service import ServiceDataModel
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-def get_user_repository(pool=Depends(get_pool)) -> UserRepository:
-    """Dependency to provide UserRepository."""
-    from services.core.data.service import ServiceDataModel
-    from app.dependencies import get_service_data
-
-    # This will be resolved through FastAPI's dependency system
-    return UserRepository(pool=pool)
+def get_user_repository(
+    pool=Depends(get_pool),
+    service_data: ServiceDataModel = Depends(get_service_data),
+) -> UserRepository:
+    return UserRepository(data_protocol=service_data.users, pool=pool)
 
 
-def get_login_code_repository(pool=Depends(get_pool)) -> LoginCodeRepository:
-    """Dependency to provide LoginCodeRepository."""
-    from services.core.data.service import ServiceDataModel
-    from app.dependencies import get_service_data
-
-    # This will be resolved through FastAPI's dependency system
-    return LoginCodeRepository(pool=pool)
+def get_login_code_repository(
+    pool=Depends(get_pool),
+    service_data: ServiceDataModel = Depends(get_service_data),
+) -> LoginCodeRepository:
+    return LoginCodeRepository(data_protocol=service_data.login_codes, pool=pool)
 
 
 @router.post("/register-from-invite", response_model=RegisterFromInviteResponse, status_code=201)

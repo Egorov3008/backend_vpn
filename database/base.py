@@ -77,6 +77,18 @@ class BaseRepository(Generic[T]):
             records = await conn.fetch(f"SELECT * FROM {self.table_name}")
             return [self.model(**r) for r in records]
 
+    async def filter(self, pool: asyncpg.Pool, order_by: Optional[str] = None, **kwargs) -> List[T]:
+        """Получение нескольких записей по фильтру."""
+        if len(kwargs) != 1:
+            raise ValueError("Only one filter parameter is allowed")
+        key, value = next(iter(kwargs.items()))
+        order_clause = f" ORDER BY {order_by}" if order_by else ""
+        async with await self._acquire(pool) as conn:
+            records = await conn.fetch(
+                f"SELECT * FROM {self.table_name} WHERE {key} = $1{order_clause}", value
+            )
+            return [self.model(**r) for r in records]
+
     async def delete(self, pool: asyncpg.Pool, **kwargs) -> bool:
         """Удаление записи по ID."""
         if not kwargs:

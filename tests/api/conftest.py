@@ -21,12 +21,25 @@ def mock_service_data():
     sd.keys.get_all = AsyncMock(return_value=[])
     sd.keys.delete = AsyncMock(return_value=True)
     sd.payments.save_data = AsyncMock(return_value=None)
+    sd.payments.update = AsyncMock(return_value=None)
     sd.servers.get_data = AsyncMock(return_value=None)
+    sd.data_service = MagicMock()
+    sd.data_service.payments.filter = AsyncMock(return_value=[])
+    sd.data_service.payments.get = AsyncMock(return_value=None)
+    sd.data_service.keys.filter = AsyncMock(return_value=[])
+    sd.data_service.keys.get = AsyncMock(return_value=None)
+    sd.data_service.keys.delete = AsyncMock(return_value=True)
+    sd.cache_service = MagicMock()
+    sd.cache_service.keys.set = AsyncMock(return_value=None)
+    sd.cache_service.keys.delete = AsyncMock(return_value=None)
     return sd
 
 
 @pytest.fixture
-async def api_client(mock_service_data):
+async def api_client(mock_service_data, monkeypatch):
+    from config import settings
+    monkeypatch.setattr(settings, "disable_webhook_ip_check", True)
+
     app.dependency_overrides[get_service_data] = lambda: mock_service_data
     app.dependency_overrides[get_pool] = lambda: AsyncMock()
     app.dependency_overrides[get_cache] = lambda: MagicMock()

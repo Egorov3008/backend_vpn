@@ -1,5 +1,6 @@
 import ast
 import os
+from pathlib import Path
 from typing import Any
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -15,8 +16,11 @@ def _parse_list(raw: str | None, default: list | None = None) -> list:
         return default or []
 
 
+# Locate .env in project root
+_env_file = Path(__file__).parent.parent / ".env"
+
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=str(_env_file), extra="ignore")
 
     # Core
     database_url: str = ""
@@ -25,6 +29,8 @@ class Settings(BaseSettings):
     invite_token: str = "changeme"
     admin_api_key: str = "changeme"
     log_level: str = "INFO"
+    log_file: str = ""
+    log_format: str = "detailed"
 
     # 3x-UI panel
     api_url: str = ""
@@ -35,6 +41,7 @@ class Settings(BaseSettings):
     yookassa_shop_id: str = ""
     yookassa_secret_key: str = ""
     disable_webhook_ip_check: bool = False
+    receipt_customer_email: str = ""  # Fiscal receipt email (required for Russian fiscal law)
 
     # Telegram
     bot_token: str = ""
@@ -54,6 +61,7 @@ class Settings(BaseSettings):
     # Monitoring
     metrics_port: int = 9101
     webhook_path: str = "/api/v1/payments/webhook"
+    webhook_base_url: str = ""  # Public URL of this backend, e.g. https://api.example.com
 
 
 settings = Settings()

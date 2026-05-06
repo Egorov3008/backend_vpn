@@ -30,18 +30,12 @@ class PaymentProcessor:
 
     async def load_payment_data(self, payment_id: str):
         """Загружает данные платежа из БД."""
-        logger.info(
-            "[Цена:Processor] Загрузка данных платежа",
-            payment_id=payment_id,
-        )
-        
+        logger.debug("Загрузка данных платежа из БД", payment_id=payment_id)
+
         data: PaymentModel = await self._model_service.payments.get_data(payment_id)
 
         if not data:
-            logger.error(
-                "[Цена:Processor] Платёж не найден в БД",
-                payment_id=payment_id,
-            )
+            logger.error("Платёж не найден в БД", payment_id=payment_id)
             raise ValueError(f"Платёж не найден: {payment_id}")
 
         self.amount = data.amount
@@ -52,20 +46,22 @@ class PaymentProcessor:
         self.referral_discount = data.referral_discount
         self.status = data.status
 
-        logger.info(
-            "[Цена:Processor] Данные платежа загружены из БД",
+        logger.debug(
+            "Данные платежа успешно загружены",
             payment_id=payment_id,
-            amount=data.amount,
-            payment_type=data.payment_type,
-            tg_id=data.tg_id,
-            number_of_months=data.number_of_months,
-            discount_percent=data.discount_percent,
-            referral_discount=data.referral_discount,
-            status=data.status,
+            tg_id=self.tg_id,
+            amount=self.amount,
+            status=self.status,
+            payment_type=self.payment_type,
+            number_of_months=self.number_of_months,
+            discount_percent=self.discount_percent,
+            referral_discount=self.referral_discount,
         )
 
     async def update_payment(self, payment_id: str, status: str = "succeeded"):
         """Обновляет или создает платеж в БД (UPSERT)."""
+        logger.debug("Обновление статуса платежа", payment_id=payment_id, old_status=self.status, new_status=status)
+
         payment = PaymentModel(
             payment_id=payment_id,
             payment_type=self.payment_type,
@@ -80,22 +76,26 @@ class PaymentProcessor:
         existing_payment = await self._model_service.payments.get_data(payment_id)
 
         if existing_payment:
+            logger.debug("Платёж найден в БД, выполняю UPDATE", payment_id=payment_id)
             # UPDATE если существует
             await self._model_service.payments.update(
                 self._conn, payment, search_data={"payment_id": payment_id}
             )
+            logger.debug("Платёж обновлен успешно", payment_id=payment_id, new_status=status)
         else:
+            logger.debug("Платёж не найден в БД, выполняю CREATE", payment_id=payment_id)
             # CREATE если не существует
             await self._model_service.payments.save_data(
                 self._conn, payment, payment_id=payment_id
             )
+            logger.debug("Платёж создан успешно", payment_id=payment_id, status=status)
 
     def extract_operation(self) -> list[str]:
         """Извлекает тип операции и данные из payment_type."""
-        logger.info(
-            "Приступаю к обработке процесса продления (создания) ключа",
-            payment_type=self.payment_type,
-        )
+        logger.debug("Извлечение операции из payment_type", payment_type=self.payment_type)
         if "|" not in self.payment_type:
+            logger.error("Некорректный формат payment_type (нет разделителя |)", payment_type=self.payment_type)
             raise ValueError(f"Некорректный формат payment_type: {self.payment_type}")
-        return self.payment_type.split("|", 1)
+        operation, data = self.payment_type.split("|", 1)
+        logger.debug("Операция извлечена успешно", operation=operation, data=data)
+        return [operation, data]

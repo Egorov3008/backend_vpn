@@ -19,7 +19,7 @@ class UserResponse(BaseModel):
             username=u.username,
             first_name=u.first_name,
             balance=u.balance,
-            trial=u.trial,
+            trial=u.trial or 0,
             server_id=u.server_id,
             is_admin=u.is_admin,
             is_blocked=u.is_blocked,

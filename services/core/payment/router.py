@@ -28,8 +28,10 @@ class PaymentRouter:
             "Начало обработки платежа",
             payment_id=payment_id,
         )
-        
+
+        logger.debug("Загрузка данных платежа из БД", payment_id=payment_id)
         await self.processor.load_payment_data(payment_id)
+        logger.debug("Данные платежа загружены", payment_id=payment_id, tg_id=self.processor.tg_id, status=self.processor.status, amount=self.processor.amount)
 
         # Идемпотентность: пропускаем уже обработанный платёж
         if self.processor.status == "succeeded":
@@ -42,7 +44,9 @@ class PaymentRouter:
             )
             return
 
+        logger.debug("Извлечение операции из payment_type", payment_type=self.processor.payment_type)
         operation, data = self.processor.extract_operation()
+        logger.debug("Операция извлечена", operation=operation, data=data)
 
         if operation == "create_key":
             logger.info(
@@ -51,7 +55,9 @@ class PaymentRouter:
                 tariff_id=data,
                 tg_id=self.processor.tg_id,
             )
+            logger.debug("Запуск KeyCreationService", tariff_id=data, tg_id=self.processor.tg_id)
             await self.creation_service.process(tariff_id=data)
+            logger.debug("KeyCreationService завершен", tariff_id=data)
         elif operation == "renew_key":
             logger.info(
                 "Обработка операции продления ключа",
@@ -60,7 +66,9 @@ class PaymentRouter:
                 tg_id=self.processor.tg_id,
                 amount=self.processor.amount,
             )
+            logger.debug("Запуск KeyRenewalService", email=data, tg_id=self.processor.tg_id)
             await self.renewal_service.process(email=data)
+            logger.debug("KeyRenewalService завершен", email=data)
         else:
             logger.error(
                 "Неизвестный тип операции",
@@ -70,8 +78,10 @@ class PaymentRouter:
             )
             raise ValueError(f"Неизвестный тип операции: {operation}")
 
+        logger.debug("Обновление статуса платежа на succeeded", payment_id=payment_id)
         await self.processor.update_payment(payment_id)
-        
+        logger.debug("Статус платежа обновлен", payment_id=payment_id, new_status="succeeded")
+
         logger.info(
             "Платеж успешно обработан",
             payment_id=payment_id,

@@ -15,6 +15,8 @@ class PaymentCreateRequest(BaseModel):
     number_of_months: int = 1
     operation: Literal["create_key", "renew_key"] = "create_key"
     email: Optional[str] = None
+    customer_email: Optional[str] = None  # For fiscal receipt
+    amount: Optional[float] = None  # Override tariff price (e.g. after discounts)
 
 
 class PaymentCreateResponse(BaseModel):

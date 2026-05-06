@@ -20,7 +20,7 @@ def make_key(email="test@vpn.ru", tg_id=123):
 
 @pytest.mark.asyncio
 async def test_list_keys_empty(api_client, mock_service_data):
-    mock_service_data.keys.get_by = AsyncMock(return_value=None)
+    mock_service_data.data_service.keys.filter = AsyncMock(return_value=[])
     response = await api_client.get("/api/v1/keys/?tg_id=123")
     assert response.status_code == 200
     assert response.json() == []
@@ -28,7 +28,7 @@ async def test_list_keys_empty(api_client, mock_service_data):
 
 @pytest.mark.asyncio
 async def test_list_keys_single(api_client, mock_service_data):
-    mock_service_data.keys.get_by = AsyncMock(return_value=make_key())
+    mock_service_data.data_service.keys.filter = AsyncMock(return_value=[make_key()])
     response = await api_client.get("/api/v1/keys/?tg_id=123")
     assert response.status_code == 200
     data = response.json()
@@ -38,7 +38,7 @@ async def test_list_keys_single(api_client, mock_service_data):
 
 @pytest.mark.asyncio
 async def test_list_keys_multiple(api_client, mock_service_data):
-    mock_service_data.keys.get_by = AsyncMock(return_value=[
+    mock_service_data.data_service.keys.filter = AsyncMock(return_value=[
         make_key("key1@vpn.ru"),
         make_key("key2@vpn.ru"),
     ])

@@ -9,10 +9,18 @@ from background.scheduler import create_scheduler
 from config import settings  # noqa: F401
 from database.base import create_db_pool
 from database.service import DataService
+from logger import generate_trace_id, get_trace_id, reset_trace_id, set_trace_id, setup_logging
 from services.cache.loader import LoadingService
 from services.cache.service import CacheService
 from services.cache.storage import CacheStorage
 from services.core.data.service import ServiceDataModel
+
+# Инициализируем логирование при импорте модуля
+setup_logging(
+    log_level=settings.log_level,
+    log_file=settings.log_file or None,
+    log_format=settings.log_format,
+)
 
 
 @asynccontextmanager
@@ -56,6 +64,19 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="VPN Platform Backend", lifespan=lifespan)
 app.include_router(api_router)
+
+
+@app.middleware("http")
+async def trace_id_middleware(request: Request, call_next):
+    """Генерирует trace_id для каждого HTTP-запроса."""
+    trace_id = generate_trace_id()
+    set_trace_id(trace_id)
+    try:
+        response = await call_next(request)
+        response.headers["X-Trace-Id"] = trace_id
+        return response
+    finally:
+        reset_trace_id()
 
 
 @app.get("/health")
