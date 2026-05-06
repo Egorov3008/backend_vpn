@@ -36,6 +36,11 @@ async def list_keys(
     # backend request cycle (e.g., via the bot's own YooKassa webhook handler).
     keys = await service_data.data_service.keys.filter(pool, tg_id=tg_id)
     for k in keys:
+        # Populate tariff name from tariffs cache
+        if k.tariff_id:
+            tariff = await service_data.tariffs.get_data(k.tariff_id)
+            if tariff:
+                k.name_tariff = tariff.name_tariff
         await service_data.cache_service.keys.set(CacheKeyManager.key(k.email), k)
     return [KeyResponse.from_key(k) for k in keys]
 
@@ -54,6 +59,12 @@ async def get_key(
             await service_data.cache_service.keys.set(CacheKeyManager.key(email), key)
     if not key:
         raise HTTPException(status_code=404, detail="Key not found")
+
+    # Populate tariff name from tariffs cache
+    if key.tariff_id:
+        tariff = await service_data.tariffs.get_data(key.tariff_id)
+        if tariff:
+            key.name_tariff = tariff.name_tariff
 
     key_svc = KeyService(modul_data=service_data)
     detail = await key_svc.getter_key_data(email)
