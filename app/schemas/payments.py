@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from typing import Optional, Literal
 from datetime import datetime
 
@@ -38,3 +38,9 @@ class PaymentStatusResponse(BaseModel):
     payment_id: str
     status: str
     tg_id: int
+    processed: bool = False
+
+    @model_validator(mode='after')
+    def set_processed(self):
+        self.processed = self.status == "succeeded"
+        return self

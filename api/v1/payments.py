@@ -259,12 +259,14 @@ async def get_payment_status(
                         data_service = DataService()
                         payment_router = build_payment_router(pool, service_data, cache, data_service)
                         await payment_router.route(payment_id)
-                        payment = await service_data.payments.get_data(payment_id)
-                        if not payment:
-                            logger.warning("Платёж не найден после обработки", extra={"payment_id": payment_id})
-                            raise HTTPException(status_code=404, detail="Payment not found after processing")
                     except Exception as e:
                         logger.warning("Ошибка при обработке платежа после YooKassa подтверждения", extra={"payment_id": payment_id, "error": str(e)})
+
+                    # Перезагружаем платёж из БД (с DB-fallback) чтобы получить актуальный статус
+                    payment = await service_data.payments.get_data(payment_id, conn=pool)
+                    if not payment:
+                        logger.warning("Платёж не найден после обработки", extra={"payment_id": payment_id})
+                        raise HTTPException(status_code=404, detail="Payment not found after processing")
 
                 elif yk_status == "canceled":
                     logger.info("YooKassa подтвердил отмену платежа, обновляем статус", extra={"payment_id": payment_id})
