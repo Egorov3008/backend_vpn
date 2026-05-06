@@ -1,5 +1,5 @@
 from dataclasses import dataclass, asdict, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any, ClassVar
 
 
@@ -13,7 +13,7 @@ class PaymentModel:
     number_of_months: int = 1
     discount_percent: int = 0
     referral_discount: float = 0.0
-    created_at: datetime = field(default_factory=datetime.now)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     # id — SERIAL в БД, генерируется автоматически; хранится в экземпляре при чтении,
     # но исключается из INSERT через _DB_FIELDS whitelist (как в Key._DB_FIELDS)
     id: Optional[int] = None
@@ -26,7 +26,7 @@ class PaymentModel:
 
     def __post_init__(self):
         if self.created_at is None:
-            self.created_at = datetime.now()
+            self.created_at = datetime.now(timezone.utc)
 
     def to_dict(self) -> Dict[str, Any]:
         # Возвращаем только поля БД (id не включаем — он SERIAL, БД генерирует сама)
