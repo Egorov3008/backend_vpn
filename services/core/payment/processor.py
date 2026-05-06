@@ -32,7 +32,7 @@ class PaymentProcessor:
         """Загружает данные платежа из БД."""
         logger.debug("Загрузка данных платежа из БД", payment_id=payment_id)
 
-        data: PaymentModel = await self._model_service.payments.get_data(payment_id)
+        data: PaymentModel = await self._model_service.payments.get_data(payment_id, self._conn)
 
         if not data:
             logger.error("Платёж не найден в БД", payment_id=payment_id)
@@ -73,7 +73,7 @@ class PaymentProcessor:
         )
 
         # Проверяем, существует ли платёж
-        existing_payment = await self._model_service.payments.get_data(payment_id)
+        existing_payment = await self._model_service.payments.get_data(payment_id, self._conn)
 
         if existing_payment:
             logger.debug("Платёж найден в БД, выполняю UPDATE", payment_id=payment_id)

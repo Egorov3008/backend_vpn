@@ -52,8 +52,8 @@ class BaseData(Generic[T]):
         else:
             raise ValueError(f"Unknown model type: {self.model_name}")
 
-    async def get_data(self, identifier: int | str) -> Optional[T]:
-        """Получить объект из кеша по ID"""
+    async def get_data(self, identifier: int | str, conn: asyncpg.Pool = None) -> Optional[T]:
+        """Получить объект из кеша по ID, с DB-fallback если conn передана"""
         try:
             if not identifier:
                 raise ValueError(f"{self.__class__.__name__}: identifier is required")
@@ -61,6 +61,25 @@ class BaseData(Generic[T]):
             cache_key = self._generate_key(identifier)
             obj = await self._get_cache_model().get(cache_key)
             if not obj:
+                # DB-fallback: если conn передана, пробуем получить из БД
+                if conn:
+                    logger.debug(
+                        "Cache miss, trying to get from database",
+                        class_name=self.__class__.__name__,
+                        identifier=identifier,
+                    )
+                    db_field = self._get_db_field_for_identifier()
+                    obj = await self.service.get(conn, **{db_field: identifier})
+                    if obj:
+                        # Добавляем в кеш перед возвратом
+                        await self._get_cache_model().set(cache_key, obj)
+                        logger.debug(
+                            "Object loaded from DB and cached",
+                            class_name=self.__class__.__name__,
+                            identifier=identifier,
+                        )
+                        return obj
+                # Если кеш и БД пусты — ошибка
                 raise ValueError(
                     f"{self.__class__.__name__}: объект с id={identifier} не найден"
                 )
@@ -126,6 +145,29 @@ class BaseData(Generic[T]):
         else:
             # Fallback: попытаться использовать id если существует
             return getattr(data, "id", str(data))
+
+    def _get_db_field_for_identifier(self) -> str:
+        """Получить название поля в БД для поиска по идентификатору"""
+        if self.model_name == "user":
+            return "tg_id"
+        elif self.model_name == "key":
+            return "email"
+        elif self.model_name == "server":
+            return "id"
+        elif self.model_name == "tariff":
+            return "id"
+        elif self.model_name == "giftlink":
+            return "sender_tg_id"
+        elif self.model_name == "inbound":
+            return "inbound_id"
+        elif self.model_name == "paymentmodel":
+            return "payment_id"
+        elif self.model_name == "stock":
+            return "tg_id"
+        elif self.model_name == "referrallink":
+            return "token"
+        else:
+            return "id"
 
     def _generate_key(self, identifier: int | str | tuple) -> str:
         """Генерировать ключ кеша через CacheKeyManager"""

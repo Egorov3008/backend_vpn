@@ -180,27 +180,23 @@ async def renew_key(
     cache: CacheService = Depends(get_cache),
 ) -> KeyResponse:
     """Renew a VPN key"""
-    key = await service_data.keys.get_data(email)
-    if not key:
-        key = await service_data.data_service.keys.get(pool, email=email)
-        if key:
-            await service_data.cache_service.keys.set(CacheKeyManager.key(email), key)
+    key = await service_data.keys.get_data(email, pool)
     if not key:
         raise HTTPException(status_code=404, detail="Key not found")
     if key.tg_id != body.tg_id:
         raise HTTPException(status_code=403, detail="Key does not belong to this user")
 
-    tariff = await service_data.tariffs.get_data(body.tariff_id)
+    tariff = await service_data.tariffs.get_data(body.tariff_id, pool)
     if not tariff:
         raise HTTPException(status_code=404, detail="Tariff not found")
     if tariff.amount != 0:
         raise HTTPException(status_code=402, detail="Only free tariffs are allowed")
 
-    user = await service_data.users.get_data(body.tg_id)
+    user = await service_data.users.get_data(body.tg_id, pool)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    server = await service_data.servers.get_data(user.server_id)
+    server = await service_data.servers.get_data(user.server_id, pool)
     if not server:
         raise HTTPException(status_code=500, detail="Server not found")
 
@@ -215,7 +211,7 @@ async def renew_key(
         number_of_months=body.number_of_months,
     )
 
-    renewed_key = await service_data.keys.get_data(email)
+    renewed_key = await service_data.keys.get_data(email, pool)
     if not renewed_key:
         raise HTTPException(status_code=500, detail="Renewed key not found in database")
 

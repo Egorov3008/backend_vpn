@@ -32,10 +32,10 @@ class KeyCreationService:
                     )
 
             tariff = await self.processor._model_service.tariffs.get_data(
-                int(tariff_id)
+                int(tariff_id), self.processor._conn
             )
             user = await self.processor._model_service.users.get_data(
-                self.processor.tg_id
+                self.processor.tg_id, self.processor._conn
             )
 
             logger.info(

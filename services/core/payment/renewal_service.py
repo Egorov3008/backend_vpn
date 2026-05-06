@@ -29,9 +29,9 @@ class KeyRenewalService:
                         f"Ожидалась операция 'renew_key', получено: {operation}"
                     )
 
-            # Загрузка данных для продления
-            key = await self.processor._model_service.keys.get_data(email)
-            
+            # Загрузка данных для продления (с DB-fallback если кеш miss)
+            key = await self.processor._model_service.keys.get_data(email, self.processor._conn)
+
             # Проверяем, есть ли выбранный тариф в кеше (для продления пробного ключа)
             renewal_cache_key = f"renewal_tariff_{email}"
             selected_tariff_id = None
@@ -41,13 +41,13 @@ class KeyRenewalService:
                     selected_tariff_id = cached_data.get("tariff_id")
             except Exception:
                 pass
-            
+
             # Используем выбранный тариф из кеша или fallback на tariff_id ключа
             tariff_id = selected_tariff_id if selected_tariff_id is not None else key.tariff_id
-            tariff = await self.processor._model_service.tariffs.get_data(tariff_id)
-            
-            user = await self.processor._model_service.users.get_data(self.processor.tg_id)
-            server = await self.processor._model_service.servers.get_data(user.server_id)
+            tariff = await self.processor._model_service.tariffs.get_data(tariff_id, self.processor._conn)
+
+            user = await self.processor._model_service.users.get_data(self.processor.tg_id, self.processor._conn)
+            server = await self.processor._model_service.servers.get_data(user.server_id, self.processor._conn)
 
             logger.info(
                 "[Цена:RenewKey] Продление ключа после оплаты",

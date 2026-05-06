@@ -103,7 +103,7 @@ class PaymentRouter:
         if self.processor.referral_discount and self.processor.referral_discount > 0:
             try:
                 user = await self.processor._model_service.users.get_data(
-                    self.processor.tg_id
+                    self.processor.tg_id, self.processor._conn
                 )
                 if user:
                     user.balance = round(
