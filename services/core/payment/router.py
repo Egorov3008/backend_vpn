@@ -48,35 +48,44 @@ class PaymentRouter:
         operation, data = self.processor.extract_operation()
         logger.debug("Операция извлечена", operation=operation, data=data)
 
-        if operation == "create_key":
-            logger.info(
-                "Обработка операции создания ключа",
-                payment_id=payment_id,
-                tariff_id=data,
-                tg_id=self.processor.tg_id,
-            )
-            logger.debug("Запуск KeyCreationService", tariff_id=data, tg_id=self.processor.tg_id)
-            await self.creation_service.process(tariff_id=data)
-            logger.debug("KeyCreationService завершен", tariff_id=data)
-        elif operation == "renew_key":
-            logger.info(
-                "Обработка операции продления ключа",
-                payment_id=payment_id,
-                email=data,
-                tg_id=self.processor.tg_id,
-                amount=self.processor.amount,
-            )
-            logger.debug("Запуск KeyRenewalService", email=data, tg_id=self.processor.tg_id)
-            await self.renewal_service.process(email=data)
-            logger.debug("KeyRenewalService завершен", email=data)
-        else:
-            logger.error(
-                "Неизвестный тип операции",
+        try:
+            if operation == "create_key":
+                logger.info(
+                    "Обработка операции создания ключа",
+                    payment_id=payment_id,
+                    tariff_id=data,
+                    tg_id=self.processor.tg_id,
+                )
+                logger.debug("Запуск KeyCreationService", tariff_id=data, tg_id=self.processor.tg_id)
+                await self.creation_service.process(tariff_id=data)
+                logger.debug("KeyCreationService завершен", tariff_id=data)
+            elif operation == "renew_key":
+                logger.info(
+                    "Обработка операции продления ключа",
+                    payment_id=payment_id,
+                    email=data,
+                    tg_id=self.processor.tg_id,
+                    amount=self.processor.amount,
+                )
+                logger.debug("Запуск KeyRenewalService", email=data, tg_id=self.processor.tg_id)
+                await self.renewal_service.process(email=data)
+                logger.debug("KeyRenewalService завершен", email=data)
+            else:
+                logger.error(
+                    "Неизвестный тип операции",
+                    payment_id=payment_id,
+                    operation=operation,
+                    data=data,
+                )
+                raise ValueError(f"Неизвестный тип операции: {operation}")
+        except Exception as e:
+            logger.warning(
+                "Ошибка при обработке платежа (статус остается pending для retry)",
                 payment_id=payment_id,
                 operation=operation,
-                data=data,
+                error=str(e),
             )
-            raise ValueError(f"Неизвестный тип операции: {operation}")
+            raise
 
         logger.debug("Обновление статуса платежа на succeeded", payment_id=payment_id)
         await self.processor.update_payment(payment_id)

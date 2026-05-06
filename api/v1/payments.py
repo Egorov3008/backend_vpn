@@ -223,6 +223,8 @@ async def get_payment_status(
     tg_id: int = Query(..., description="Telegram user ID"),
     _: None = Depends(verify_bot_secret),
     service_data: ServiceDataModel = Depends(get_service_data),
+    pool=Depends(get_pool),
+    cache: CacheService = Depends(get_cache),
 ) -> PaymentStatusResponse:
     """Get status of a specific payment"""
     logger.debug("Запрос статуса платежа", extra={"payment_id": payment_id, "tg_id": tg_id})
@@ -236,6 +238,53 @@ async def get_payment_status(
     if payment.tg_id != tg_id:
         logger.warning("Платёж принадлежит другому пользователю", extra={"payment_id": payment_id, "requested_tg_id": tg_id, "actual_tg_id": payment.tg_id})
         raise HTTPException(status_code=403, detail="Payment does not belong to this user")
+
+    if payment.status == "pending":
+        try:
+            import yookassa
+            yookassa.Configuration.account_id = settings.yookassa_shop_id
+            yookassa.Configuration.secret_key = settings.yookassa_secret_key
+
+            logger.debug("Проверка статуса платежа в YooKassa", extra={"payment_id": payment_id})
+            yk_payment = yookassa.Payment.find_one(payment_id)
+
+            if yk_payment and hasattr(yk_payment, 'status'):
+                yk_status = yk_payment.status
+                logger.debug("Статус в YooKassa получен", extra={"payment_id": payment_id, "yk_status": yk_status})
+
+                if yk_status == "succeeded":
+                    logger.info("YooKassa подтвердил успех платежа, запускаем обработку", extra={"payment_id": payment_id})
+                    try:
+                        from database.service import DataService
+                        data_service = DataService()
+                        payment_router = build_payment_router(pool, service_data, cache, data_service)
+                        await payment_router.route(payment_id)
+                        payment = await service_data.payments.get_data(payment_id)
+                        if not payment:
+                            logger.warning("Платёж не найден после обработки", extra={"payment_id": payment_id})
+                            raise HTTPException(status_code=404, detail="Payment not found after processing")
+                    except Exception as e:
+                        logger.warning("Ошибка при обработке платежа после YooKassa подтверждения", extra={"payment_id": payment_id, "error": str(e)})
+
+                elif yk_status == "canceled":
+                    logger.info("YooKassa подтвердил отмену платежа, обновляем статус", extra={"payment_id": payment_id})
+                    try:
+                        canceled_payment = PaymentModel(
+                            payment_id=payment.payment_id,
+                            tg_id=payment.tg_id,
+                            amount=payment.amount,
+                            payment_type=payment.payment_type,
+                            status="canceled",
+                            number_of_months=payment.number_of_months,
+                            discount_percent=payment.discount_percent,
+                        )
+                        await service_data.payments.update(pool, canceled_payment, search_data={"payment_id": payment_id})
+                        payment = canceled_payment
+                        logger.info("Статус платежа обновлен на canceled", extra={"payment_id": payment_id})
+                    except Exception as e:
+                        logger.warning("Ошибка при обновлении статуса на canceled", extra={"payment_id": payment_id, "error": str(e)})
+        except Exception as e:
+            logger.warning("Ошибка при проверке статуса в YooKassa", extra={"payment_id": payment_id, "error": str(e)})
 
     logger.info("Статус платежа возвращен", extra={"payment_id": payment_id, "status": payment.status})
     return PaymentStatusResponse(
