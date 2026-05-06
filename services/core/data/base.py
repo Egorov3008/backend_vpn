@@ -54,39 +54,40 @@ class BaseData(Generic[T]):
 
     async def get_data(self, identifier: int | str, conn: asyncpg.Pool = None) -> Optional[T]:
         """Получить объект из кеша по ID, с DB-fallback если conn передана"""
-        try:
-            if not identifier:
-                raise ValueError(f"{self.__class__.__name__}: identifier is required")
-            # Генерируем ключ через CacheKeyManager для единообразия
-            cache_key = self._generate_key(identifier)
-            obj = await self._get_cache_model().get(cache_key)
-            if not obj:
-                # DB-fallback: если conn передана, пробуем получить из БД
-                if conn:
+        if not identifier:
+            raise ValueError(f"{self.__class__.__name__}: identifier is required")
+        # Генерируем ключ через CacheKeyManager для единообразия
+        cache_key = self._generate_key(identifier)
+        obj = await self._get_cache_model().get(cache_key)
+        if not obj:
+            # DB-fallback: если conn передана, пробуем получить из БД
+            if conn:
+                logger.debug(
+                    "Cache miss, trying to get from database",
+                    class_name=self.__class__.__name__,
+                    identifier=identifier,
+                )
+                db_field = self._get_db_field_for_identifier()
+                obj = await self.service.get(conn, **{db_field: identifier})
+                if obj:
+                    # Добавляем в кеш перед возвратом
+                    await self._get_cache_model().set(cache_key, obj)
                     logger.debug(
-                        "Cache miss, trying to get from database",
+                        "Object loaded from DB and cached",
                         class_name=self.__class__.__name__,
                         identifier=identifier,
                     )
-                    db_field = self._get_db_field_for_identifier()
-                    obj = await self.service.get(conn, **{db_field: identifier})
-                    if obj:
-                        # Добавляем в кеш перед возвратом
-                        await self._get_cache_model().set(cache_key, obj)
-                        logger.debug(
-                            "Object loaded from DB and cached",
-                            class_name=self.__class__.__name__,
-                            identifier=identifier,
-                        )
-                        return obj
-                # Если кеш и БД пусты — ошибка
-                raise ValueError(
-                    f"{self.__class__.__name__}: объект с id={identifier} не найден"
-                )
-            return obj
-        except Exception as e:
-            self._log_error(e, identifier)
-            return None
+                    return obj
+            # Если кеш и БД пусты — ошибка
+            logger.warning(
+                "Объект не найден в кеше и БД",
+                class_name=self.__class__.__name__,
+                identifier=identifier,
+            )
+            raise ValueError(
+                f"{self.__class__.__name__}: объект с id={identifier} не найден"
+            )
+        return obj
 
     async def get_all(self) -> List[T]:
         """Получить все объекты из кеша"""
