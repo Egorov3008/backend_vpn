@@ -112,7 +112,7 @@ class XUISession:
                 self.server_id
             )
             logger.debug(
-                "Сервер загружен из кеша", server=self.server, server_id=self.server_id
+                "Сервер загружен из кеша", extra={"server": self.server, "server_id": self.server_id}
             )
 
         self.xui = AsyncApi(
@@ -149,21 +149,19 @@ class XUISession:
                 if login_duration > 5.0:
                     logger.warning(
                         "Login выполнен медленно",
-                        duration_sec=round(login_duration, 2),
-                        timeout=self.login_timeout
+                        extra={"duration_sec": round(login_duration, 2), "timeout": self.login_timeout}
                     )
                 else:
                     logger.debug(
                         "Login выполнен успешно",
-                        duration_sec=round(login_duration, 3)
+                        extra={"duration_sec": round(login_duration, 3)}
                     )
                     
             except asyncio.TimeoutError:
                 xui_api_errors_total.labels(method="login", error_type="TimeoutError").inc()
                 logger.error(
                     "Превышен таймаут login",
-                    timeout=self.login_timeout,
-                    host=self.server.api_url
+                    extra={"timeout": self.login_timeout, "host": self.server.api_url}
                 )
                 raise TimeoutError(
                     f"Login превысил таймаут {self.login_timeout}сек"
@@ -172,9 +170,7 @@ class XUISession:
                 xui_api_errors_total.labels(method="login", error_type=type(e).__name__).inc()
                 logger.error(
                     "Ошибка при login",
-                    error_type=type(e).__name__,
-                    error_message=str(e),
-                    exc_info=True
+                    extra={"error_type": type(e).__name__, "error_message": str(e), "exc_info": True}
                 )
                 raise
 
@@ -218,7 +214,7 @@ class XUISession:
 
             await self.xui.client.add(inbound_id, [client])
             logger.info(
-                "Клиент успешно добавлен с ID", email=email, client_id=client_id
+                "Клиент успешно добавлен с ID", extra={"email": email, "client_id": client_id}
             )
             return True
 
@@ -228,16 +224,22 @@ class XUISession:
             ).inc()
             logger.error(
                 "Ошибка при добавлении клиента",
-                email=email,
-                error_type=type(e).__name__,
-                error_message=str(e),
-                exc_info=True,
+                extra={"email": email, "error_type": type(e).__name__, "error_message": str(e), "exc_info": True}
             )
             return False
         finally:
             xui_api_duration.labels(method="add_client").observe(
                 time.monotonic() - t0
             )
+
+    async def _get_client_or_none(self, email: str):
+        """get_by_email бросает ValueError когда email не найден ни в одном inbound — нормализуем к None."""
+        try:
+            return await self.xui.client.get_by_email(email)
+        except ValueError as e:
+            if "Inbound Not Found For Email" in str(e):
+                return None
+            raise
 
     async def extend_client_key(
         self,
@@ -249,17 +251,16 @@ class XUISession:
         try:
             await self.ensure_auth()
 
-            client = await self.xui.client.get_by_email(key_details.email)
+            client = await self._get_client_or_none(key_details.email)
             if not client or not client.id:
-                logger.warning("Клиент не найден", email=key_details.email)
+                logger.warning("Клиент не найден", extra={"email": key_details.email})
                 return False
 
             # Расчет нового времени expiry
             expiry_datetime = datetime.fromtimestamp(key_details.expiry_time / 1000)
             logger.debug(
                 "Проверка присваемого времени",
-                expiry_time=key_details.expiry_time,
-                expiry_datetime=expiry_datetime,
+                extra={"expiry_time": key_details.expiry_time, "expiry_datetime": expiry_datetime}
             )
             # Обновление клиента
             client.inbound_id = key_details.inbound_id
@@ -271,11 +272,11 @@ class XUISession:
             client.flow = "xtls-rprx-vision"
             client.sub_id = key_details.email
             client.enable = True
-            logger.debug("Сформированный клиент", client=client)
+            logger.debug("Сформированный клиент", extra={"client": client})
             await self.xui.client.update(client.id, client)
             await self.xui.client.reset_stats(client.inbound_id, key_details.email)
 
-            logger.info("Ключ клиента продлён", email=key_details.email)
+            logger.info("Ключ клиента продлён", extra={"email": key_details.email})
             return True
 
         except Exception as e:
@@ -284,10 +285,7 @@ class XUISession:
             ).inc()
             logger.error(
                 "Ошибка при продлении ключа ",
-                email=key_details.email,
-                error_type=type(e).__name__,
-                error_message=str(e),
-                exc_info=True,
+                extra={"email": key_details.email, "error_type": type(e).__name__, "error_message": str(e), "exc_info": True}
             )
             return False
         finally:
@@ -303,13 +301,13 @@ class XUISession:
         try:
             await self.ensure_auth()
 
-            client = await self.xui.client.get_by_email(email)
+            client = await self._get_client_or_none(email)
             if not client:
-                logger.warning("Клиент не найден", email=email)
-                return False
+                logger.warning("Клиент не найден в панели, считаем удалённым", extra={"email": email})
+                return True
 
             await self.xui.client.delete(inbound_id, client_id)
-            logger.info("Клиент удалён", email=email)
+            logger.info("Клиент удалён", extra={"email": email})
             return True
 
         except Exception as e:
@@ -318,10 +316,7 @@ class XUISession:
             ).inc()
             logger.error(
                 "Ошибка при удалении клиента",
-                email=email,
-                error_type=type(e).__name__,
-                error_message=str(e),
-                exc_info=True,
+                extra={"email": email, "error_type": type(e).__name__, "error_message": str(e), "exc_info": True}
             )
             return False
         finally:
@@ -346,8 +341,7 @@ class XUISession:
             ).inc()
             logger.error(
                 "Ошибка при получении списка подключений",
-                error_type=type(e).__name__,
-                error_message=str(e)
+                extra={"error_type": type(e).__name__, "error_message": str(e)}
             )
             return []
         finally:
@@ -361,7 +355,7 @@ class XUISession:
         xui_api_calls_total.labels(method="get_traffic").inc()
         try:
             await self.ensure_auth()
-            client = await self.xui.client.get_by_email(email)
+            client = await self._get_client_or_none(email)
             return client.total_gb if client else None
 
         except Exception as e:
@@ -370,10 +364,7 @@ class XUISession:
             ).inc()
             logger.error(
                 "Ошибка при получении трафика",
-                email=email,
-                error_type=type(e).__name__,
-                error_message=str(e),
-                exc_info=True,
+                extra={"email": email, "error_type": type(e).__name__, "error_message": str(e), "exc_info": True}
             )
             return None
         finally:
@@ -394,8 +385,7 @@ class XUISession:
         ]
         logger.debug(
             "Истекшие ключи для подключения получены",
-            count_client=len(old_clients),
-            inbound_id=inbound_id,
+            extra={"count_client": len(old_clients), "inbound_id": inbound_id}
         )
         task_list = []
         for client in old_clients:
@@ -405,7 +395,7 @@ class XUISession:
             task_list.append(task)
         deletion_results = await asyncio.gather(*task_list)
         successful_deletions = sum(1 for result in deletion_results if result)
-        logger.debug("Ключи удалены", inbound_id=inbound_id, count=successful_deletions)
+        logger.debug("Ключи удалены", extra={"inbound_id": inbound_id, "count": successful_deletions})
 
     async def close(self):
         """Закрывает сессию"""

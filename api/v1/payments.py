@@ -60,7 +60,7 @@ def _check_webhook_ip(request: Request) -> bool:
         logger.warning(f"Webhook отклонён: IP {client_ip} не в списке разрешённых YooKassa")
         return False
     except ValueError as e:
-        logger.error(f"Ошибка при парсинге IP: {client_ip_str}, error={str(e)}")
+        logger.error("Ошибка при парсинге IP", extra={"client_ip": client_ip_str, "error": str(e)})
         return False
 
 
@@ -72,19 +72,29 @@ async def payment_webhook(
     service_data: ServiceDataModel = Depends(get_service_data),
     cache: CacheService = Depends(get_cache),
 ):
+    client_ip = request.client.host if request.client else "unknown"
+    logger.debug("Webhook получен", extra={"event": body.event, "client_ip": client_ip, "type": body.type})
+
     if not _check_webhook_ip(request):
+        logger.warning("Webhook IP не разрешен", extra={"client_ip": client_ip})
         raise HTTPException(status_code=403, detail="Webhook IP not allowed")
 
     if body.event != "payment.succeeded":
+        logger.debug("Webhook игнорирован (не payment.succeeded)", extra={"event": body.event})
         return {"ok": True}
 
     payment_id = body.object.get("id")
     if not payment_id:
+        logger.warning("Webhook без payment_id")
         raise HTTPException(status_code=400, detail="Missing payment id in webhook body")
+
+    logger.debug("Начало обработки webhook платежа", extra={"payment_id": payment_id})
 
     data_service = DataService()
     payment_router = build_payment_router(pool, service_data, cache, data_service)
     await payment_router.route(payment_id)
+
+    logger.info("Webhook платежа обработан", extra={"payment_id": payment_id})
     return {"ok": True}
 
 
@@ -95,12 +105,18 @@ async def create_payment(
     pool=Depends(get_pool),
     service_data: ServiceDataModel = Depends(get_service_data),
 ):
+    logger.debug("Запрос create_payment", extra={"tg_id": body.tg_id, "tariff_id": body.tariff_id, "months": body.number_of_months, "operation": body.operation})
+
     tariff = await service_data.tariffs.get_data(body.tariff_id)
     if not tariff:
+        logger.warning("Тариф не найден", extra={"tariff_id": body.tariff_id})
         raise HTTPException(status_code=404, detail="Tariff not found")
+
+    logger.debug("Тариф загружен", extra={"tariff_id": body.tariff_id, "name": tariff.name_tariff, "amount": tariff.amount})
 
     if body.operation == "renew_key":
         if not body.email:
+            logger.warning("Email не указан для renew_key операции")
             raise HTTPException(status_code=422, detail="email required for renew_key operation")
         payment_type = f"renew_key|{body.email}"
     else:
@@ -114,11 +130,15 @@ async def create_payment(
     else:
         amount = base
 
+    logger.debug("Сумма рассчитана", extra={"base": base, "discount_percent": discount_percent, "final_amount": amount})
+
     import yookassa
     yookassa.Configuration.account_id = settings.yookassa_shop_id
     yookassa.Configuration.secret_key = settings.yookassa_secret_key
 
     idempotency_key = str(uuid.uuid4())
+    logger.debug("Отправка запроса в YooKassa", extra={"idempotency_key": idempotency_key, "amount": amount, "payment_type": payment_type})
+
     try:
         yk_payment = yookassa.Payment.create(
             {
@@ -136,8 +156,9 @@ async def create_payment(
             },
             idempotency_key,
         )
+        logger.debug("YooKassa вернул платёж", extra={"payment_id": yk_payment.id, "status": yk_payment.status})
     except Exception as e:
-        logger.error("YooKassa payment creation failed", error=str(e))
+        logger.error("YooKassa payment creation failed", extra={"error": str(e)})
         raise HTTPException(status_code=502, detail="Payment provider error")
 
     payment_id = yk_payment.id
@@ -152,7 +173,16 @@ async def create_payment(
         number_of_months=body.number_of_months,
         discount_percent=discount_percent,
     )
-    await service_data.payments.save_data(pool, payment, payment_id=payment_id)
+    logger.debug("PaymentModel создан", extra={"payment_dict": payment.to_dict()})
+
+    try:
+        await service_data.payments.save_data(pool, payment, payment_id=payment_id)
+        logger.debug("Платёж сохранён в БД и кеше", extra={"payment_id": payment_id})
+    except Exception as e:
+        logger.error("Ошибка при сохранении платежа", extra={"error": str(e), "payment_id": payment_id})
+        raise HTTPException(status_code=500, detail="Failed to save payment")
+
+    logger.info("Платёж успешно создан", extra={"payment_id": payment_id, "tg_id": body.tg_id, "amount": amount})
 
     return PaymentCreateResponse(
         payment_id=payment_id,
@@ -168,10 +198,12 @@ async def get_payment_history(
     service_data: ServiceDataModel = Depends(get_service_data),
 ) -> List[PaymentHistoryItem]:
     """Get payment history for a user"""
-    logger.info(f"Fetching payment history for tg_id={tg_id}")
+    logger.debug(f"Запрос истории платежей", extra={"tg_id": tg_id})
     result = await service_data.payments.get_by(tg_id=tg_id)
     payments = _normalize_get_by(result)
-    logger.info(f"Found {len(payments)} payments for tg_id={tg_id}")
+    logger.debug(f"Загружено платежей", extra={"tg_id": tg_id, "count": len(payments)})
+    if payments:
+        logger.debug(f"IDs платежей", extra={"payment_ids": [p.payment_id for p in payments]})
     return [
         PaymentHistoryItem(
             payment_id=p.payment_id,
@@ -193,17 +225,19 @@ async def get_payment_status(
     service_data: ServiceDataModel = Depends(get_service_data),
 ) -> PaymentStatusResponse:
     """Get status of a specific payment"""
-    logger.info(f"Fetching payment status for payment_id={payment_id}, tg_id={tg_id}")
+    logger.debug("Запрос статуса платежа", extra={"payment_id": payment_id, "tg_id": tg_id})
     payment = await service_data.payments.get_data(payment_id)
     if not payment:
-        logger.warning(f"Payment not found: payment_id={payment_id}")
+        logger.warning("Платёж не найден", extra={"payment_id": payment_id})
         raise HTTPException(status_code=404, detail="Payment not found")
 
+    logger.debug("Платёж загружен", extra={"payment_id": payment_id, "owner_tg_id": payment.tg_id, "status": payment.status})
+
     if payment.tg_id != tg_id:
-        logger.warning(f"Payment belongs to different user: payment_id={payment_id}, expected_tg_id={tg_id}, actual_tg_id={payment.tg_id}")
+        logger.warning("Платёж принадлежит другому пользователю", extra={"payment_id": payment_id, "requested_tg_id": tg_id, "actual_tg_id": payment.tg_id})
         raise HTTPException(status_code=403, detail="Payment does not belong to this user")
 
-    logger.info(f"Payment status for payment_id={payment_id}: {payment.status}")
+    logger.info("Статус платежа возвращен", extra={"payment_id": payment_id, "status": payment.status})
     return PaymentStatusResponse(
         payment_id=payment.payment_id,
         status=payment.status,
