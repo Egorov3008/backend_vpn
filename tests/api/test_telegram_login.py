@@ -125,3 +125,92 @@ async def test_telegram_login_existing_user():
     user_repo.get_by_tg_id.assert_awaited_once_with(42)
     user_repo.create.assert_not_awaited()
     notify_fn.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_telegram_login_endpoint_new_user(monkeypatch):
+    """POST /auth/telegram-login creates a new user and returns is_new=True."""
+    from httpx import AsyncClient, ASGITransport
+
+    from app.main import app
+    from app.auth import verify_bot_secret
+    from app.dependencies import get_pool, get_service_data
+    from api.v1.auth import get_user_repository
+    from config import settings
+
+    # Patch bot token used by settings to ensure verify_telegram_hash succeeds
+    monkeypatch.setattr(settings, "bot_token", BOT_TOKEN)
+
+    auth_date = int(time.time())
+    payload = {
+        "id": 555,
+        "first_name": "Web",
+        "last_name": "User",
+        "username": "web_user",
+        "photo_url": None,
+        "auth_date": auth_date,
+    }
+    payload["hash"] = _make_valid_hash(payload, BOT_TOKEN)
+
+    # Mock user repository: no existing user, create returns a fresh user.
+    user_repo = MagicMock()
+    user_repo.get_by_tg_id = AsyncMock(return_value=None)
+    user_repo.create = AsyncMock(return_value=MagicMock(tg_id=555, is_admin=False))
+
+    # Patch admin notification helper to avoid network calls.
+    import api.v1.auth as auth_module
+    monkeypatch.setattr(auth_module, "_notify_admins_telegram", AsyncMock(return_value=None))
+
+    app.dependency_overrides[verify_bot_secret] = lambda: None
+    app.dependency_overrides[get_pool] = lambda: MagicMock()
+    app.dependency_overrides[get_service_data] = lambda: MagicMock()
+    app.dependency_overrides[get_user_repository] = lambda: user_repo
+
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            response = await client.post(
+                "/api/v1/auth/telegram-login",
+                json=payload,
+                headers={"X-Bot-Secret": "test_secret"},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["tg_id"] == 555
+    assert data["is_new"] is True
+    assert data["is_admin"] is False
+    user_repo.get_by_tg_id.assert_awaited_once_with(555)
+    user_repo.create.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_telegram_login_missing_bot_secret():
+    """POST /auth/telegram-login without X-Bot-Secret header is rejected with 401."""
+    from httpx import AsyncClient, ASGITransport
+
+    from app.main import app
+
+    # Ensure no overrides are bypassing auth.
+    app.dependency_overrides.clear()
+
+    payload = {
+        "id": 555,
+        "first_name": "Web",
+        "auth_date": int(time.time()),
+        "hash": "dummyhash",
+    }
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/api/v1/auth/telegram-login",
+            json=payload,
+        )
+
+    assert response.status_code == 401
+    assert "Invalid bot secret" in response.json()["detail"]
