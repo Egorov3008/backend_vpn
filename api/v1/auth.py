@@ -1,4 +1,6 @@
 """Authentication and registration endpoints."""
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
@@ -9,6 +11,8 @@ from app.repositories.login_codes import LoginCodeRepository
 from app.schemas.auth import RegisterFromInviteRequest, RegisterFromInviteResponse
 from app.services_auth import register_from_invite
 from services.core.data.service import ServiceDataModel
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -61,4 +65,5 @@ async def register_from_invite_endpoint(
             raise HTTPException(status_code=409, detail=error_msg)
         raise HTTPException(status_code=400, detail=error_msg)
     except Exception as e:
+        logger.error(f"register_from_invite failed for tg_id={request.tg_id}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error during registration")

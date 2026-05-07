@@ -1,14 +1,14 @@
 from dataclasses import dataclass, asdict
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 
 
 def default_created_at():
-    return datetime.now()
+    return datetime.now(timezone.utc)
 
 
 def default_expires_at():
-    return datetime.now()
+    return datetime.now(timezone.utc)
 
 
 @dataclass

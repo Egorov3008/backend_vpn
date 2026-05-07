@@ -1,16 +1,19 @@
 """Integration tests for register-from-invite endpoint."""
 import pytest
 from httpx import AsyncClient, ASGITransport
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock, AsyncMock, patch
 
 from app.main import app
 from app.auth import verify_bot_secret
 from app.dependencies import get_service_data, get_pool, get_cache
+from config import settings
 
 
 @pytest.fixture
 async def api_client_with_auth():
     """Create an API client with proper authentication setup."""
+    from datetime import datetime, timezone
+
     # Setup mocks
     mock_service_data = MagicMock()
     mock_service_data.tariffs.get_all = AsyncMock(return_value=[])
@@ -19,14 +22,40 @@ async def api_client_with_auth():
     mock_service_data.users.get_all = AsyncMock(return_value=[])
     mock_service_data.users.save_data = AsyncMock(return_value=None)
     mock_service_data.users.update = AsyncMock(return_value=None)
+    mock_service_data.users.exists = AsyncMock(return_value=False)
     mock_service_data.keys.get_by = AsyncMock(return_value=None)
     mock_service_data.keys.get_data = AsyncMock(return_value=None)
     mock_service_data.keys.get_all = AsyncMock(return_value=[])
     mock_service_data.keys.delete = AsyncMock(return_value=True)
     mock_service_data.payments.save_data = AsyncMock(return_value=None)
     mock_service_data.servers.get_data = AsyncMock(return_value=None)
+    mock_service_data.login_codes.save_data = AsyncMock(return_value=None)
+
+    # Setup mock pool with proper transaction support
+    mock_conn = MagicMock()
+    mock_transaction = MagicMock()
+    mock_transaction.__aenter__ = AsyncMock(return_value=None)
+    mock_transaction.__aexit__ = AsyncMock(return_value=None)
+    mock_conn.transaction = MagicMock(return_value=mock_transaction)
+    mock_conn.fetchrow = AsyncMock(return_value={
+        'code': 'ABC12345',
+        'tg_id': 123456789,
+        'expires_at': datetime.now(timezone.utc),
+        'used': False,
+        'id': 1,
+        'created_at': datetime.now(timezone.utc)
+    })
+    mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_conn.__aexit__ = AsyncMock(return_value=None)
 
     mock_pool = MagicMock()
+    def mock_acquire():
+        ctx = MagicMock()
+        ctx.__aenter__ = AsyncMock(return_value=mock_conn)
+        ctx.__aexit__ = AsyncMock(return_value=None)
+        return ctx
+    mock_pool.acquire = mock_acquire
+
     mock_cache = MagicMock()
 
     # Setup dependency overrides
@@ -35,10 +64,14 @@ async def api_client_with_auth():
     app.dependency_overrides[get_cache] = lambda: mock_cache
     app.dependency_overrides[verify_bot_secret] = lambda: None
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
-        yield client, mock_pool
+    # Mock settings.invite_token for testing
+    with patch('app.services_auth.settings') as mock_settings:
+        mock_settings.invite_token = "test_token"
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            yield client, mock_pool
 
     app.dependency_overrides.clear()
 
@@ -103,18 +136,37 @@ async def test_register_from_invite_invalid_token(api_client_with_auth):
 
 @pytest.mark.asyncio
 async def test_register_from_invite_user_already_exists(api_client_with_auth):
-    """Test endpoint returns 409 conflict if user exists."""
+    """Test endpoint successfully generates login code for existing user."""
+    from models import User, LoginCode
+    from app.repositories.users import UserRepository
+    from app.repositories.login_codes import LoginCodeRepository
+    from datetime import datetime, timezone
+
     client, mock_pool = api_client_with_auth
 
-    # Setup mock transaction
-    mock_conn = MagicMock()
-    mock_transaction = MagicMock()
-    mock_transaction.__aenter__ = AsyncMock(return_value=None)
-    mock_transaction.__aexit__ = AsyncMock(return_value=None)
-    mock_conn.transaction = MagicMock(return_value=mock_transaction)
-    mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-    mock_conn.__aexit__ = AsyncMock(return_value=None)
-    mock_pool.acquire = MagicMock(return_value=mock_conn)
+    # Mock UserRepository
+    mock_user_repo = MagicMock(spec=UserRepository)
+    existing_user = User(
+        tg_id=123456789,
+        username="testuser",
+        first_name="Test",
+        language_code="en"
+    )
+    mock_user_repo.get_by_tg_id = AsyncMock(return_value=existing_user)
+
+    # Mock LoginCodeRepository
+    mock_login_code_repo = MagicMock(spec=LoginCodeRepository)
+    saved_code = LoginCode(
+        code="ABC12345",
+        tg_id=123456789,
+        expires_at=datetime.now(timezone.utc)
+    )
+    mock_login_code_repo.create = AsyncMock(return_value=saved_code)
+
+    # Override dependencies
+    from api.v1.auth import get_user_repository, get_login_code_repository
+    app.dependency_overrides[get_user_repository] = lambda: mock_user_repo
+    app.dependency_overrides[get_login_code_repository] = lambda: mock_login_code_repo
 
     response = await client.post(
         "/api/v1/auth/register-from-invite",
@@ -129,9 +181,18 @@ async def test_register_from_invite_user_already_exists(api_client_with_auth):
         headers={"X-Bot-Secret": "test_secret"},
     )
 
-    # Response should be successful (201) or conflict (409)
-    # depending on whether user exists or not
-    assert response.status_code in [201, 409]
+    # Cleanup
+    if get_user_repository in app.dependency_overrides:
+        del app.dependency_overrides[get_user_repository]
+    if get_login_code_repository in app.dependency_overrides:
+        del app.dependency_overrides[get_login_code_repository]
+
+    # Response should be successful (201) for existing user
+    assert response.status_code == 201, f"Expected 201, got {response.status_code}: {response.json()}"
+    data = response.json()
+    assert data["tg_id"] == 123456789
+    assert "login_code" in data
+    assert "code_expires_at" in data
 
 
 @pytest.mark.asyncio
@@ -171,7 +232,34 @@ async def test_register_from_invite_response_format(api_client_with_auth):
 @pytest.mark.asyncio
 async def test_register_from_invite_with_minimal_data(api_client_with_auth):
     """Test endpoint accepts minimal user data."""
+    from models import User, LoginCode
+    from app.repositories.users import UserRepository
+    from app.repositories.login_codes import LoginCodeRepository
+    from datetime import datetime, timezone
+
     client, _ = api_client_with_auth
+
+    # Mock UserRepository - no existing user
+    mock_user_repo = MagicMock(spec=UserRepository)
+    mock_user_repo.get_by_tg_id = AsyncMock(return_value=None)
+    mock_user_repo.create = AsyncMock(return_value=User(
+        tg_id=999888777,
+        language_code="ru"
+    ))
+
+    # Mock LoginCodeRepository
+    mock_login_code_repo = MagicMock(spec=LoginCodeRepository)
+    saved_code = LoginCode(
+        code="XYZ98765",
+        tg_id=999888777,
+        expires_at=datetime.now(timezone.utc)
+    )
+    mock_login_code_repo.create = AsyncMock(return_value=saved_code)
+
+    # Override dependencies
+    from api.v1.auth import get_user_repository, get_login_code_repository
+    app.dependency_overrides[get_user_repository] = lambda: mock_user_repo
+    app.dependency_overrides[get_login_code_repository] = lambda: mock_login_code_repo
 
     response = await client.post(
         "/api/v1/auth/register-from-invite",
@@ -186,8 +274,14 @@ async def test_register_from_invite_with_minimal_data(api_client_with_auth):
         headers={"X-Bot-Secret": "test_secret"},
     )
 
-    # Should handle minimal data gracefully
-    assert response.status_code in [201, 400, 409]
+    # Cleanup
+    if get_user_repository in app.dependency_overrides:
+        del app.dependency_overrides[get_user_repository]
+    if get_login_code_repository in app.dependency_overrides:
+        del app.dependency_overrides[get_login_code_repository]
+
+    # Should handle minimal data gracefully and create user
+    assert response.status_code == 201
 
 
 @pytest.mark.asyncio

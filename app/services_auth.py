@@ -56,20 +56,29 @@ async def register_from_invite(
     existing_user = await user_repo.get_by_tg_id(request.tg_id)
     if existing_user:
         logger.info(f"Existing user requesting web login code: tg_id={request.tg_id}")
-        async with pool.acquire() as conn:
-            saved_code = await login_code_repo.create(
-                code=code,
+        try:
+            async with pool.acquire() as conn:
+                saved_code = await login_code_repo.create(
+                    code=code,
+                    tg_id=request.tg_id,
+                    expires_at=expires_at,
+                    conn=conn,
+                )
+                if not saved_code:
+                    raise ValueError("Failed to create login code")
+        except Exception as e:
+            logger.error(f"Failed to create login code for existing user: tg_id={request.tg_id}, error={e}", exc_info=True)
+            raise
+
+        try:
+            return RegisterFromInviteResponse(
                 tg_id=request.tg_id,
-                expires_at=expires_at,
-                conn=conn,
+                login_code=code,
+                code_expires_at=expires_at,
             )
-            if not saved_code:
-                raise ValueError("Failed to create login code")
-        return RegisterFromInviteResponse(
-            tg_id=request.tg_id,
-            login_code=code,
-            code_expires_at=expires_at,
-        )
+        except Exception as e:
+            logger.error(f"Failed to create RegisterFromInviteResponse: {e}", exc_info=True)
+            raise
 
     # New user — create account and issue code in one transaction
     new_user = User(
