@@ -3,11 +3,16 @@ Service functions for authentication and user registration from invites.
 """
 import logging
 from datetime import datetime, timezone, timedelta
+from typing import Any, Awaitable, Callable
 
 import asyncpg
 
 from models import User, LoginCode
-from app.schemas.auth import RegisterFromInviteRequest, RegisterFromInviteResponse
+from app.schemas.auth import (
+    RegisterFromInviteRequest,
+    RegisterFromInviteResponse,
+    TelegramAuthData,
+)
 from app.repositories.users import UserRepository
 from app.repositories.login_codes import LoginCodeRepository
 from core.utils import generate_login_code
@@ -115,3 +120,70 @@ async def register_from_invite(
         login_code=code,
         code_expires_at=expires_at,
     )
+
+
+async def telegram_login(
+    data: TelegramAuthData,
+    user_repo: UserRepository,
+    notify_fn: Callable[[int], Awaitable[Any]],
+) -> dict:
+    """Handle a verified Telegram Login Widget payload.
+
+    The HMAC signature on ``data`` must already have been validated by the
+    caller via :func:`app.core.telegram.verify_telegram_hash`.
+
+    Behaviour:
+        - If a user with ``data.id`` does not exist, a new ``User`` row is
+          created and ``notify_fn(tg_id)`` is awaited (e.g. send a Telegram
+          welcome DM).
+        - If the user already exists, no notification is sent.
+
+    Args:
+        data: Verified ``TelegramAuthData`` payload from the login widget.
+        user_repo: Repository used to look up and create users.
+        notify_fn: Async callable invoked with the new user's ``tg_id``
+            when a fresh account is created.
+
+    Returns:
+        A dict with keys ``tg_id``, ``is_admin``, ``is_new`` suitable for
+        constructing :class:`TelegramLoginResponse`.
+    """
+    tg_id = data.id
+    existing_user = await user_repo.get_by_tg_id(tg_id)
+
+    if existing_user is not None:
+        logger.info(f"Telegram login for existing user: tg_id={tg_id}")
+        is_admin = bool(getattr(existing_user, "is_admin", False))
+        return {"tg_id": tg_id, "is_admin": is_admin, "is_new": False}
+
+    new_user = User(
+        tg_id=tg_id,
+        username=data.username,
+        first_name=data.first_name,
+        last_name=data.last_name,
+        language_code=None,
+        server_id=None,
+        balance=0.0,
+        trial=0,
+        is_admin=False,
+        is_blocked=False,
+    )
+
+    created_user = await user_repo.create(new_user)
+    if not created_user:
+        # Repository may return ``None`` on insert failure; surface a clear error.
+        logger.error(f"Failed to create user from Telegram login: tg_id={tg_id}")
+        raise ValueError("Failed to create user from Telegram login")
+
+    try:
+        await notify_fn(tg_id)
+    except Exception as exc:
+        # Notification failures must not break the login flow.
+        logger.warning(
+            f"telegram_login notify_fn failed for tg_id={tg_id}: {exc}",
+            exc_info=True,
+        )
+
+    is_admin = bool(getattr(created_user, "is_admin", False))
+    logger.info(f"New Telegram user registered: tg_id={tg_id}")
+    return {"tg_id": tg_id, "is_admin": is_admin, "is_new": True}

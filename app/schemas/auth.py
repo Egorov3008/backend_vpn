@@ -37,3 +37,49 @@ class RegisterFromInviteResponse(BaseModel):
     tg_id: int
     login_code: str = Field(..., pattern=r'^[A-Z0-9]{8}$', description="8-character alphanumeric code")
     code_expires_at: datetime
+
+
+class TelegramAuthData(BaseModel):
+    """Payload received from Telegram Login Widget.
+
+    Mirrors the fields documented at
+    https://core.telegram.org/widgets/login#receiving-authorization-data.
+    """
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "id": 123456789,
+            "first_name": "John",
+            "last_name": "Doe",
+            "username": "johndoe",
+            "photo_url": "https://t.me/i/userpic/320/photo.jpg",
+            "auth_date": 1714290000,
+            "hash": "abcdef0123456789..."
+        }
+    })
+
+    id: int
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    username: Optional[str] = None
+    photo_url: Optional[str] = None
+    auth_date: int
+    hash: str
+
+
+class TelegramLoginResponse(BaseModel):
+    """Response after successful Telegram login.
+
+    Indicates whether the user was newly created and whether they hold
+    administrator privileges.
+    """
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "tg_id": 123456789,
+            "is_admin": False,
+            "is_new": True
+        }
+    })
+
+    tg_id: int
+    is_admin: bool = False
+    is_new: bool = False
