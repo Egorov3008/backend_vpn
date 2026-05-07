@@ -40,14 +40,10 @@ def get_login_code_repository(
     return LoginCodeRepository(data_protocol=service_data.login_codes, pool=pool)
 
 
-async def _notify_admins_telegram(data: TelegramAuthData) -> None:
-    name = data.first_name or ""
-    username = f"@{data.username}" if data.username else "нет"
+async def _notify_admins_telegram(tg_id: int) -> None:
     text = (
         "👤 <b>Новая регистрация (Web)</b>\n\n"
-        f"🆔 ID: <code>{data.id}</code>\n"
-        f"👤 Имя: {name}\n"
-        f"🔗 Username: {username}"
+        f"🆔 ID: <code>{tg_id}</code>"
     )
     async with httpx.AsyncClient(timeout=5) as client:
         for admin_id in ADMIN_ID:
