@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
@@ -7,6 +9,7 @@ from app.schemas.users import UserResponse, UserRegisterRequest, UserUpdateReque
 from models import User
 from services.core.data.service import ServiceDataModel
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/users", tags=["users"])
 
 
@@ -16,10 +19,16 @@ async def get_user(
     _: None = Depends(verify_bot_secret),
     service_data: ServiceDataModel = Depends(get_service_data),
 ) -> UserResponse:
-    user = await service_data.users.get_data(tg_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    return UserResponse.from_user(user)
+    try:
+        user = await service_data.users.get_data(tg_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        return UserResponse.from_user(user)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting user tg_id={tg_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/register")
