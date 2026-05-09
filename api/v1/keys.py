@@ -7,9 +7,11 @@ from app.auth import verify_bot_secret
 from app.dependencies import get_service_data, get_pool, get_cache
 from app.factories import build_key_services
 from app.schemas.keys import KeyResponse, KeyDetailResponse, KeyCreateRequest, KeyRenewRequest
+from config import DEFAULT_PRICING_PLAN
 from services.cache.key_manager import CacheKeyManager
 from services.core.data.service import ServiceDataModel
 from services.core.keys.service import KeyService
+from services.core.user.utils.trial import TrialService
 from database.service import DataService
 from services.cache.service import CacheService
 
@@ -127,6 +129,48 @@ async def create_key(
     key = await service_data.keys.get_data(result["email"])
     if not key:
         raise HTTPException(status_code=500, detail="Created key not found in database")
+
+    return KeyResponse.from_key(key)
+
+
+@router.post("/trial", response_model=KeyResponse)
+async def create_trial_key(
+    tg_id: int = Query(..., description="Telegram user ID"),
+    _: None = Depends(verify_bot_secret),
+    pool: asyncpg.Pool = Depends(get_pool),
+    service_data: ServiceDataModel = Depends(get_service_data),
+    cache: CacheService = Depends(get_cache),
+) -> KeyResponse:
+    """Create a free trial VPN key (sets user.trial = 1)"""
+    user = await service_data.users.get_data(tg_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user.trial != 0:
+        raise HTTPException(status_code=403, detail="Trial already used")
+
+    tariff = await service_data.tariffs.get_data(int(DEFAULT_PRICING_PLAN))
+    if not tariff:
+        raise HTTPException(status_code=404, detail="Trial tariff not found")
+
+    data_service = DataService()
+    create_key_svc, _, _ = build_key_services(pool, service_data, cache, data_service)
+
+    result = await create_key_svc.proces(
+        tg_id=tg_id,
+        tariff=tariff,
+        server_id=2,
+        conn=pool,
+        number_of_months=1,
+    )
+
+    if not result:
+        raise HTTPException(status_code=500, detail="Failed to create trial key")
+
+    key = await service_data.keys.get_data(result["email"])
+    if not key:
+        raise HTTPException(status_code=500, detail="Created key not found in database")
+
+    await TrialService(service_data).installation_trial(tg_id, pool, trial=1)
 
     return KeyResponse.from_key(key)
 

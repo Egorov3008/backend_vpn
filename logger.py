@@ -144,26 +144,32 @@ def setup_logging(
     )
 
     # File sink: application.log (INFO level, 3h rotation, 30d retention)
-    _loguru.add(
-        os.path.join(LOG_FOLDER, "application.log"),
-        level="INFO",
-        format=fmt,
-        rotation="3 hours",
-        retention="30 days",
-        compression="zip",
-        enqueue=True,
-    )
+    try:
+        _loguru.add(
+            os.path.join(LOG_FOLDER, "application.log"),
+            level="INFO",
+            format=fmt,
+            rotation="3 hours",
+            retention="30 days",
+            compression="zip",
+            enqueue=True,
+        )
+    except (PermissionError, OSError):
+        pass  # Skip file sink if log file is not writable (e.g., in test environments)
 
     # File sink: errors.log (ERROR level, 1d rotation, 90d retention)
-    _loguru.add(
-        os.path.join(ERROR_LOG_FOLDER, "errors.log"),
-        level="ERROR",
-        format=fmt,
-        rotation="1 day",
-        retention="90 days",
-        compression="zip",
-        enqueue=True,
-    )
+    try:
+        _loguru.add(
+            os.path.join(ERROR_LOG_FOLDER, "errors.log"),
+            level="ERROR",
+            format=fmt,
+            rotation="1 day",
+            retention="90 days",
+            compression="zip",
+            enqueue=True,
+        )
+    except (PermissionError, OSError):
+        pass  # Skip file sink if log file is not writable (e.g., in test environments)
 
     # Перехватываем stdlib logging
     logging.basicConfig(handlers=[InterceptHandler()], level=numeric_level)
