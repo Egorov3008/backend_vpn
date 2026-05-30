@@ -2,10 +2,10 @@
 
 from typing import Optional
 
-import py3xui
 from asyncpg import Pool
 from logger import logger
 
+from client import PanelClient
 from models import Key
 from services.core.data.service import ServiceDataModel
 from services.synchron.tariff_matcher import TariffMatcher
@@ -51,13 +51,13 @@ class KeyCreator:
             return False
 
     async def create_key(
-        self, client: py3xui.Client, used_traffic: int = 0
+        self, client: PanelClient, used_traffic: int = 0
     ) -> Optional[Key]:
         """
         Создаёт новый объект Key на основе клиента XUI и сохраняет его.
 
         Args:
-            client: Объект клиента из XUI
+            client: Объект клиента из XUI (PanelClient)
             used_traffic: Объём использованного трафика
 
         Returns:

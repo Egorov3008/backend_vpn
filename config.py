@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     api_url: str = ""
     admin_username: str = ""
     admin_password: str = ""
+    xui_web_base_path: str = "/"
+    xui_server_id: int = 1
+    xui_skip_ssl_verify: bool = False
 
     # YooKassa
     yookassa_shop_id: str = ""
@@ -78,6 +81,9 @@ DATABASE_URL: str = settings.database_url
 API_URL: str = settings.api_url
 ADMIN_USERNAME: str = settings.admin_username
 ADMIN_PASSWORD: str = settings.admin_password
+XUI_WEB_BASE_PATH: str = settings.xui_web_base_path
+XUI_SERVER_ID: int = settings.xui_server_id
+XUI_SKIP_SSL_VERIFY: bool = settings.xui_skip_ssl_verify
 YOOKASSA_SHOP_ID: str = settings.yookassa_shop_id
 YOOKASSA_SECRET_KEY: str = settings.yookassa_secret_key
 DISABLE_WEBHOOK_IP_CHECK: bool = settings.disable_webhook_ip_check

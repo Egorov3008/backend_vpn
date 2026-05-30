@@ -4,8 +4,8 @@ from typing import List, Dict, Optional, Tuple
 import aiohttp
 import asyncpg
 from loguru import logger
-from py3xui import Client
 
+from client import PanelClient
 from models import Key
 from services.core.data.service import ServiceDataModel
 
@@ -30,7 +30,7 @@ class TrafficUpdater:
 
     async def fetch_traffic_batch(
         self,
-        clients: List[Client],
+        clients: List[PanelClient],
         server_subscription_url: str,
         session: aiohttp.ClientSession,
     ) -> Dict[str, Optional[Dict]]:
@@ -38,7 +38,7 @@ class TrafficUpdater:
         Асинхронно получает данные о трафике для пакета клиентов.
 
         Args:
-            clients: Список клиентов
+            clients: Список клиентов (PanelClient)
             server_subscription_url: Базовый URL подписки
             session: Общая aiohttp сессия
 
@@ -46,7 +46,7 @@ class TrafficUpdater:
             Словарь: email -> данные о трафике или None
         """
 
-        async def fetch_single(client: Client) -> Tuple[str, Optional[Dict]]:
+        async def fetch_single(client: PanelClient) -> Tuple[str, Optional[Dict]]:
             url = (
                 f"{server_subscription_url}/{client.email}"
                 if client.email == client.sub_id
@@ -140,14 +140,14 @@ class TrafficUpdater:
             return None
 
     async def update_key_with_traffic(
-        self, pool: asyncpg.Pool, key: Key, client: Client, traffic_data: Optional[Dict]
+        self, pool: asyncpg.Pool, key: Key, client: PanelClient, traffic_data: Optional[Dict]
     ) -> bool:
         """
         Обновляет объект Key на основе полученных данных о трафике.
 
         Args:
             key: Объект ключа для обновления
-            client: Клиент из XUI (для синхронизации expiry_time и limit_ip)
+            client: Клиент из XUI (PanelClient) — для синхронизации expiry_time и limit_ip
             traffic_data: Данные о трафике
 
         Returns:

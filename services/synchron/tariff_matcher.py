@@ -1,11 +1,10 @@
 from typing import Optional
 
-import py3xui
-
 from config import DEFAULT_PRICING_PLAN
 from logger import logger
 from models import Tariff
 from services.core.data.service import ServiceDataModel
+from client import PanelClient
 
 
 class TariffMatcher:
@@ -16,7 +15,7 @@ class TariffMatcher:
     def __init__(self, model_data: ServiceDataModel) -> None:
         self.model_data = model_data
 
-    async def match(self, client: py3xui.Client) -> int:
+    async def match(self, client: PanelClient) -> int:
         """Определяет tariff_id для клиента XUI."""
         # 1. Специальное правило для inbound_id
         if client.inbound_id in self.SPECIAL_INBOUND_TARIFF and not client.total_gb:
@@ -49,7 +48,7 @@ class TariffMatcher:
         return int(DEFAULT_PRICING_PLAN)
 
     def _find_exact_match(
-        self, tariffs: list[Tariff], client: py3xui.Client
+        self, tariffs: list[Tariff], client: PanelClient
     ) -> Optional[Tariff]:
         """Точное совпадение: limit_ip + traffic_limit."""
         client_traffic_gb = client.total_gb / (1024**3) if client.total_gb else 0
@@ -62,7 +61,7 @@ class TariffMatcher:
         return None
 
     def _find_by_limit_ip(
-        self, tariffs: list[Tariff], client: py3xui.Client
+        self, tariffs: list[Tariff], client: PanelClient
     ) -> Optional[Tariff]:
         """Совпадение по limit_ip (первый найденный)."""
         for tariff in tariffs:

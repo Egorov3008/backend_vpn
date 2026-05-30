@@ -4,9 +4,7 @@ import aiohttp
 import asyncpg
 from loguru import logger
 
-from py3xui import Client
-
-from client import XUISession
+from client import XUISession, PanelClient
 from services.synchron.xui_fetcher import XUIFetcher
 from services.synchron.cache_comparator import CacheComparator
 from services.synchron.key_creator import KeyCreator
@@ -113,7 +111,7 @@ class DatabaseSynchronizer:
             return {"total": 0, "successful": 0, "failed": 0, "error": str(e)}
 
     async def _restore_missing_data(
-        self, clients: List[Client], out_keys: List[str], out_users: List[int]
+        self, clients: List[PanelClient], out_keys: List[str], out_users: List[int]
     ) -> dict:
         """Восстанавливает отсутствующие ключи и пользователей"""
         key_map = {c.email: c for c in clients}
@@ -141,7 +139,7 @@ class DatabaseSynchronizer:
         return {"restored_keys": restored_keys, "restored_users": restored_users}
 
     async def _update_traffic_in_batches(
-        self, clients: List[Client], batch_size: int
+        self, clients: List[PanelClient], batch_size: int
     ) -> dict:
         """Обновляет трафик пакетно"""
         successful = 0

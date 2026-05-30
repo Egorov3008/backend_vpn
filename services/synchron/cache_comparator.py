@@ -1,10 +1,9 @@
 from typing import List, Set, Tuple
 
-import py3xui
-
 from logger import logger
 
 from models import User, Key
+from client import PanelClient
 
 
 class CacheComparator:
@@ -26,18 +25,18 @@ class CacheComparator:
         self.out_keys: List[str] = []
         self.out_users: List[int] = []
 
-    def set_panel_data(self, clients: List[py3xui.Client]) -> None:
+    def set_panel_data(self, clients: List[PanelClient]) -> None:
         """
         Устанавливает данные, полученные с панели (email, tg_id).
 
         Args:
             clients: Список клиентов с XUI
         """
-        self.keys_panel = [c.email for c in clients if hasattr(c, "email") and c.email]
+        self.keys_panel = [c.email for c in clients if c.email]
         self.users_panel = [
             c.tg_id
             for c in clients
-            if hasattr(c, "tg_id") and isinstance(c.tg_id, int) and c.tg_id > 0
+            if isinstance(c.tg_id, int) and c.tg_id > 0
         ]
 
         logger.info(

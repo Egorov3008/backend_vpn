@@ -1,9 +1,27 @@
 from typing import List
-import py3xui
-from logger import logger
-from py3xui.client import Client
 
-from client import XUISession
+from logger import logger
+
+from client import XUISession, PanelClient
+
+
+def _to_panel_client(raw: dict) -> PanelClient:
+    """Конвертирует raw dict из standalone API в PanelClient."""
+    return PanelClient(
+        id=raw.get("id", ""),
+        email=raw.get("email", ""),
+        tg_id=raw.get("tgId") or raw.get("tg_id") or 0,
+        limit_ip=raw.get("limitIp") or raw.get("limit_ip") or 0,
+        total_gb=raw.get("totalGB") or raw.get("total_gb") or 0,
+        expiry_time=raw.get("expiryTime") or raw.get("expiry_time") or 0,
+        inbound_id=(raw.get("inboundIds") or [0])[0] if raw.get("inboundIds") else raw.get("inbound_id", 0),
+        inbound_ids=list(raw.get("inboundIds", []) or []),
+        sub_id=raw.get("subId") or raw.get("sub_id", ""),
+        enable=raw.get("enable", True),
+        flow=raw.get("flow", ""),
+        group=raw.get("group", ""),
+        comment=raw.get("comment", ""),
+    )
 
 
 class XUIFetcher:
@@ -11,11 +29,11 @@ class XUIFetcher:
     Сервис для получения данных с XUI-панели.
     Не хранит состояние — работает с переданной сессией.
     Отвечает за:
-      - Получение списка инбаундов
-      - Извлечение и валидацию клиентов
+      - Получение списка инбаундов (legacy, через py3xui)
+      - Извлечение и валидацию клиентов (standalone API v3.2.0)
     """
 
-    async def fetch_inbounds(self, xui_session: XUISession) -> List[py3xui.Inbound]:
+    async def fetch_inbounds(self, xui_session: XUISession) -> list:
         """
         Получает список всех инбаундов с XUI-панели.
 
@@ -26,7 +44,7 @@ class XUIFetcher:
             Список инбаундов или пустой список при ошибке
         """
         try:
-            inbounds: List[py3xui.Inbound] = await xui_session.get_inbounds()
+            inbounds = await xui_session.get_inbounds()
             if not inbounds:
                 logger.warning(
                     "Список инбаундов пуст",
@@ -43,31 +61,42 @@ class XUIFetcher:
             )
             return []
 
-    async def extract_clients(self, xui_session: XUISession) -> List[Client]:
+    async def extract_clients(self, xui_session: XUISession) -> List[PanelClient]:
         """
-        Полностью извлекает валидных клиентов из всех инбаундов.
+        Получает список всех standalone-клиентов через v3.2.0 API.
 
         Args:
             xui_session: Активная сессия XUI
 
         Returns:
-            Список корректных клиентов с email и tg_id
+            Список корректных PanelClient с email и tg_id
         """
-        inbounds = await self.fetch_inbounds(xui_session)
-        if not inbounds:
+        try:
+            raw_list = await xui_session.list_clients()
+        except Exception as e:
+            logger.error(
+                "Ошибка получения списка клиентов через standalone API",
+                server_id=getattr(xui_session, "server_id", "unknown"),
+                error=str(e)
+            )
             return []
 
-        all_clients: List[Client] = []
-        for inbound in inbounds:
+        if not raw_list:
+            logger.warning(
+                "Список standalone клиентов пуст",
+                server_id=getattr(xui_session, "server_id", "unknown")
+            )
+            return []
+
+        all_clients: List[PanelClient] = []
+        for raw in raw_list:
             try:
-                for client in inbound.settings.clients:
-                    if not hasattr(client, "inbound_id") or client.inbound_id is None:
-                        client.inbound_id = inbound.id
-                    all_clients.append(client)
-            except AttributeError as e:
+                if isinstance(raw, dict):
+                    all_clients.append(_to_panel_client(raw))
+            except Exception as e:
                 logger.debug(
-                    "Ошибка доступа к клиентам инбаунда",
-                    inbound_id=inbound.id,
+                    "Ошибка парсинга клиента",
+                    raw=raw,
                     error=str(e),
                 )
                 continue
@@ -76,12 +105,7 @@ class XUIFetcher:
         valid_clients = [
             client
             for client in all_clients
-            if client
-            and hasattr(client, "email")
-            and client.email
-            and hasattr(client, "tg_id")
-            and isinstance(client.tg_id, int)
-            and client.tg_id > 0
+            if client.email and isinstance(client.tg_id, int) and client.tg_id > 0
         ]
 
         logger.info(
