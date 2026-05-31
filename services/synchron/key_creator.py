@@ -39,7 +39,7 @@ class KeyCreator:
         try:
             from models import User
 
-            user = await self.model_data.users.get_data(tg_id)
+            user = await self.model_data.users.get_data(tg_id, self.pool)
             if not user:
                 user_obj = User(tg_id=tg_id, server_id=settings.xui_server_id)
                 await self.model_data.users.save_data(
@@ -65,7 +65,7 @@ class KeyCreator:
             Объект Key или None при ошибке
         """
         try:
-            server = await self.model_data.servers.get_data(settings.xui_server_id)
+            server = await self.model_data.servers.get_data(settings.xui_server_id, self.pool)
             if not server:
                 from models.servers.server import get_env_server
                 server = get_env_server()
@@ -85,7 +85,7 @@ class KeyCreator:
 
             key = Key(
                 email=client.email,
-                client_id=client.id,
+                client_id=str(client.id),
                 limit_ip=client.limit_ip,
                 total_gb=client.total_gb,
                 used_traffic=used_traffic,

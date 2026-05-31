@@ -8,7 +8,7 @@ from client import XUISession, PanelClient
 def _to_panel_client(raw: dict) -> PanelClient:
     """Конвертирует raw dict из standalone API в PanelClient."""
     return PanelClient(
-        id=raw.get("id", ""),
+        id=str(raw.get("id", "")),
         email=raw.get("email", ""),
         tg_id=raw.get("tgId") or raw.get("tg_id") or 0,
         limit_ip=raw.get("limitIp") or raw.get("limit_ip") or 0,

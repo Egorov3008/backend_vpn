@@ -60,7 +60,7 @@ async def _sync_cache(service_data: ServiceDataModel, pool: asyncpg.Pool) -> dic
         return {"status": "error", "error": str(e)}
 
 
-async def _sync_panel(service_data: ServiceDataModel, pool: asyncpg.Pool) -> None:
+async def _sync_panel(service_data: ServiceDataModel, pool: asyncpg.Pool) -> dict:
     """Sync panel clients with DB+cache and clean up orphaned keys."""
     from client import XUISession
     from services.cache.loader import LoadingService
@@ -89,9 +89,10 @@ async def _sync_panel(service_data: ServiceDataModel, pool: asyncpg.Pool) -> Non
             model_data=service_data,
             pool=pool,
         )
-        stats = await synchronizer.sync_data(xui_session=xui)
-        logger.info("Синхронизация с панелью завершена", **stats)
-        return {"status": "success", **stats}
+        async with synchronizer:
+            stats = await synchronizer.sync_data(xui_session=xui)
+            logger.info("Синхронизация с панелью завершена", **stats)
+            return {"status": "success", **stats}
     except Exception as e:
         logger.error("Ошибка синхронизации с панелью", error=str(e), exc_info=True)
         return {"status": "error", "error": str(e)}

@@ -194,9 +194,9 @@ class DatabaseSynchronizer:
             )
 
             for client in batch:
-                key = await self.model_data.keys.get_data(client.email)
+                key = await self.model_data.keys.get_data(client.email, self.pool)
                 if not key:
-                    logger.warning("Ключ не найден в кэше", email=client.email)
+                    logger.warning("Ключ не найден в кэше/БД", email=client.email)
                     failed += 1
                     continue
 
