@@ -68,6 +68,7 @@ async def _sync_panel(service_data: ServiceDataModel, pool: asyncpg.Pool) -> Non
     from services.synchron.xui_fetcher import XUIFetcher
     from services.synchron.cache_comparator import CacheComparator
     from services.synchron.key_creator import KeyCreator
+    from services.synchron.tariff_matcher import TariffMatcher
     from services.synchron.traffic import TrafficUpdater
     from database.service import DataService
 
@@ -83,8 +84,8 @@ async def _sync_panel(service_data: ServiceDataModel, pool: asyncpg.Pool) -> Non
         synchronizer = DatabaseSynchronizer(
             xui_fetcher=XUIFetcher(),
             cache_comparator=CacheComparator(),
-            key_creator=KeyCreator(service_data, pool),
-            traffic_updater=TrafficUpdater(),
+            key_creator=KeyCreator(service_data, pool, TariffMatcher(service_data)),
+            traffic_updater=TrafficUpdater(service_data),
             model_data=service_data,
             pool=pool,
         )
