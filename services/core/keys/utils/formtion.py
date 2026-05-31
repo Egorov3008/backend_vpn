@@ -33,7 +33,7 @@ class FormationKey:
         )
         client_id = self._generate_client_id()
         server_data = await self.connected_data.data(user_id=tg_id, server_id=server_id)
-        
+
         if not server_data:
             logger.error(
                 "Не удалось получить данные сервера для создания ключа",
@@ -41,9 +41,12 @@ class FormationKey:
                 server_id=server_id,
             )
             return None
-        
+
         total_traffic = int((tariff.traffic_limit * (2**30)) * number_of_months)
         subscription_url = f"{server_data.get('subscription_url')}/{email}"
+        inbound_ids = server_data.get("inbound_ids", [])
+        # Для БД сохраняем первый inbound_id; для панели передаём весь список
+        primary_inbound_id = inbound_ids[0] if inbound_ids else 0
 
         key = Key(
             tg_id=tg_id,
@@ -51,7 +54,8 @@ class FormationKey:
             client_id=client_id,
             limit_ip=tariff.limit_ip,
             expiry_time=int(new_expiry_time),
-            inbound_id=int(server_data.get("inbound_id")),
+            inbound_id=int(primary_inbound_id),
+            inbound_ids=inbound_ids,
             key=subscription_url,
             tariff_id=tariff.id,
             total_gb=total_traffic,

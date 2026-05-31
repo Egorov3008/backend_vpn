@@ -16,8 +16,11 @@ class KeyCreationService:
         self.processor = processor
         self.create_key = create_key
         self.builder = InlineKeyboardBuilder()
+        if SUPPORT_CHAT_URL:
+            self.builder.add(
+                InlineKeyboardButton(text="Техническая поддержка", url=SUPPORT_CHAT_URL),
+            )
         self.builder.add(
-            InlineKeyboardButton(text="Техническая поддержка", url=SUPPORT_CHAT_URL),
             InlineKeyboardButton(text="Личный кабинет", callback_data="profile")
         )
 

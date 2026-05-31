@@ -43,3 +43,8 @@ def sorted_keys(data: list) -> dict:
 def generate_login_code(length: int = 8) -> str:
     """Generate random 8-character alphanumeric login code."""
     return ''.join(random.choices(string.ascii_uppercase + string.digits, k=length))
+
+
+def generate_unique_token(length: int = 12) -> str:
+    """Generate random unique token (alphanumeric)."""
+    return ''.join(random.choices(string.ascii_letters + string.digits, k=length))

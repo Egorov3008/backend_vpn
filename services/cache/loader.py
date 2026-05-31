@@ -26,6 +26,7 @@ class LoadingService(LoaderFactory):
         self.inbound_repo = data_service.inbounds
         self.payments = data_service.payments
         self.referral_links = data_service.referral_links
+        self.stock_srv = data_service.stocks
         self.keys = CacheKeyManager()
 
     async def loading(self):
@@ -57,6 +58,10 @@ class LoadingService(LoaderFactory):
                 lambda r: self.cache.referral_links.set(
                     self.keys.referral_link(r.token), r
                 ),
+            ),
+            (
+                self.stock_srv,
+                lambda s: self.cache.stocks.set(self.keys.stock(s.tg_id), s),
             ),
         )
         logger.info(

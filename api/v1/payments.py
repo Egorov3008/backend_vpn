@@ -33,19 +33,44 @@ def _normalize_get_by(result) -> list:
     return [result]
 
 
+def _extract_client_ip(request: Request) -> str | None:
+    """Извлекает реальный IP клиента с учётом прокси-заголовков."""
+    # Сначала проверяем X-Forwarded-For (может содержать цепочку: client, proxy1, proxy2)
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        # Берём первый IP — это реальный клиент
+        client_ip_str = forwarded_for.split(",")[0].strip()
+        if client_ip_str:
+            return client_ip_str
+
+    # Затем X-Real-IP
+    real_ip = request.headers.get("x-real-ip")
+    if real_ip:
+        return real_ip
+
+    # Fallback на прямой client.host
+    return request.client.host if request.client else None
+
+
 def _check_webhook_ip(request: Request) -> bool:
     """Проверяет, что webhook приходит с одного из разрешённых IP YooKassa."""
     if settings.disable_webhook_ip_check:
         logger.info("IP проверка для webhook отключена (DEV MODE)")
         return True
 
-    # IP адреса YooKassa: 185.71.76.0/27 и 185.109.44.0/27
+    # Актуальные IP-диапазоны YooKassa (по состоянию на 2024–2025)
+    # https://yookassa.ru/developers/using-api/webhooks
     allowed_networks = [
         ip_network("185.71.76.0/27"),
-        ip_network("185.109.44.0/27"),
+        ip_network("185.71.77.0/27"),
+        ip_network("77.75.153.0/25"),
+        ip_network("77.75.154.128/25"),
+        ip_network("77.75.156.11/32"),
+        ip_network("77.75.156.35/32"),
+        ip_network("2a02:5180::/32"),
     ]
 
-    client_ip_str = request.client.host if request.client else None
+    client_ip_str = _extract_client_ip(request)
     if not client_ip_str:
         logger.warning("Webhook: не удалось определить IP клиента")
         return False
@@ -107,7 +132,7 @@ async def create_payment(
 ):
     logger.debug("Запрос create_payment", extra={"tg_id": body.tg_id, "tariff_id": body.tariff_id, "months": body.number_of_months, "operation": body.operation})
 
-    tariff = await service_data.tariffs.get_data(body.tariff_id)
+    tariff = await service_data.tariffs.get_data(body.tariff_id, conn=pool)
     if not tariff:
         logger.warning("Тариф не найден", extra={"tariff_id": body.tariff_id})
         raise HTTPException(status_code=404, detail="Tariff not found")

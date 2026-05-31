@@ -13,9 +13,16 @@ class KeyResponse(BaseModel):
     total_gb: Optional[int] = None
     used_traffic: Optional[float] = None
     inbound_id: int
+    public_link: Optional[str] = None
+    link_to_connect: Optional[str] = None
+    notified_10h: bool = False
+    notified_24h: bool = False
 
     @classmethod
     def from_key(cls, k) -> "KeyResponse":
+        # k.key уже содержит полный URL подписки (subscription_url/email)
+        public_link = k.key
+        link_to_connect = k.key
         return cls(
             email=k.email,
             tg_id=k.tg_id,
@@ -27,6 +34,10 @@ class KeyResponse(BaseModel):
             total_gb=k.total_gb,
             used_traffic=k.used_traffic,
             inbound_id=k.inbound_id,
+            public_link=public_link,
+            link_to_connect=link_to_connect,
+            notified_10h=getattr(k, "notified_10h", False),
+            notified_24h=getattr(k, "notified_24h", False),
         )
 
 

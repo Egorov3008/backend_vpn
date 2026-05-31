@@ -88,9 +88,10 @@ async def test_register_from_invite_success(
     with patch("app.services_auth.settings") as mock_settings:
         mock_settings.invite_token = valid_request.invite_token
 
-        result = await register_from_invite(
-            valid_request, mock_user_repo, mock_login_code_repo, mock_pool
-        )
+        with patch("app.services_auth.generate_login_code", return_value="ABC12345"):
+            result = await register_from_invite(
+                valid_request, mock_user_repo, mock_login_code_repo, mock_pool
+            )
 
     # Verify result
     assert isinstance(result, RegisterFromInviteResponse)
@@ -127,7 +128,7 @@ async def test_register_from_invite_invalid_token(
 async def test_register_from_invite_user_already_exists(
     valid_request, mock_user_repo, mock_login_code_repo, mock_pool
 ):
-    """Test registration fails if user already exists."""
+    """Test registration for existing user issues a new login code."""
     # Setup mock to return existing user
     existing_user = User(
         tg_id=valid_request.tg_id,
@@ -143,17 +144,27 @@ async def test_register_from_invite_user_already_exists(
     )
     mock_user_repo.get_by_tg_id.return_value = existing_user
 
+    created_code = LoginCode(
+        code="ABC12345",
+        tg_id=valid_request.tg_id,
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=24)
+    )
+    mock_login_code_repo.create.return_value = created_code
+
     with patch("app.services_auth.settings") as mock_settings:
         mock_settings.invite_token = valid_request.invite_token
 
-        with pytest.raises(ValueError, match="already exists"):
-            await register_from_invite(
+        with patch("app.services_auth.generate_login_code", return_value="ABC12345"):
+            result = await register_from_invite(
                 valid_request, mock_user_repo, mock_login_code_repo, mock_pool
             )
 
-    # Verify no creation occurred
+    assert isinstance(result, RegisterFromInviteResponse)
+    assert result.tg_id == valid_request.tg_id
+    assert result.login_code == "ABC12345"
+    # Verify user creation was skipped, but login code was created
     mock_user_repo.create.assert_not_called()
-    mock_login_code_repo.create.assert_not_called()
+    mock_login_code_repo.create.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -246,9 +257,10 @@ async def test_register_from_invite_with_minimal_data(
     with patch("app.services_auth.settings") as mock_settings:
         mock_settings.invite_token = request.invite_token
 
-        result = await register_from_invite(
-            request, mock_user_repo, mock_login_code_repo, mock_pool
-        )
+        with patch("app.services_auth.generate_login_code", return_value="XYZ98765"):
+            result = await register_from_invite(
+                request, mock_user_repo, mock_login_code_repo, mock_pool
+            )
 
     assert result.tg_id == request.tg_id
     assert result.login_code == "XYZ98765"

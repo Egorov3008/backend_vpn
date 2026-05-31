@@ -17,6 +17,9 @@ class SaturationUser:
         if not user:
             return {}
         server = await self.server.get_data(user.server_id)
+        if not server:
+            from models.servers.server import get_env_server
+            server = get_env_server()
         keys = await self.user_data.get_by(tg_id=tg_id)
 
         return {"user": user, "connect_module": server, "keys": keys}

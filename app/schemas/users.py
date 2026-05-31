@@ -2,6 +2,9 @@ from pydantic import BaseModel
 from typing import Optional
 
 
+from datetime import datetime
+
+
 class UserResponse(BaseModel):
     tg_id: int
     username: Optional[str] = None
@@ -11,6 +14,7 @@ class UserResponse(BaseModel):
     server_id: Optional[int] = None
     is_admin: bool = False
     is_blocked: bool = False
+    created_at: Optional[datetime] = None
 
     @classmethod
     def from_user(cls, u) -> "UserResponse":
@@ -23,6 +27,7 @@ class UserResponse(BaseModel):
             server_id=u.server_id,
             is_admin=u.is_admin,
             is_blocked=u.is_blocked,
+            created_at=getattr(u, "created_at", None),
         )
 
 
@@ -33,6 +38,8 @@ class UserRegisterRequest(BaseModel):
     last_name: Optional[str] = None
     language_code: Optional[str] = None
     server_id: Optional[int] = None
+    referral_id: Optional[int] = None
+    referral_link_id: Optional[int] = None
 
 
 class UserUpdateRequest(BaseModel):

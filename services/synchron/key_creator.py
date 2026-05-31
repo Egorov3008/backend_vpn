@@ -6,6 +6,7 @@ from asyncpg import Pool
 from logger import logger
 
 from client import PanelClient
+from config import settings
 from models import Key
 from services.core.data.service import ServiceDataModel
 from services.synchron.tariff_matcher import TariffMatcher
@@ -40,7 +41,7 @@ class KeyCreator:
 
             user = await self.model_data.users.get_data(tg_id)
             if not user:
-                user_obj = User(tg_id=tg_id, server_id=2)
+                user_obj = User(tg_id=tg_id, server_id=settings.xui_server_id)
                 await self.model_data.users.save_data(
                     self.pool, user_obj, tg_id=user_obj.tg_id
                 )
@@ -64,17 +65,22 @@ class KeyCreator:
             Объект Key или None при ошибке
         """
         try:
-            server = await self.model_data.servers.get_data(2)
+            server = await self.model_data.servers.get_data(settings.xui_server_id)
             if not server:
-                logger.error("Сервер не найден", server_id=2)
+                from models.servers.server import get_env_server
+                server = get_env_server()
+                logger.debug("Используем сервер из .env для создания ключа", server_id=settings.xui_server_id)
+            if not server:
+                logger.error("Сервер не найден", server_id=settings.xui_server_id)
                 return None
 
             tariff_id = await self.tariff_matcher.match(client)
 
+            sub_url = settings.xui_subscription_url or server.subscription_url
             link = (
-                f"{server.subscription_url}/{client.email}"
+                f"{sub_url}/{client.email}"
                 if client.email == client.sub_id
-                else f"{server.subscription_url}/{client.sub_id}"
+                else f"{sub_url}/{client.sub_id}"
             )
 
             key = Key(

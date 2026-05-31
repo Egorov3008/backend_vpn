@@ -15,6 +15,7 @@ class Key:
     expiry_time: int
     key: str
     inbound_id: int
+    inbound_ids: Optional[list] = None
     tariff_id: Optional[int] = None
     total_gb: Optional[int] = 10
     created_at: int = None
@@ -48,6 +49,7 @@ class Key:
             "notified_10h",
             "notified_24h",
             "tariff_id",
+            "limit_ip",
         }
     )
 

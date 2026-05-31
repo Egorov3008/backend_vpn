@@ -15,7 +15,7 @@ class TariffData:
 
     async def get_tariffs(self) -> List[Tariff]:
         """Возвращает список тарифов."""
-        tariffs = await self.tariff_data.get_data()
+        tariffs = await self.tariff_data.get_all()
         return [tariff for tariff in tariffs if tariff.id in AVAILABLE_RATES_LIST]
 
     async def get(self, user_id: int) -> List[Tariff]:

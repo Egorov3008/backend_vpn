@@ -53,7 +53,7 @@ class BaseData(Generic[T]):
             raise ValueError(f"Unknown model type: {self.model_name}")
 
     async def get_data(self, identifier: int | str, conn: asyncpg.Pool = None) -> Optional[T]:
-        """Получить объект из кеша по ID, с DB-fallback если conn передана"""
+        """Получить объект из кеша по ID, с DB-fallback если conn передана."""
         if not identifier:
             raise ValueError(f"{self.__class__.__name__}: identifier is required")
         # Генерируем ключ через CacheKeyManager для единообразия
@@ -78,20 +78,36 @@ class BaseData(Generic[T]):
                         identifier=identifier,
                     )
                     return obj
-            # Если кеш и БД пусты — ошибка
+            # Если кеш и БД пусты — возвращаем None, чтобы API мог вернуть 404
             logger.warning(
                 "Объект не найден в кеше и БД",
                 class_name=self.__class__.__name__,
                 identifier=identifier,
             )
-            raise ValueError(
-                f"{self.__class__.__name__}: объект с id={identifier} не найден"
-            )
+            return None
         return obj
 
-    async def get_all(self) -> List[T]:
-        """Получить все объекты из кеша"""
-        return await self._get_cache_model().all()
+    async def get_all(self, conn: asyncpg.Pool = None) -> List[T]:
+        """Получить все объекты из кеша, с DB-fallback и загрузкой в кеш."""
+        cached = await self._get_cache_model().all()
+        if cached:
+            return cached
+        if conn:
+            logger.debug(
+                "Cache empty, trying to load all from database",
+                class_name=self.__class__.__name__,
+            )
+            db_items = await self.service.get_all(conn)
+            for item in db_items:
+                cache_key = self._generate_key(self._extract_identifier(item))
+                await self._get_cache_model().set(cache_key, item)
+            logger.debug(
+                "Objects loaded from DB and cached",
+                class_name=self.__class__.__name__,
+                count=len(db_items),
+            )
+            return db_items
+        return []
 
     async def exists(self, identifier: int) -> bool:
         """Проверить существует ли объект в кеше"""

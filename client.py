@@ -22,6 +22,7 @@ from services.metrics.registry import (
     xui_api_duration,
     xui_api_retries_total,
 )
+from config import settings
 
 # Метрики специально для login
 xui_login_duration = xui_api_duration.labels(method="login")
@@ -303,7 +304,7 @@ class XUISession:
         self, model_service: ServiceDataModel, loading: LoadingService,
         login_timeout: float = 15.0, login_max_retries: int = 1
     ) -> None:
-        self.server_id = 2
+        self.server_id = settings.xui_server_id
         self._is_authenticated = False
         self.server = None
         self._standalone: Optional[_StandaloneClientAPI] = None
@@ -322,12 +323,11 @@ class XUISession:
     async def server_init(self):
         self.server: Optional[Server] = await self.server_data.get_data(self.server_id)
         if not self.server:
-            await self.loading.load_server()
-            self.server: Optional[Server] = await self.server_data.get_data(
-                self.server_id
-            )
+            # Fallback: build Server from .env when DB servers table is empty
+            from models.servers.server import get_env_server
+            self.server = get_env_server()
             logger.debug(
-                "Сервер загружен из кеша", extra={"server": self.server, "server_id": self.server_id}
+                "Сервер загружен из .env", extra={"server": self.server, "server_id": self.server_id}
             )
 
         # Ленивая инициализация standalone API клиента при первом вызове
@@ -388,13 +388,13 @@ class XUISession:
         email: str,
         tg_id: int,
         limit_ip: int,
-        inbound_id: int,
+        inbound_ids: list,
         expiry_time: int,
         total_gb: int,
         enable: bool = True,
         flow: str = "xtls-rprx-vision",
     ) -> Any:
-        """Добавляет standalone-клиента и привязывает к inbound (v3.2.0 API)."""
+        """Добавляет standalone-клиента и привязывает к inbound-ам (v3.2.0 API)."""
         await self.ensure_auth()
         await self._ensure_standalone()
         t0 = time.monotonic()
@@ -414,7 +414,7 @@ class XUISession:
                 "comment": "",
                 "reset": 0,
             }
-            await self._standalone.add(client_data, [inbound_id])
+            await self._standalone.add(client_data, inbound_ids)
             logger.info(
                 "Клиент успешно добавлен", extra={"email": email, "client_id": client_id}
             )

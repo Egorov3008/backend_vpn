@@ -5,6 +5,7 @@ import asyncpg
 from loguru import logger
 
 from client import XUISession, PanelClient
+from config import settings
 from services.synchron.xui_fetcher import XUIFetcher
 from services.synchron.cache_comparator import CacheComparator
 from services.synchron.key_creator import KeyCreator
@@ -92,10 +93,13 @@ class DatabaseSynchronizer:
                 get_all_keys_func=self.model_data.keys.get_all,
                 get_all_users_func=self.model_data.users.get_all,
             )
-            out_keys, out_users = self.cache_comparator.compare()
+            out_keys, out_users, orphaned_keys = self.cache_comparator.compare()
 
             # 3. Восстанавливаем недостающие данные
             restore_stats = await self._restore_missing_data(clients, out_keys, out_users)
+
+            # 3.5. Удаляем orphaned ключи (есть в кэше/БД, нет в панели)
+            cleanup_stats = await self._cleanup_orphaned_keys(orphaned_keys)
 
             # 4. Обновляем трафик пакетно
             stats = await self._update_traffic_in_batches(clients, batch_size)
@@ -104,6 +108,8 @@ class DatabaseSynchronizer:
             stats["panel_clients"] = len(clients)
             stats["missing_keys"] = len(out_keys)
             stats["missing_users"] = len(out_users)
+            stats["orphaned_keys"] = len(orphaned_keys)
+            stats["deleted_orphaned"] = cleanup_stats["deleted"]
             return stats
 
         except Exception as e:
@@ -138,6 +144,21 @@ class DatabaseSynchronizer:
 
         return {"restored_keys": restored_keys, "restored_users": restored_users}
 
+    async def _cleanup_orphaned_keys(self, orphaned_keys: List[str]) -> dict:
+        """Удаляет ключи из БД и кэша, которых больше нет в панели."""
+        deleted = 0
+        for email in orphaned_keys:
+            try:
+                key = await self.model_data.keys.get_data(email)
+                if key:
+                    await self.model_data.data_service.keys.delete(self.pool, email=email)
+                    await self.model_data.cache_service.keys.delete(f"key_{email}")
+                    deleted += 1
+                    logger.info("Удалён orphaned ключ", email=email)
+            except Exception as e:
+                logger.error("Ошибка удаления orphaned ключа", email=email, error=str(e))
+        return {"deleted": deleted}
+
     async def _update_traffic_in_batches(
         self, clients: List[PanelClient], batch_size: int
     ) -> dict:
@@ -146,11 +167,19 @@ class DatabaseSynchronizer:
         failed = 0
 
         # ✅ Использование CacheService через ServiceDataModel
-        server = await self.model_data.servers.get_data(2)
+        server = await self.model_data.servers.get_data(settings.xui_server_id)
+        if not server:
+            from models.servers.server import get_env_server
+            server = get_env_server()
+            logger.debug(
+                "Используем сервер из .env для синхронизации",
+                server_id=settings.xui_server_id,
+                method="update_traffic_batch"
+            )
         if not server:
             logger.error(
                 "Сервер не найден",
-                server_id=2,
+                server_id=settings.xui_server_id,
                 method="update_traffic_batch"
             )
             return {"total": 0, "successful": 0, "failed": 1}
@@ -159,8 +188,9 @@ class DatabaseSynchronizer:
 
         for i in range(0, len(clients), batch_size):
             batch = clients[i : i + batch_size]
+            sub_url = settings.xui_subscription_url or server.subscription_url
             traffic_data = await self.traffic_updater.fetch_traffic_batch(
-                batch, server.subscription_url, session
+                batch, sub_url, session
             )
 
             for client in batch:

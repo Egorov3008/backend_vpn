@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 import asyncpg
@@ -7,11 +7,12 @@ from app.auth import verify_bot_secret
 from app.dependencies import get_service_data, get_pool, get_cache
 from app.factories import build_key_services
 from app.schemas.keys import KeyResponse, KeyDetailResponse, KeyCreateRequest, KeyRenewRequest
-from config import DEFAULT_PRICING_PLAN
+from config import DEFAULT_PRICING_PLAN, settings
 from services.cache.key_manager import CacheKeyManager
 from services.core.data.service import ServiceDataModel
 from services.core.keys.service import KeyService
 from services.core.user.utils.trial import TrialService
+from services.core.gift import GiftLinkProvider
 from database.service import DataService
 from services.cache.service import CacheService
 
@@ -40,7 +41,7 @@ async def list_keys(
     for k in keys:
         # Populate tariff name from tariffs cache
         if k.tariff_id:
-            tariff = await service_data.tariffs.get_data(k.tariff_id)
+            tariff = await service_data.tariffs.get_data(k.tariff_id, conn=pool)
             if tariff:
                 k.name_tariff = tariff.name_tariff
         await service_data.cache_service.keys.set(CacheKeyManager.key(k.email), k)
@@ -64,7 +65,7 @@ async def get_key(
 
     # Populate tariff name from tariffs cache
     if key.tariff_id:
-        tariff = await service_data.tariffs.get_data(key.tariff_id)
+        tariff = await service_data.tariffs.get_data(key.tariff_id, conn=pool)
         if tariff:
             key.name_tariff = tariff.name_tariff
 
@@ -102,7 +103,7 @@ async def create_key(
     cache: CacheService = Depends(get_cache),
 ) -> KeyResponse:
     """Create a free VPN key for a user"""
-    tariff = await service_data.tariffs.get_data(body.tariff_id)
+    tariff = await service_data.tariffs.get_data(body.tariff_id, conn=pool)
     if not tariff:
         raise HTTPException(status_code=404, detail="Tariff not found")
     if tariff.amount != 0:
@@ -118,7 +119,7 @@ async def create_key(
     result = await create_key_svc.proces(
         tg_id=body.tg_id,
         tariff=tariff,
-        server_id=2,
+        server_id=settings.xui_server_id,
         conn=pool,
         number_of_months=1,
     )
@@ -136,19 +137,20 @@ async def create_key(
 @router.post("/trial", response_model=KeyResponse)
 async def create_trial_key(
     tg_id: int = Query(..., description="Telegram user ID"),
+    gift_token: Optional[str] = Query(None, description="Optional gift token"),
     _: None = Depends(verify_bot_secret),
     pool: asyncpg.Pool = Depends(get_pool),
     service_data: ServiceDataModel = Depends(get_service_data),
     cache: CacheService = Depends(get_cache),
 ) -> KeyResponse:
-    """Create a free trial VPN key (sets user.trial = 1)"""
+    """Create a free trial VPN key (sets user.trial = 1). If gift_token is provided, applies the gift."""
     user = await service_data.users.get_data(tg_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     if user.trial != 0:
         raise HTTPException(status_code=403, detail="Trial already used")
 
-    tariff = await service_data.tariffs.get_data(int(DEFAULT_PRICING_PLAN))
+    tariff = await service_data.tariffs.get_data(int(DEFAULT_PRICING_PLAN), conn=pool)
     if not tariff:
         raise HTTPException(status_code=404, detail="Trial tariff not found")
 
@@ -158,7 +160,7 @@ async def create_trial_key(
     result = await create_key_svc.proces(
         tg_id=tg_id,
         tariff=tariff,
-        server_id=2,
+        server_id=settings.xui_server_id,
         conn=pool,
         number_of_months=1,
     )
@@ -171,6 +173,18 @@ async def create_trial_key(
         raise HTTPException(status_code=500, detail="Created key not found in database")
 
     await TrialService(service_data).installation_trial(tg_id, pool, trial=1)
+
+    if gift_token:
+        gift = await service_data.gifts.get_by(token=gift_token)
+        if not gift:
+            raise HTTPException(status_code=400, detail="Gift not found")
+        if not gift.is_redeemable():
+            raise HTTPException(status_code=400, detail="Gift already used or expired")
+        gift_provider = GiftLinkProvider(
+            gen_token=service_data.gift_token_gen,
+            model_data=service_data,
+        )
+        await gift_provider.application(pool, gift, tg_id, key.email)
 
     return KeyResponse.from_key(key)
 
@@ -241,6 +255,9 @@ async def renew_key(
         raise HTTPException(status_code=404, detail="User not found")
 
     server = await service_data.servers.get_data(user.server_id, pool)
+    if not server:
+        from models.servers.server import get_env_server
+        server = get_env_server()
     if not server:
         raise HTTPException(status_code=500, detail="Server not found")
 

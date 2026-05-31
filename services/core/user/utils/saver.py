@@ -11,9 +11,8 @@ class SeverUser:
         self.user_data = model_data.users
 
     async def register_user(self, conn: asyncpg.Pool, **kwargs) -> User:
-
-        if "tg_id" not in kwargs or "server_id" not in kwargs:
-            raise ValueError("Не указан tg_id или server_id")
+        if "tg_id" not in kwargs:
+            raise ValueError("Не указан tg_id")
         new_user = User.from_dict(kwargs)
         await self.user_data.save_data(conn, new_user, tg_id=new_user.tg_id)
         return new_user

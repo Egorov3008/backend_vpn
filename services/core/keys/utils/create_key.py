@@ -66,7 +66,7 @@ class CreateKey:
                 email=key.email,
                 tg_id=key.tg_id,
                 limit_ip=key.limit_ip,
-                inbound_id=key.inbound_id,
+                inbound_ids=key.inbound_ids or [key.inbound_id],
                 expiry_time=key.expiry_time,
                 total_gb=key.total_gb,
             )
@@ -77,8 +77,8 @@ class CreateKey:
             days = self._get_days(key.expiry_time)
 
             # Формирование ссылки подключения
-            domain = self._get_domain(server_id)
-            link_to_connect = f"https://{domain}/vless/{key.key}"
+            # key.key уже содержит полный URL подписки (subscription_url/email)
+            link_to_connect = key.key
 
             # Определяем тип ключа: trial или paid
             key_type = "trial" if tariff.amount == 0 else "paid"
@@ -105,11 +105,3 @@ class CreateKey:
         expiry_time = datetime.fromtimestamp(expiry_time / 1000)
         remaining_time = expiry_time - datetime.utcnow()
         return remaining_time.days
-
-    def _get_domain(self, server_id: int) -> str:
-        """Возвращает домен для сервера по его ID."""
-        domains = {
-            2: "tds-pro.space",
-            # Добавить другие серверы по мере необходимости
-        }
-        return domains.get(server_id, "tds-pro.space")

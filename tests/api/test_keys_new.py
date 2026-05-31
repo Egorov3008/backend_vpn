@@ -63,7 +63,7 @@ async def test_create_key_free_tariff(api_client, mock_service_data):
             "email": "test@vpn.ru",
             "public_link": "https://sub.example.com/abc",
             "days": 30,
-            "link_to_connect": "https://tds-pro.space/vless/abc",
+            "link_to_connect": "https://sub.example.com/abc",
         })
         mock_build.return_value = (mock_create_key_svc, MagicMock(), MagicMock())
 
@@ -182,6 +182,7 @@ async def test_renew_key_free(api_client, mock_service_data):
     mock_service_data.keys.get_data = AsyncMock(return_value=key)
     mock_service_data.tariffs.get_data = AsyncMock(return_value=tariff)
     mock_service_data.servers.get_data = AsyncMock(return_value=server)
+    mock_service_data.users.get_data = AsyncMock(return_value=make_user())
 
     with patch("api.v1.keys.build_key_services") as mock_build:
         mock_renewal = AsyncMock()

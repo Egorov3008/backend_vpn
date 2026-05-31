@@ -33,7 +33,7 @@ FastAPI Router (/api/v1/*)
     └─ Call service/factory functions
     ↓
 Service Classes (KeyCreation, PaymentProcessor, KeyRenewal, etc.)
-    ├─ 3x-UI integration (py3xui client)
+    ├─ 3x-UI integration (native standalone API via client.py)
     ├─ YooKassa payment processing
     ├─ Cache invalidation
     └─ Database updates
@@ -75,10 +75,14 @@ PostgreSQL + 3x-UI Panel
 #### Keys (`/api/v1/keys`)
 
 - **GET `/?tg_id=...`** — List user's keys (paginated)
-- **GET `/{email}`** — Get key details (includes client_id, key config, expiry)
+- **GET `/{email}`** — Get key details (includes client_id, key config, expiry, trial status)
 - **POST `/create`** — Create new key (free tariffs only)
   - Requires: `tg_id`, `tariff_id`
   - Fails: 402 if tariff is paid (use payments flow instead)
+- **POST `/trial`** — Create a free trial key (sets `user.trial = 1`)
+  - Requires: `tg_id` (query param)
+  - Optional: `gift_token` (query param) — applies gift if provided
+  - Fails: 403 if trial already used
 - **POST `/{email}/renew`** — Renew key expiry
   - Requires: `tg_id`, `tariff_id`, `number_of_months`
   - Fails: 402 if tariff is paid
@@ -111,6 +115,16 @@ PostgreSQL + 3x-UI Panel
 
 - **GET `/health`** — System health check
 - **POST `/rebuild-cache`** — Force cache refresh from database
+- **GET `/stats`** — Dashboard stats (total users, key stats)
+- **GET `/users`** — List all users
+- **GET `/users/{tg_id}`** — Get user details
+- **GET `/users/{tg_id}/stock`** — Get active discount/stock for user
+- **POST `/users/register`** — Register new user (called by bot)
+- **POST `/users/{tg_id}/keys/generate`** — Admin generate key for user
+- **POST `/users/{tg_id}/keys/mass-renew`** — Mass renewal for user's keys
+- **POST `/keys/{email}/change-date`** — Change key expiry date
+- **POST `/keys/{email}/change-tariff`** — Change key tariff
+- **POST `/keys/{email}/reset-traffic`** — Reset key traffic counters
 
 ### Authentication
 
@@ -134,15 +148,25 @@ PostgreSQL + 3x-UI Panel
 
 ### 3x-UI Integration
 
-**Client:** `py3xui.AsyncApi` (lazy singleton in `app/core/xui.py`).
+**Client:** Native httpx client for 3x-ui v3.2.0 standalone API (`client.py`). The `py3xui` dependency has been removed.
+
+**Auth modes:**
+1. Bearer token (API Token from panel settings) — preferred, no CSRF.
+2. Session cookie (CSRF + login flow).
+
+**Key classes:**
+- `_StandaloneClientAPI` — low-level httpx wrapper for `/panel/api/` endpoints.
+- `XUISession` — high-level service with retry policy (`tenacity`), metrics, and auth state management.
+- `PanelClient` — dataclass DTO replacing `py3xui.Client`.
 
 **Operations:**
 - `add_client()` — create VPN key (returns client_id)
 - `update_client()` — modify key (traffic limit, expiry, etc.)
 - `delete_client()` — remove key
 - `get_inbound()` — fetch inbound config
+- `get_client_traffic()` — fetch client traffic stats
 
-**Error Handling:** If 3x-UI is down, key operations fail with 502. No retry logic (backend assumes 3x-UI is reliable).
+**Error Handling:** Retry logic via `tenacity` for network/temporal errors (ConnectionError, TimeoutError). Authentication errors are non-retryable. If 3x-UI is down after retries, key operations fail with 502.
 
 ### YooKassa Integration
 
@@ -155,6 +179,13 @@ PostgreSQL + 3x-UI Panel
 6. If status == "succeeded", calls `KeyCreation.process()` to create/renew key
 
 **Idempotency:** Webhook processing checks `status == "succeeded"` before creating key. Duplicate webhooks are ignored.
+
+### Background Tasks
+
+`background/scheduler.py` sets up APScheduler jobs:
+- **Cache sync** (`_sync_cache`) — every 3 hours. Reloads all data from PostgreSQL into `CacheService`.
+- **Panel sync** (`_sync_panel`) — every 3 hours. Syncs 3x-UI panel clients with DB+cache, cleans up orphaned keys, updates traffic stats.
+- **Notifications** (`_run_notifications`) — every 1 hour. Runs notification funnels (key expiry, trial reminders, referral bonuses).
 
 ### Caching Strategy
 
@@ -192,7 +223,7 @@ Configurable via env vars:
 
 ## Testing Patterns
 
-Tests use `AsyncMock` for asyncpg, py3xui, and yookassa clients.
+Tests use `AsyncMock` for asyncpg, native XUI client, and yookassa clients.
 
 **Setup Pattern:**
 ```python
@@ -255,6 +286,7 @@ Required in `.env`:
 - `TELEGRAM_BOT_TOKEN` — for sending user notifications
 - `XUI_API_URL` / `XUI_LOGIN` / `XUI_PASSWORD` — 3x-UI panel credentials
 - `XUI_INBOUND_ID` — default inbound ID for new keys
+- `DEFAULT_PRICING_PLAN` — default tariff ID for trial keys
 - `YOOKASSA_SHOP_ID` / `YOOKASSA_SECRET_KEY` — payment processing
 - `WEBHOOK_BASE_URL` — public URL for YooKassa callbacks (e.g., https://api.example.com)
 - `WEBHOOK_ALLOWED_IPS` — comma-separated IPs (YooKassa: 185.71.76.0/27,185.109.44.0/27)

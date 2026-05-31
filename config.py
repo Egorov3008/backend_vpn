@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,7 +25,7 @@ if not _env_path.exists():
 _env_file = _env_path
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=str(_env_file), extra="ignore")
+    model_config = SettingsConfigDict(env_file=str(_env_file), extra="ignore", populate_by_name=True)
 
     # Core
     database_url: str = ""
@@ -37,12 +38,13 @@ class Settings(BaseSettings):
     log_format: str = "detailed"
 
     # 3x-UI panel
-    api_url: str = ""
-    admin_username: str = ""
-    admin_password: str = ""
-    xui_web_base_path: str = "/"
-    xui_server_id: int = 1
-    xui_skip_ssl_verify: bool = False
+    api_url: str = Field(default="", alias="XUI_API_URL")
+    xui_subscription_url: str = Field(default="", alias="XUI_SUB")
+    admin_username: str = Field(default="", alias="XUI_LOGIN")
+    admin_password: str = Field(default="", alias="XUI_PASSWORD")
+    xui_web_base_path: str = Field(default="/", alias="XUI_WEB_BASE_PATH")
+    xui_server_id: int = Field(default=1, alias="XUI_SERVER_ID")
+    xui_skip_ssl_verify: bool = Field(default=False, alias="XUI_SKIP_SSL_VERIFY")
 
     # YooKassa
     yookassa_shop_id: str = ""
@@ -58,8 +60,8 @@ class Settings(BaseSettings):
 
     # Bot behaviour
     admin_id_raw: str = "[0]"
-    available_rates_raw: str = "[9, 8, 7]"
-    available_connections_raw: str = "[11, 12]"
+    available_rates_raw: str = Field(default="[9, 8, 7]", alias="AVAILABLE_RATES")
+    available_connections_raw: str = Field(default="[11, 12]", alias="AVAILABLE_CONNECTIONS")
     default_pricing_plan: str = "10"
     trial_time: int = 30
     discounts: int = 3
@@ -79,6 +81,7 @@ settings = Settings()
 # ============================================================
 DATABASE_URL: str = settings.database_url
 API_URL: str = settings.api_url
+XUI_SUBSCRIPTION_URL: str = settings.xui_subscription_url or settings.api_url
 ADMIN_USERNAME: str = settings.admin_username
 ADMIN_PASSWORD: str = settings.admin_password
 XUI_WEB_BASE_PATH: str = settings.xui_web_base_path

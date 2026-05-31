@@ -67,12 +67,12 @@ class CacheComparator:
             users_cached=len(self.users_cache),
         )
 
-    def compare(self) -> Tuple[List[str], List[int]]:
+    def compare(self) -> Tuple[List[str], List[int], List[str]]:
         """
         Сравнивает данные панели и кэша, находит различия.
 
         Returns:
-            (отсутствующие_ключи, отсутствующие_пользователи)
+            (отсутствующие_ключи, отсутствующие_пользователи, orphaned_ключи)
         """
         keys_panel_set: Set[str] = set(self.keys_panel)
         keys_cache_set: Set[str] = set(self.keys_cache)
@@ -81,6 +81,7 @@ class CacheComparator:
 
         self.out_keys = list(keys_panel_set - keys_cache_set)
         self.out_users = list(users_panel_set - users_cache_set)
+        orphaned_keys = list(keys_cache_set - keys_panel_set)
 
         if self.out_keys:
             logger.info("Найдены отсутствующие ключи в кэше", count=len(self.out_keys))
@@ -94,7 +95,10 @@ class CacheComparator:
         else:
             logger.debug("Все пользователи из панели присутствуют в кэше")
 
-        return self.out_keys, self.out_users
+        if orphaned_keys:
+            logger.info("Найдены orphaned ключи (есть в кэше, нет в панели)", count=len(orphaned_keys))
+
+        return self.out_keys, self.out_users, orphaned_keys
 
     def get_out_keys(self) -> List[str]:
         """Возвращает email ключей, отсутствующих в кэше."""

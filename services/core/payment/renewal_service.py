@@ -48,6 +48,9 @@ class KeyRenewalService:
 
             user = await self.processor._model_service.users.get_data(self.processor.tg_id, self.processor._conn)
             server = await self.processor._model_service.servers.get_data(user.server_id, self.processor._conn)
+            if not server:
+                from models.servers.server import get_env_server
+                server = get_env_server()
 
             logger.info(
                 "[Цена:RenewKey] Продление ключа после оплаты",

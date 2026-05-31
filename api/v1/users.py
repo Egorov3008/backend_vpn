@@ -51,7 +51,7 @@ async def register_user(
         server_id=body.server_id,
     )
     await service_data.users.save_data(pool, user, tg_id=user.tg_id)
-    return JSONResponse(status_code=201, content=UserResponse.from_user(user).model_dump())
+    return JSONResponse(status_code=201, content=UserResponse.from_user(user).model_dump(mode="json"))
 
 
 @router.patch("/{tg_id}", response_model=UserResponse)
