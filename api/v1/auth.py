@@ -23,7 +23,11 @@ from services.core.data.service import ServiceDataModel
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = APIRouter(
+    prefix="/auth",
+    tags=["auth"],
+    dependencies=[Depends(verify_bot_secret)],
+)
 
 
 def get_user_repository(
@@ -59,7 +63,6 @@ async def _notify_admins_telegram(tg_id: int) -> None:
 @router.post("/register-from-invite", response_model=RegisterFromInviteResponse, status_code=201)
 async def register_from_invite_endpoint(
     request: RegisterFromInviteRequest,
-    _: None = Depends(verify_bot_secret),
     pool=Depends(get_pool),
     user_repo: UserRepository = Depends(get_user_repository),
     login_code_repo: LoginCodeRepository = Depends(get_login_code_repository),
@@ -98,7 +101,6 @@ async def register_from_invite_endpoint(
 async def telegram_login_endpoint(
     request: Request,
     body: TelegramAuthData,
-    _: None = Depends(verify_bot_secret),
     user_repo: UserRepository = Depends(get_user_repository),
 ):
     try:

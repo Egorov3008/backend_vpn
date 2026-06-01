@@ -21,7 +21,11 @@ from services.cache.service import CacheService
 from services.core.data.service import ServiceDataModel
 from logger import logger
 
-router = APIRouter(prefix="/payments", tags=["payments"])
+router = APIRouter(
+    prefix="/payments",
+    tags=["payments"],
+    dependencies=[Depends(verify_bot_secret)],
+)
 
 
 def _normalize_get_by(result) -> list:
@@ -126,7 +130,6 @@ async def payment_webhook(
 @router.post("/create", response_model=PaymentCreateResponse)
 async def create_payment(
     body: PaymentCreateRequest,
-    _: None = Depends(verify_bot_secret),
     pool=Depends(get_pool),
     service_data: ServiceDataModel = Depends(get_service_data),
 ):
@@ -219,7 +222,6 @@ async def create_payment(
 @router.get("/", response_model=List[PaymentHistoryItem])
 async def get_payment_history(
     tg_id: int = Query(..., description="Telegram user ID"),
-    _: None = Depends(verify_bot_secret),
     service_data: ServiceDataModel = Depends(get_service_data),
 ) -> List[PaymentHistoryItem]:
     """Get payment history for a user"""
@@ -246,7 +248,6 @@ async def get_payment_history(
 async def get_payment_status(
     payment_id: str,
     tg_id: int = Query(..., description="Telegram user ID"),
-    _: None = Depends(verify_bot_secret),
     service_data: ServiceDataModel = Depends(get_service_data),
     pool=Depends(get_pool),
     cache: CacheService = Depends(get_cache),

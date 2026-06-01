@@ -2,7 +2,7 @@ import asyncio
 from typing import List
 import aiohttp
 import asyncpg
-from loguru import logger
+from logger import logger
 
 from client import XUISession, PanelClient
 from config import settings

@@ -3,7 +3,7 @@ from typing import List, Dict, Optional, Tuple
 
 import aiohttp
 import asyncpg
-from loguru import logger
+from logger import logger
 
 from client import PanelClient
 from models import Key

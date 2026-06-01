@@ -10,13 +10,16 @@ from models import User
 from services.core.data.service import ServiceDataModel
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/users", tags=["users"])
+router = APIRouter(
+    prefix="/users",
+    tags=["users"],
+    dependencies=[Depends(verify_bot_secret)],
+)
 
 
 @router.get("/{tg_id}", response_model=UserResponse)
 async def get_user(
     tg_id: int,
-    _: None = Depends(verify_bot_secret),
     service_data: ServiceDataModel = Depends(get_service_data),
 ) -> UserResponse:
     try:
@@ -34,7 +37,6 @@ async def get_user(
 @router.post("/register")
 async def register_user(
     body: UserRegisterRequest,
-    _: None = Depends(verify_bot_secret),
     service_data: ServiceDataModel = Depends(get_service_data),
     pool=Depends(get_pool),
 ):
@@ -58,7 +60,6 @@ async def register_user(
 async def update_user(
     tg_id: int,
     body: UserUpdateRequest,
-    _: None = Depends(verify_bot_secret),
     service_data: ServiceDataModel = Depends(get_service_data),
     pool=Depends(get_pool),
 ) -> UserResponse:

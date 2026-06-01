@@ -16,7 +16,11 @@ from services.core.gift import GiftLinkProvider
 from database.service import DataService
 from services.cache.service import CacheService
 
-router = APIRouter(prefix="/keys", tags=["keys"])
+router = APIRouter(
+    prefix="/keys",
+    tags=["keys"],
+    dependencies=[Depends(verify_bot_secret)],
+)
 
 
 def _normalize_get_by(result) -> list:
@@ -31,7 +35,6 @@ def _normalize_get_by(result) -> list:
 @router.get("/", response_model=List[KeyResponse])
 async def list_keys(
     tg_id: int = Query(..., description="Telegram user ID"),
-    _: None = Depends(verify_bot_secret),
     service_data: ServiceDataModel = Depends(get_service_data),
     pool: asyncpg.Pool = Depends(get_pool),
 ) -> List[KeyResponse]:
@@ -51,7 +54,6 @@ async def list_keys(
 @router.get("/{email:path}", response_model=KeyDetailResponse)
 async def get_key(
     email: str,
-    _: None = Depends(verify_bot_secret),
     service_data: ServiceDataModel = Depends(get_service_data),
     pool: asyncpg.Pool = Depends(get_pool),
 ) -> KeyDetailResponse:
@@ -97,7 +99,6 @@ async def get_key(
 @router.post("/create", response_model=KeyResponse)
 async def create_key(
     body: KeyCreateRequest,
-    _: None = Depends(verify_bot_secret),
     pool: asyncpg.Pool = Depends(get_pool),
     service_data: ServiceDataModel = Depends(get_service_data),
     cache: CacheService = Depends(get_cache),
@@ -138,7 +139,6 @@ async def create_key(
 async def create_trial_key(
     tg_id: int = Query(..., description="Telegram user ID"),
     gift_token: Optional[str] = Query(None, description="Optional gift token"),
-    _: None = Depends(verify_bot_secret),
     pool: asyncpg.Pool = Depends(get_pool),
     service_data: ServiceDataModel = Depends(get_service_data),
     cache: CacheService = Depends(get_cache),
@@ -193,7 +193,6 @@ async def create_trial_key(
 async def delete_key(
     email: str,
     tg_id: int = Query(..., description="Telegram user ID"),
-    _: None = Depends(verify_bot_secret),
     pool: asyncpg.Pool = Depends(get_pool),
     service_data: ServiceDataModel = Depends(get_service_data),
     cache: CacheService = Depends(get_cache),
@@ -232,7 +231,6 @@ async def delete_key(
 async def renew_key(
     email: str,
     body: KeyRenewRequest,
-    _: None = Depends(verify_bot_secret),
     pool: asyncpg.Pool = Depends(get_pool),
     service_data: ServiceDataModel = Depends(get_service_data),
     cache: CacheService = Depends(get_cache),

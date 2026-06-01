@@ -8,12 +8,15 @@ from app.dependencies import get_pool, get_service_data
 from app.schemas.tariffs import TariffResponse
 from services.core.data.service import ServiceDataModel
 
-router = APIRouter(prefix="/tariffs", tags=["tariffs"])
+router = APIRouter(
+    prefix="/tariffs",
+    tags=["tariffs"],
+    dependencies=[Depends(verify_bot_secret)],
+)
 
 
 @router.get("/", response_model=List[TariffResponse])
 async def list_tariffs(
-    _: None = Depends(verify_bot_secret),
     service_data: ServiceDataModel = Depends(get_service_data),
     pool: asyncpg.Pool = Depends(get_pool),
 ) -> List[TariffResponse]:
@@ -24,7 +27,6 @@ async def list_tariffs(
 @router.get("/{tariff_id}", response_model=TariffResponse)
 async def get_tariff(
     tariff_id: int,
-    _: None = Depends(verify_bot_secret),
     service_data: ServiceDataModel = Depends(get_service_data),
     pool: asyncpg.Pool = Depends(get_pool),
 ) -> TariffResponse:
