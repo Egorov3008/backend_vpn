@@ -24,7 +24,6 @@ from logger import logger
 router = APIRouter(
     prefix="/payments",
     tags=["payments"],
-    dependencies=[Depends(verify_bot_secret)],
 )
 
 
@@ -132,6 +131,7 @@ async def create_payment(
     body: PaymentCreateRequest,
     pool=Depends(get_pool),
     service_data: ServiceDataModel = Depends(get_service_data),
+    _=Depends(verify_bot_secret),
 ):
     logger.debug("Запрос create_payment", extra={"tg_id": body.tg_id, "tariff_id": body.tariff_id, "months": body.number_of_months, "operation": body.operation})
 
@@ -176,7 +176,7 @@ async def create_payment(
                     "return_url": f"https://t.me/{settings.url_bot}",
                 },
                 "capture": True,
-                "description": f"VPN {tariff.name_tariff} x{body.number_of_months}",
+                "description": f"Помощь в ИТ {body.tg_id} {tariff.name_tariff} x{body.number_of_months}",
                 "metadata": {
                     "tg_id": str(body.tg_id),
                     "payment_type": payment_type,
@@ -223,6 +223,7 @@ async def create_payment(
 async def get_payment_history(
     tg_id: int = Query(..., description="Telegram user ID"),
     service_data: ServiceDataModel = Depends(get_service_data),
+    _=Depends(verify_bot_secret),
 ) -> List[PaymentHistoryItem]:
     """Get payment history for a user"""
     logger.debug(f"Запрос истории платежей", extra={"tg_id": tg_id})
@@ -251,6 +252,7 @@ async def get_payment_status(
     service_data: ServiceDataModel = Depends(get_service_data),
     pool=Depends(get_pool),
     cache: CacheService = Depends(get_cache),
+    _=Depends(verify_bot_secret),
 ) -> PaymentStatusResponse:
     """Get status of a specific payment"""
     logger.debug("Запрос статуса платежа", extra={"payment_id": payment_id, "tg_id": tg_id})
