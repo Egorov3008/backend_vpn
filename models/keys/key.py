@@ -29,6 +29,7 @@ class Key:
     period: Optional[int] = None
     used_traffic: Optional[float] = 0
     server_info: Optional[Any] = None
+    notified_expired_grace: bool = False
     _name: str = "key"
 
     def __post_init__(self):
@@ -50,6 +51,7 @@ class Key:
             "notified_24h",
             "tariff_id",
             "limit_ip",
+            "notified_expired_grace",
         }
     )
 

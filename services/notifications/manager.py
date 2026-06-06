@@ -37,7 +37,12 @@ class FunnelManager:
         t0 = time.monotonic()
 
         if not self._in_sending_window():
-            logger.info("Уведомления: нерабочее время, пропуск цикла")
+            moscow_now = datetime.now(_MOSCOW_TZ)
+            logger.info(
+                "Уведомления: нерабочее время, пропуск цикла",
+                moscow_hour=moscow_now.hour,
+                window=list(SENDING_HOUR_WINDOW),
+            )
             return report
 
         # Load users and keys from cache (backend is source of truth)
@@ -86,6 +91,13 @@ class FunnelManager:
                     )
 
         report.duration_seconds = time.monotonic() - t0
+        if report.total_keys_segmented == 0:
+            logger.warning(
+                "Цикл уведомлений: ни один ключ не попал ни в один сегмент",
+                users=report.total_users,
+                blocked=sum(1 for u in users if u.is_blocked),
+                keys=len(all_keys),
+            )
         logger.info(
             "Цикл уведомлений завершён",
             users=report.total_users,

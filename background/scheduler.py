@@ -103,6 +103,7 @@ async def _run_notifications(service_data: ServiceDataModel, pool: asyncpg.Pool)
     from services.notifications.manager import FunnelManager
     from services.notifications.funnels.key_expiry_24h import KeyExpiryFunnel24h
     from services.notifications.funnels.key_expiry_10h import KeyExpiryFunnel10h
+    from services.notifications.funnels.key_expired_grace import KeyExpiredGraceFunnel
     from services.notifications.funnels.trial_reminder import TrialReminderFunnel
     from services.notifications.funnels.cold_lead import ColdLeadFunnel
     from services.notifications.funnels.referral_bonus import ReferralBonusFunnel
@@ -115,6 +116,7 @@ async def _run_notifications(service_data: ServiceDataModel, pool: asyncpg.Pool)
         funnel_manager = FunnelManager(service_data=service_data)
         funnel_manager.register(KeyExpiryFunnel24h(pool=pool, rate_limiter=rate_limiter))
         funnel_manager.register(KeyExpiryFunnel10h(pool=pool, rate_limiter=rate_limiter))
+        funnel_manager.register(KeyExpiredGraceFunnel(pool=pool, rate_limiter=rate_limiter))
         funnel_manager.register(TrialReminderFunnel(pool=pool, rate_limiter=rate_limiter))
         funnel_manager.register(ColdLeadFunnel(pool=pool, rate_limiter=rate_limiter))
         funnel_manager.register(ReferralBonusFunnel(pool=pool, rate_limiter=rate_limiter))

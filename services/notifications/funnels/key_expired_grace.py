@@ -1,4 +1,4 @@
-"""Воронка уведомлений об истечении ключей (за 24 часа до окончания)."""
+"""Воронка уведомлений об истёкших ключах (grace-период)."""
 
 from datetime import datetime, timedelta
 from typing import Optional
@@ -11,13 +11,18 @@ from services.notifications.rate_limiter import RateLimiter
 from services.notifications.dedupe import NotificationDedupeCache
 from bot_project import bot
 
-_DEDUPE_TTL = timedelta(hours=25)
+_DEDUPE_TTL = timedelta(hours=24)
 
 
-class KeyExpiryFunnel24h:
-    """Воронка: уведомление об истечении ключа за 24 часа."""
+class KeyExpiredGraceFunnel:
+    """Воронка: «ваш ключ истёк N часов назад» — повтор не чаще 1 раза в 24ч.
 
-    funnel_id = "key_expiry_24h"
+    Покрывает ключи, чей expiry_time уже в прошлом и которые не попали
+    в окна EXPIRING_24H/EXPIRING_10H (например, после рестарт-шторма scheduler
+    или когда ключ пролежал в кэше дольше 24ч).
+    """
+
+    funnel_id = "key_expired_grace"
 
     def __init__(self, pool, rate_limiter: RateLimiter) -> None:
         self._pool = pool
@@ -30,7 +35,7 @@ class KeyExpiryFunnel24h:
     async def process(self, ctx: NotificationContext) -> NotificationResult:
         result = NotificationResult(tg_id=ctx.user.tg_id, funnel_id=self.funnel_id)
         for key in ctx.segment_keys:
-            if key.notified_24h:
+            if getattr(key, "notified_expired_grace", False):
                 result.skipped += 1
                 continue
             dedupe_id = f"{self.funnel_id}:{key.email}"
@@ -56,12 +61,12 @@ class KeyExpiryFunnel24h:
     @staticmethod
     def _build_text(key: Key) -> str:
         expiry_dt = datetime.fromtimestamp(key.expiry_time / 1000)
-        hours_left = max(0, int((expiry_dt - datetime.now()).total_seconds() // 3600))
+        hours_ago = max(0, int((datetime.now() - expiry_dt).total_seconds() // 3600))
         return (
-            f"⚠️ <b>Ваш ключ истекает через {hours_left} ч.</b>\n"
+            f"⛔ <b>Ваш ключ истёк {hours_ago} ч. назад</b>\n"
             f"📧 {key.email}\n"
-            f"⏳ {expiry_dt:%d.%m.%Y %H:%M}\n\n"
-            "Продлите доступ, чтобы не потерять подключение к VPN."
+            f"⏳ Истёк: {expiry_dt:%d.%m.%Y %H:%M}\n\n"
+            "Продлите доступ — подключение восстановится сразу после оплаты."
         )
 
     @staticmethod
@@ -87,20 +92,19 @@ class KeyExpiryFunnel24h:
             return "error"
 
     async def _mark_notified(self, key: Key) -> None:
-        key.notified_24h = True
-        # No direct DB update here — backend scheduler will update via API or cache sync
+        key.notified_expired_grace = True
 
     async def _persist_flag(self, key: Key) -> None:
-        """Записать notified_24h=true в БД (выживает после sync_cache)."""
+        """Записать notified_expired_grace=true в БД (выживает после sync_cache)."""
         try:
             async with self._pool.acquire() as conn:
                 await conn.execute(
-                    "UPDATE keys SET notified_24h = TRUE WHERE email = $1",
+                    "UPDATE keys SET notified_expired_grace = TRUE WHERE email = $1",
                     key.email,
                 )
         except Exception as exc:
             logger.error(
-                "Не удалось записать notified_24h в БД",
+                "Не удалось записать notified_expired_grace в БД",
                 email=key.email,
                 error=str(exc),
             )

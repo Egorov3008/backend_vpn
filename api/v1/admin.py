@@ -40,6 +40,30 @@ async def get_stats(
     return {"total_users": len(users), **stats}
 
 
+@router.get("/scheduler/status")
+async def admin_scheduler_status(
+    service_data: ServiceDataModel = Depends(get_service_data),
+):
+    """Состояние scheduler и сегменты ключей (для админ-панели)."""
+    from services.notifications.segmentation import KeySegmenter, KeySegment
+    users = await service_data.users.get_all()
+    keys = await service_data.keys.get_all()
+    seg = KeySegmenter()
+    seg_counts = {
+        "EXPIRING_10H": sum(1 for k in keys if seg.filter_keys([k], KeySegment.EXPIRING_10H)),
+        "EXPIRING_24H": sum(1 for k in keys if seg.filter_keys([k], KeySegment.EXPIRING_24H)),
+        "EXPIRED":      sum(1 for k in keys if seg.filter_keys([k], KeySegment.EXPIRED)),
+        "TRIAL":        sum(1 for k in keys if seg.filter_keys([k], KeySegment.TRIAL)),
+    }
+    return {
+        "container_alive": True,
+        "users": len(users),
+        "blocked": sum(1 for u in users if u.is_blocked),
+        "keys": len(keys),
+        "segment_counts": seg_counts,
+    }
+
+
 @router.get("/users", response_model=List[UserResponse])
 async def list_users(
     service_data: ServiceDataModel = Depends(get_service_data),

@@ -20,6 +20,7 @@ class KeyExpiryFunnel10h:
     funnel_id = "key_expiry_10h"
 
     def __init__(self, pool, rate_limiter: RateLimiter) -> None:
+        self._pool = pool
         self._rate_limiter = rate_limiter
         self._dedupe = NotificationDedupeCache(pool)
 
@@ -45,6 +46,7 @@ class KeyExpiryFunnel10h:
                 result.sent += 1
                 await self._dedupe.mark_sent(dedupe_id, ctx.user.tg_id, _DEDUPE_TTL)
                 await self._mark_notified(key)
+                await self._persist_flag(key)
             elif send_result == "blocked":
                 result.failed_blocked += 1
             else:
@@ -86,3 +88,18 @@ class KeyExpiryFunnel10h:
 
     async def _mark_notified(self, key: Key) -> None:
         key.notified_10h = True
+
+    async def _persist_flag(self, key: Key) -> None:
+        """Записать notified_10h=true в БД (выживает после sync_cache)."""
+        try:
+            async with self._pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE keys SET notified_10h = TRUE WHERE email = $1",
+                    key.email,
+                )
+        except Exception as exc:
+            logger.error(
+                "Не удалось записать notified_10h в БД",
+                email=key.email,
+                error=str(exc),
+            )
