@@ -407,10 +407,13 @@ async def admin_get_gift(
         "sender_tg_id": gift.sender_tg_id,
         "tariff_id": gift.tariff_id,
         "created_at": gift.created_at.isoformat() if gift.created_at else None,
-        "redeemed_at": gift.redeemed_at.isoformat() if gift.redeemed_at else None,
+        # `used_at` в модели — это момент активации подарка (аналог redeemed_at);
+        # отдаём оба имени для совместимости с клиентом, который ожидает redeemed_at.
+        "redeemed_at": gift.used_at.isoformat() if gift.used_at else None,
+        "used_at": gift.used_at.isoformat() if gift.used_at else None,
         "recipient_tg_id": gift.recipient_tg_id,
-        "recipient_email": gift.recipient_email,
-        "expiry_date": gift.expiry_date.isoformat() if gift.expiry_date else None,
+        # В БД колонка `email` хранит email получателя (аналог recipient_email).
+        "recipient_email": gift.email,
     }
 
 
@@ -430,10 +433,11 @@ async def admin_list_gifts(
                 "sender_tg_id": g.sender_tg_id,
                 "tariff_id": g.tariff_id,
                 "created_at": g.created_at.isoformat() if g.created_at else None,
-                "redeemed_at": g.redeemed_at.isoformat() if g.redeemed_at else None,
+                # См. замечание про `used_at` ↔ `redeemed_at` в admin_get_gift.
+                "redeemed_at": g.used_at.isoformat() if g.used_at else None,
+                "used_at": g.used_at.isoformat() if g.used_at else None,
                 "recipient_tg_id": g.recipient_tg_id,
-                "recipient_email": g.recipient_email,
-                "expiry_date": g.expiry_date.isoformat() if g.expiry_date else None,
+                "recipient_email": g.email,
             }
             for g in gifts
         ]
