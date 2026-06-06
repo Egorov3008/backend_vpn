@@ -482,7 +482,8 @@ class XUISession:
                 "subId": key_details.email,
                 "enable": True,
             })
-            await self._standalone.reset_traffic(key_details.email)
+            # reset_traffic НЕ вызываем — 3x-ui обнуляет totalGB и expiryTime (баг #6cx7ah)
+            # Сброс трафика происходит через БД (used_traffic=0) после продления
 
             logger.info("Ключ клиента продлён", extra={"email": key_details.email})
             return True
