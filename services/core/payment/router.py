@@ -8,7 +8,15 @@ from services.core.referral.bonus_service import ReferralBonusService
 
 
 class PaymentRouter:
-    """Маршрутизация платежа на нужный обработчик."""
+    """
+    Маршрутизация платежа на нужный обработчик.
+
+    Orchestrates payment processing:
+    1. Load payment data
+    2. Route to creation or renewal service
+    3. Send notifications
+    4. Handle referral bonuses
+    """
 
     def __init__(
         self,
@@ -22,8 +30,13 @@ class PaymentRouter:
         self.renewal_service = renewal_service
         self.bonus_service = bonus_service
 
-    async def route(self, payment_id: str):
-        """Основной метод маршрутизации."""
+    async def route(self, payment_id: str) -> None:
+        """
+        Обработать платеж и отправить уведомления.
+
+        Args:
+            payment_id: ID платежа для обработки
+        """
         logger.info(
             "Начало обработки платежа",
             payment_id=payment_id,
@@ -31,7 +44,13 @@ class PaymentRouter:
 
         logger.debug("Загрузка данных платежа из БД", payment_id=payment_id)
         await self.processor.load_payment_data(payment_id)
-        logger.debug("Данные платежа загружены", payment_id=payment_id, tg_id=self.processor.tg_id, status=self.processor.status, amount=self.processor.amount)
+        logger.debug(
+            "Данные платежа загружены",
+            payment_id=payment_id,
+            tg_id=self.processor.tg_id,
+            status=self.processor.status,
+            amount=self.processor.amount,
+        )
 
         # Идемпотентность: пропускаем уже обработанный платёж
         if self.processor.status == "succeeded":
@@ -44,7 +63,10 @@ class PaymentRouter:
             )
             return
 
-        logger.debug("Извлечение операции из payment_type", payment_type=self.processor.payment_type)
+        logger.debug(
+            "Извлечение операции из payment_type",
+            payment_type=self.processor.payment_type,
+        )
         operation, data = self.processor.extract_operation()
         logger.debug("Операция извлечена", operation=operation, data=data)
 
@@ -56,9 +78,19 @@ class PaymentRouter:
                     tariff_id=data,
                     tg_id=self.processor.tg_id,
                 )
-                logger.debug("Запуск KeyCreationService", tariff_id=data, tg_id=self.processor.tg_id)
-                await self.creation_service.process(tariff_id=data)
+                logger.debug(
+                    "Запуск KeyCreationService", tariff_id=data, tg_id=self.processor.tg_id
+                )
+
+                # Process creation
+                key_data = await self.creation_service.process(tariff_id=data)
+
+                # Send notification
+                if key_data:
+                    await self.creation_service.send_notification(key_data)
+
                 logger.debug("KeyCreationService завершен", tariff_id=data)
+
             elif operation == "renew_key":
                 logger.info(
                     "Обработка операции продления ключа",
@@ -67,9 +99,23 @@ class PaymentRouter:
                     tg_id=self.processor.tg_id,
                     amount=self.processor.amount,
                 )
-                logger.debug("Запуск KeyRenewalService", email=data, tg_id=self.processor.tg_id)
-                await self.renewal_service.process(email=data)
+                logger.debug(
+                    "Запуск KeyRenewalService", email=data, tg_id=self.processor.tg_id
+                )
+
+                # Process renewal
+                renewal_data = await self.renewal_service.process(email=data)
+
+                # Send notification
+                if renewal_data:
+                    await self.renewal_service.send_notification(
+                        updated_key=renewal_data["updated_key"],
+                        new_expiry=renewal_data["new_expiry"],
+                        traffic_gb=renewal_data["traffic_gb"],
+                    )
+
                 logger.debug("KeyRenewalService завершен", email=data)
+
             else:
                 logger.error(
                     "Неизвестный тип операции",
@@ -78,6 +124,7 @@ class PaymentRouter:
                     data=data,
                 )
                 raise ValueError(f"Неизвестный тип операции: {operation}")
+
         except Exception as e:
             logger.error(
                 "Ошибка при обработке платежа (статус остается pending для retry)",
@@ -89,9 +136,13 @@ class PaymentRouter:
             )
             raise
 
-        logger.debug("Обновление статуса платежа на succeeded", payment_id=payment_id)
+        logger.debug(
+            "Обновление статуса платежа на succeeded", payment_id=payment_id
+        )
         await self.processor.update_payment(payment_id)
-        logger.debug("Статус платежа обновлен", payment_id=payment_id, new_status="succeeded")
+        logger.debug(
+            "Статус платежа обновлен", payment_id=payment_id, new_status="succeeded"
+        )
 
         logger.info(
             "Платеж успешно обработан",
@@ -102,7 +153,10 @@ class PaymentRouter:
         )
 
         # Списываем реферальную скидку с баланса пользователя
-        if self.processor.referral_discount and self.processor.referral_discount > 0:
+        if (
+            self.processor.referral_discount
+            and self.processor.referral_discount > 0
+        ):
             try:
                 user = await self.processor._model_service.users.get_data(
                     self.processor.tg_id, self.processor._conn
@@ -112,7 +166,8 @@ class PaymentRouter:
                         max(0.0, user.balance - self.processor.referral_discount), 2
                     )
                     await self.processor._model_service.users.update(
-                        self.processor._conn, user,
+                        self.processor._conn,
+                        user,
                         search_data={"tg_id": user.tg_id},
                     )
                     logger.info(

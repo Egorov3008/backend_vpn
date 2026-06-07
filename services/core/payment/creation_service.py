@@ -1,31 +1,40 @@
-from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiogram.types import InlineKeyboardButton
+from typing import Optional, Dict, Any
 
-from bot_project import bot
-from config import SUPPORT_CHAT_URL
 from logger import logger
 
 from services.core.keys.utils.create_key import CreateKey
 from services.core.payment.processor import PaymentProcessor
+from services.core.notifications.protocols import INotifier
 
 
 class KeyCreationService:
-    """Сервис создания ключа после оплаты."""
+    """
+    Сервис создания ключа после оплаты.
 
-    def __init__(self, processor: PaymentProcessor, create_key: CreateKey):
+    Использует INotifier для отправки уведомлений — не зависит от aiogram.
+    Это позволяет тестировать сервис с моком notifier без инициализации бота.
+    """
+
+    def __init__(
+        self,
+        processor: PaymentProcessor,
+        create_key: CreateKey,
+        notifier: Optional[INotifier] = None,
+    ):
         self.processor = processor
         self.create_key = create_key
-        self.builder = InlineKeyboardBuilder()
-        if SUPPORT_CHAT_URL:
-            self.builder.add(
-                InlineKeyboardButton(text="Техническая поддержка", url=SUPPORT_CHAT_URL),
-            )
-        self.builder.add(
-            InlineKeyboardButton(text="Личный кабинет", callback_data="profile")
-        )
+        self.notifier = notifier
 
-    async def process(self, tariff_id: str = None):
-        """Создаёт ключ и отправляет пользователю."""
+    async def process(self, tariff_id: str = None) -> Optional[Dict[str, Any]]:
+        """
+        Создаёт ключ и отправляет уведомление пользователю.
+
+        Args:
+            tariff_id: ID тарифа (опционально, извлекается из payment_type если не указан)
+
+        Returns:
+            key_data: Данные созданного ключа или None при ошибке
+        """
         try:
             if tariff_id is None:
                 operation, tariff_id = self.processor.extract_operation()
@@ -67,6 +76,8 @@ class KeyCreationService:
                 tariff_id=tariff_id,
             )
 
+            return key_data
+
         except Exception as e:
             logger.error(
                 "Ошибка при создании ключа",
@@ -77,29 +88,31 @@ class KeyCreationService:
             )
             raise
 
-        # Отправка сообщения — не критична для платёжного потока
+    async def send_notification(self, key_data: Dict[str, Any]) -> None:
+        """
+        Отправить уведомление о созданном ключе.
+
+        Выносится отдельно чтобы позволить вызывающему коду решить,
+        нужно ли отправлять уведомление и когда.
+
+        Args:
+            key_data: Данные ключа от create_key.proces()
+        """
+        if self.notifier is None:
+            logger.debug(
+                "Notifier не настроен, пропускаем отправку уведомления",
+                tg_id=self.processor.tg_id,
+            )
+            return
+
         try:
-            await self._send_key_message(key_data)
+            await self.notifier.send_key_created(
+                tg_id=self.processor.tg_id,
+                key_data=key_data,
+            )
         except Exception as e:
             logger.warning(
-                "Не удалось отправить сообщение с ключом",
+                "Не удалось отправить уведомление о созданном ключе",
                 tg_id=self.processor.tg_id,
                 error=str(e),
             )
-
-    async def _send_key_message(self, key_data):
-        """Отправляет сообщение с ключом."""
-        message = (
-            f"<b>Ссылка внизу - твой новый ключ! Скопируй его:</b>\n\n"
-            f"{key_data.get('public_link', 'Недоступно')}\n\n"
-            f"- Теперь перейди в приложение \n"
-            f"- Нажми ➕!\n"
-            f"- Далее ➡️ 'Добавить из буфера обмена'\n\n"
-            f"⏳ Осталось дней: {key_data.get('days', 'Неизвестно')} 📅\n\n"
-            f"<b>-Подробная инструкция внизу</b> 👇"
-        )
-        await bot.send_message(
-            chat_id=self.processor.tg_id,
-            text=message,
-            reply_markup=self.builder.as_markup(),
-        )

@@ -1,4 +1,5 @@
 import asyncpg
+from typing import Optional
 
 from client import XUISession
 from database.service import DataService
@@ -16,6 +17,7 @@ from services.core.payment.creation_service import KeyCreationService
 from services.core.payment.processor import PaymentProcessor
 from services.core.payment.renewal_service import KeyRenewalService
 from services.core.payment.router import PaymentRouter
+from services.core.notifications.protocols import INotifier
 
 
 def build_key_services(
@@ -62,12 +64,33 @@ def build_payment_router(
     service_data: ServiceDataModel,
     cache: CacheService,
     data_service: DataService,
+    notifier: Optional[INotifier] = None,
 ) -> PaymentRouter:
-    create_key, key_renewal, xui = build_key_services(pool, service_data, cache, data_service)
+    """
+    Build payment router with all dependencies.
+
+    Args:
+        pool: Database connection pool
+        service_data: Service data model
+        cache: Cache service
+        data_service: Data service
+        notifier: Optional notification service for sending user messages.
+                  If None, services will not send notifications.
+
+    Returns:
+        PaymentRouter configured with all services
+    """
+    create_key, key_renewal, xui = build_key_services(
+        pool, service_data, cache, data_service
+    )
 
     processor = PaymentProcessor(conn=pool, model_service=service_data, cache=cache)
-    creation_svc = KeyCreationService(processor=processor, create_key=create_key)
-    renewal_svc = KeyRenewalService(processor=processor, key_manager=key_renewal)
+    creation_svc = KeyCreationService(
+        processor=processor, create_key=create_key, notifier=notifier
+    )
+    renewal_svc = KeyRenewalService(
+        processor=processor, key_manager=key_renewal, notifier=notifier
+    )
 
     return PaymentRouter(
         processor=processor,
