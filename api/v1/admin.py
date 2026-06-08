@@ -621,10 +621,30 @@ async def admin_sync(
     1. Full cache reload from PostgreSQL
     2. Panel ↔ DB sync + traffic update
     """
-    from background.scheduler import _sync_cache, _sync_panel
+    import time
+    from background.scheduler import _sync_cache, _sync_panel, _sync_in_progress
+
+    sync_start = time.time()
+    logger.info("Ручная синхронизация запущена через admin/sync")
+
+    # Проверка на уже запущенную синхронизацию
+    if _sync_in_progress:
+        logger.warning("Синхронизация уже запущена — отклонение ручного запроса")
+        raise HTTPException(
+            status_code=409,
+            detail={"status": "conflict", "reason": "sync_already_in_progress"},
+        )
 
     cache_result = await _sync_cache(service_data, pool)
     panel_result = await _sync_panel(service_data, pool)
+
+    total_time = time.time() - sync_start
+    logger.info(
+        "Ручная синхронизация завершена",
+        total_time=f"{total_time:.2f}s",
+        cache_status=cache_result.get("status"),
+        panel_status=panel_result.get("status")
+    )
 
     has_error = (
         (cache_result or {}).get("status") == "error"
@@ -640,5 +660,6 @@ async def admin_sync(
         "status": "success",
         "cache": cache_result,
         "panel": panel_result,
+        "total_time": f"{total_time:.2f}s",
     }
 

@@ -101,11 +101,15 @@ class XUIFetcher:
                 )
                 continue
 
-        # Фильтруем только валидных клиентов
+        # Фильтруем только валидных клиентов.
+        # ВАЖНО: tg_id может быть 0 (например, когда на панели клиент потерял
+        # привязку к пользователю) — такие клиенты НЕЛЬЗЯ отбрасывать,
+        # иначе синхронизатор посчитает их удалёнными с панели и сотрёт
+        # из БД как orphaned (см. баг с пользователем 397349989 / email 6cx7ah).
         valid_clients = [
             client
             for client in all_clients
-            if client.email and isinstance(client.tg_id, int) and client.tg_id > 0
+            if client.email and isinstance(client.tg_id, int)
         ]
 
         logger.info(
