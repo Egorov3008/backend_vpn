@@ -24,6 +24,9 @@ apscheduler>=3.10.0
 # Retry logic (used in client.py XUISession)
 tenacity>=8.0.0
 
+# Circuit breaker
+pybreaker>=1.0.0
+
 # Prometheus metrics
 prometheus-client>=0.20.0
 

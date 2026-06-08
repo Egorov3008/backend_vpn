@@ -8,6 +8,7 @@ from multiprocessing import AuthenticationError
 from typing import Optional, Any
 
 import httpx
+import pybreaker
 from tenacity import stop, wait, retry, retry_if_exception, RetryCallState
 
 from core.utils import filter_by_method_signature
@@ -23,6 +24,15 @@ from services.metrics.registry import (
     xui_api_retries_total,
 )
 from config import settings
+
+# Circuit breaker for XUI API calls
+# Fails after 5 consecutive failures, resets after 30 seconds
+_xui_circuit_breaker = pybreaker.CircuitBreaker(
+    fail_max=5,
+    reset_timeout=30,
+    success_threshold=1,
+    name="xui_api",
+)
 
 # Метрики специально для login
 xui_login_duration = xui_api_duration.labels(method="login")
@@ -341,10 +351,12 @@ class XUISession:
             t0 = time.monotonic()
             xui_login_calls_total.inc()
             try:
-                await asyncio.wait_for(
-                    self._standalone._ensure_auth(),
-                    timeout=max(self.login_timeout, 35.0)
-                )
+                async def _auth():
+                    await asyncio.wait_for(
+                        self._standalone._ensure_auth(),
+                        timeout=max(self.login_timeout, 35.0)
+                    )
+                await _xui_circuit_breaker.call_async(_auth)
                 login_duration = time.monotonic() - t0
                 self._is_authenticated = True
                 xui_login_duration.observe(login_duration)
@@ -358,6 +370,10 @@ class XUISession:
                         "Login выполнен успешно",
                         extra={"duration_sec": round(login_duration, 3)}
                     )
+            except pybreaker.CircuitBreakerError:
+                xui_api_errors_total.labels(method="login", error_type="CircuitBreakerError").inc()
+                logger.error("XUI circuit breaker open - skipping login")
+                raise
             except asyncio.TimeoutError:
                 xui_api_errors_total.labels(method="login", error_type="TimeoutError").inc()
                 logger.error(
@@ -414,12 +430,18 @@ class XUISession:
                 "comment": "",
                 "reset": 0,
             }
-            await self._standalone.add(client_data, inbound_ids)
+            async def _add():
+                return await self._standalone.add(client_data, inbound_ids)
+            await _xui_circuit_breaker.call_async(_add)
             logger.info(
                 "Клиент успешно добавлен", extra={"email": email, "client_id": client_id}
             )
             return True
 
+        except pybreaker.CircuitBreakerError:
+            xui_api_errors_total.labels(method="add_client", error_type="CircuitBreakerError").inc()
+            logger.error("XUI circuit breaker open - add_client skipped", extra={"email": email})
+            return False
         except Exception as e:
             xui_api_errors_total.labels(
                 method="add_client", error_type=type(e).__name__
