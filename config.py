@@ -1,10 +1,13 @@
 import ast
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from shared.config import core_settings, REFERRAL_BONUS_PERCENTAGES  # noqa: F401
 
 
 def _parse_list(raw: str | None, default: list | None = None) -> list:
@@ -27,7 +30,7 @@ _env_file = _env_path
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=str(_env_file), extra="ignore", populate_by_name=True)
 
-    # Core
+    # Core — sourced from shared.config.core_settings where possible
     database_url: str = ""
     bot_secret_key: str = "changeme"
     # Single-use registration token for web form registration invites
@@ -46,7 +49,7 @@ class Settings(BaseSettings):
     xui_server_id: int = Field(default=1, alias="XUI_SERVER_ID")
     xui_skip_ssl_verify: bool = Field(default=False, alias="XUI_SKIP_SSL_VERIFY")
 
-    # YooKassa
+    # YooKassa — values fall back to shared core_settings if .env is missing them
     yookassa_shop_id: str = ""
     yookassa_secret_key: str = ""
     disable_webhook_ip_check: bool = False
@@ -78,8 +81,9 @@ settings = Settings()
 # ============================================================
 # Module-level compat vars — used by copied bot modules via
 # `from config import DATABASE_URL` pattern (flat imports)
+# Source priority: env-loaded Settings > shared.core_settings
 # ============================================================
-DATABASE_URL: str = settings.database_url
+DATABASE_URL: str = settings.database_url or core_settings.database_url
 API_URL: str = settings.api_url
 XUI_SUBSCRIPTION_URL: str = settings.xui_subscription_url or settings.api_url
 ADMIN_USERNAME: str = settings.admin_username
@@ -87,8 +91,8 @@ ADMIN_PASSWORD: str = settings.admin_password
 XUI_WEB_BASE_PATH: str = settings.xui_web_base_path
 XUI_SERVER_ID: int = settings.xui_server_id
 XUI_SKIP_SSL_VERIFY: bool = settings.xui_skip_ssl_verify
-YOOKASSA_SHOP_ID: str = settings.yookassa_shop_id
-YOOKASSA_SECRET_KEY: str = settings.yookassa_secret_key
+YOOKASSA_SHOP_ID: str = settings.yookassa_shop_id or core_settings.yookassa_shop_id
+YOOKASSA_SECRET_KEY: str = settings.yookassa_secret_key or core_settings.yookassa_secret_key
 DISABLE_WEBHOOK_IP_CHECK: bool = settings.disable_webhook_ip_check
 BOT_TOKEN: str = settings.bot_token
 BOT_NAME: str = settings.bot_name
@@ -105,11 +109,8 @@ ADMIN_ID: list = _parse_list(settings.admin_id_raw, [0])
 AVAILABLE_RATES_LIST: list = _parse_list(settings.available_rates_raw, [])
 LIST_AVAILABLE_CONNECTIONS: list = _parse_list(settings.available_connections_raw, [])
 
-REFERRAL_BONUS_PERCENTAGES: dict = {
-    "1": "0.10",
-    "2": "0.05",
-    "3": "0.02",
-}
+# Referral bonus percentages — single source of truth in shared.config
+REFERRAL_BONUS_PERCENTAGES: dict = REFERRAL_BONUS_PERCENTAGES
 
 # Aliases expected by some bot modules
 WEBHOOK_HOST: str = os.getenv("WEBHOOK_HOST", "0.0.0.0")
