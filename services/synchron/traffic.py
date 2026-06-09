@@ -70,10 +70,10 @@ class TrafficUpdater:
                         else:
                             text = await response.text()
                             return client.email, {
-                                "headers": dict(response.headers),  # ← добавить заголовки
+                                "headers": dict(response.headers),
                                 "content_type": content_type,
                                 "status_code": response.status,
-                                "text": await response.text(),
+                                "text": text,
                             }
                 except Exception as e:
                     logger.debug(
