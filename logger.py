@@ -62,14 +62,18 @@ class InterceptHandler(logging.Handler):
 
 
 class StructuredLogger:
-    def _log(self, level: str, message: str, **kwargs: Any) -> None:
+    def _log(self, level: str, message: str, exc_info: bool = False, **kwargs: Any) -> None:
         trace_id = get_trace_id()
         extra = {
             "service": "backend",
             **({"trace_id": trace_id} if trace_id else {}),
             **_mask_sensitive(kwargs),
         }
-        _loguru.opt(depth=2).bind(**extra).log(level.upper(), message)
+        # loguru uses .opt(exception=True) to attach the current frame's
+        # traceback to the formatted log record — passing ``exc_info`` as a
+        # bind kwarg is a silent no-op.
+        sink = _loguru.opt(depth=2, exception=exc_info).bind(**extra)
+        sink.log(level.upper(), message)
 
     def debug(self, message: str, **kwargs: Any) -> None:
         self._log("DEBUG", message, **kwargs)
@@ -80,8 +84,8 @@ class StructuredLogger:
     def warning(self, message: str, **kwargs: Any) -> None:
         self._log("WARNING", message, **kwargs)
 
-    def error(self, message: str, **kwargs: Any) -> None:
-        self._log("ERROR", message, **kwargs)
+    def error(self, message: str, exc_info: bool = False, **kwargs: Any) -> None:
+        self._log("ERROR", message, exc_info=exc_info, **kwargs)
 
     def critical(self, message: str, **kwargs: Any) -> None:
         self._log("CRITICAL", message, **kwargs)
@@ -90,7 +94,7 @@ class StructuredLogger:
         self._log("SUCCESS", message, **kwargs)
 
     def exception(self, message: str, **kwargs: Any) -> None:
-        self._log("ERROR", message, **kwargs)
+        self._log("ERROR", message, exc_info=True, **kwargs)
 
 
 logger = StructuredLogger()

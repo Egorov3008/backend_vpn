@@ -83,11 +83,16 @@ class FunnelManager:
                     report.total_keys_segmented += len(segment_keys)
 
                 except Exception as exc:
+                    # exc_info=True attaches the full traceback so we can
+                    # diagnose the funnel failure from errors.log without
+                    # having to reproduce the cycle.
                     logger.error(
                         "Ошибка в воронке",
                         funnel_id=funnel.funnel_id,
                         tg_id=user.tg_id,
+                        error_type=type(exc).__name__,
                         error=str(exc),
+                        exc_info=True,
                     )
 
         report.duration_seconds = time.monotonic() - t0
