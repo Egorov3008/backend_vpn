@@ -622,21 +622,22 @@ async def admin_sync(
     2. Panel ↔ DB sync + traffic update
     """
     import time
-    from background.scheduler import _sync_cache, _sync_panel, _sync_in_progress
+    from background.scheduler import SyncScheduler
 
     sync_start = time.time()
     logger.info("Ручная синхронизация запущена через admin/sync")
 
     # Проверка на уже запущенную синхронизацию
-    if _sync_in_progress:
+    scheduler = SyncScheduler(service_data, pool)
+    if scheduler.is_sync_in_progress:
         logger.warning("Синхронизация уже запущена — отклонение ручного запроса")
         raise HTTPException(
             status_code=409,
             detail={"status": "conflict", "reason": "sync_already_in_progress"},
         )
 
-    cache_result = await _sync_cache(service_data, pool)
-    panel_result = await _sync_panel(service_data, pool)
+    cache_result = await scheduler.sync_cache()
+    panel_result = await scheduler._sync_panel()
 
     total_time = time.time() - sync_start
     logger.info(

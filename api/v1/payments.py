@@ -21,11 +21,21 @@ from database.service import DataService
 from models import PaymentModel
 from services.cache.service import CacheService
 from services.core.data.service import ServiceDataModel
+from services.core.notifications import TelegramBotNotifier
 from logger import logger
 
 router = APIRouter(
     prefix="/payments",
     tags=["payments"],
+)
+
+# Singleton notifier — uses the same bot_token and support URL as the
+# backend bot_project wrapper. TelegramBotNotifier is stateless and safe
+# to share across requests. Created once at import time so the webhook
+# and the status-check fallback can both send user notifications.
+_NOTIFIER = TelegramBotNotifier(
+    bot_token=settings.bot_token,
+    support_chat_url=settings.support_chat_url,
 )
 
 
@@ -190,7 +200,9 @@ async def payment_webhook(
     logger.debug("Начало обработки webhook платежа", extra={"payment_id": payment_id})
 
     data_service = DataService()
-    payment_router = build_payment_router(pool, service_data, cache, data_service)
+    payment_router = build_payment_router(
+        pool, service_data, cache, data_service, notifier=_NOTIFIER
+    )
     await payment_router.route(payment_id)
 
     logger.info("Webhook платежа обработан", extra={"payment_id": payment_id})
@@ -359,7 +371,11 @@ async def create_payment(
         )
         logger.debug("YooKassa вернул платёж", extra={"payment_id": yk_payment.id, "status": yk_payment.status})
     except Exception as e:
-        logger.error("YooKassa payment creation failed", extra={"error": str(e)})
+        logger.error(
+            "YooKassa payment creation failed",
+            extra={"error": str(e)},
+            exc_info=True,
+        )
         raise HTTPException(status_code=502, detail="Payment provider error")
 
     payment_id = yk_payment.id
@@ -469,7 +485,9 @@ async def get_payment_status(
                     try:
                         from database.service import DataService
                         data_service = DataService()
-                        payment_router = build_payment_router(pool, service_data, cache, data_service)
+                        payment_router = build_payment_router(
+                            pool, service_data, cache, data_service, notifier=_NOTIFIER
+                        )
                         await payment_router.route(payment_id)
                     except Exception as e:
                         logger.error("Ошибка при обработке платежа после YooKassa подтверждения", extra={"payment_id": payment_id, "error": str(e), "error_type": type(e).__name__}, exc_info=True)

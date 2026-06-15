@@ -17,6 +17,7 @@ class PaymentCreateRequest(BaseModel):
     email: Optional[str] = None
     customer_email: Optional[str] = None  # For fiscal receipt
     amount: Optional[float] = None  # Override tariff price (e.g. after discounts)
+    referral_discount: Optional[float] = None  # Two-sided referral discount passed from bot
 
 
 class PaymentCreateResponse(BaseModel):
@@ -44,3 +45,16 @@ class PaymentStatusResponse(BaseModel):
     def set_processed(self):
         self.processed = self.status == "succeeded"
         return self
+
+
+class PaymentCalculateRequest(BaseModel):
+    tg_id: int
+    tariff_id: int
+    number_of_months: int = 1
+    operation: Literal["create_key", "renew_key"] = "create_key"
+
+
+class PaymentCalculateResponse(BaseModel):
+    amount: float
+    discount: float = 0.0
+    final_amount: float

@@ -34,6 +34,37 @@ async def test_webhook_payment_succeeded_calls_router(api_client, mock_service_d
 
 
 @pytest.mark.asyncio
+async def test_webhook_passes_notifier_to_router(api_client, mock_service_data):
+    """Regression: webhook must pass a TelegramBotNotifier so the user
+    actually receives a Telegram message after the key is created."""
+    with patch("api.v1.payments.build_payment_router") as mock_factory:
+        mock_router = MagicMock()
+        mock_router.route = AsyncMock(return_value=None)
+        mock_factory.return_value = mock_router
+
+        response = await api_client.post("/api/v1/payments/webhook", json={
+            "type": "notification",
+            "event": "payment.succeeded",
+            "object": {"id": "pay_abc123"},
+        })
+
+    assert response.status_code == 200
+    # build_payment_router must be called with a notifier=... kwarg
+    # and the notifier must not be None — otherwise send_notification
+    # in KeyCreationService silently no-ops.
+    assert mock_factory.call_args is not None
+    kwargs = mock_factory.call_args.kwargs
+    assert "notifier" in kwargs, (
+        "build_payment_router was called without a notifier — "
+        "the Telegram notification will be silently skipped"
+    )
+    assert kwargs["notifier"] is not None, (
+        "build_payment_router was called with notifier=None — "
+        "the Telegram notification will be silently skipped"
+    )
+
+
+@pytest.mark.asyncio
 async def test_webhook_missing_payment_id_returns_400(api_client):
     response = await api_client.post("/api/v1/payments/webhook", json={
         "type": "notification",
