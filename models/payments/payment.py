@@ -13,6 +13,7 @@ class PaymentModel:
     number_of_months: int = 1
     discount_percent: int = 0
     referral_discount: float = 0.0
+    balance_discount: float = 0.0
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     # id — SERIAL в БД, генерируется автоматически; хранится в экземпляре при чтении,
     # но исключается из INSERT через _DB_FIELDS whitelist (как в Key._DB_FIELDS)
@@ -21,7 +22,7 @@ class PaymentModel:
 
     # Поля, реально существующие в таблице payments; id исключён — он SERIAL/генерируется БД
     _DB_FIELDS: ClassVar[frozenset] = frozenset(
-        {"payment_id", "tg_id", "amount", "payment_type", "status", "created_at", "number_of_months", "discount_percent", "referral_discount"}
+        {"payment_id", "tg_id", "amount", "payment_type", "status", "created_at", "number_of_months", "discount_percent", "referral_discount", "balance_discount"}
     )
 
     def __post_init__(self):

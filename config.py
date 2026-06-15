@@ -112,6 +112,15 @@ LIST_AVAILABLE_CONNECTIONS: list = _parse_list(settings.available_connections_ra
 # Referral bonus percentages — single source of truth in shared.config
 REFERRAL_BONUS_PERCENTAGES: dict = REFERRAL_BONUS_PERCENTAGES
 
+# Referral bonus constants for bonus_service.py
+REFERRAL_BONUS_PERCENT: float = 0.10  # 10% bonus for referrer
+REFERRAL_BONUS_DAYS: int = 3  # +3 days for referred user
+REFERRAL_DISCOUNT_PERCENT: float = 0.10  # 10% referral discount
+
+# Minimum amount (₽) the user must pay out-of-pocket — we never let the
+# balance discount drive the final amount below this floor.
+MIN_PAYMENT_AMOUNT: float = float(os.getenv("MIN_PAYMENT_AMOUNT", "10.0"))
+
 # Aliases expected by some bot modules
 WEBHOOK_HOST: str = os.getenv("WEBHOOK_HOST", "0.0.0.0")
 WEBHOOK_PORT: int = int(os.getenv("WEBHOOK_PORT", "8000"))
