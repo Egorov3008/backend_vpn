@@ -25,7 +25,10 @@ apscheduler>=3.10.0
 tenacity>=8.0.0
 
 # Circuit breaker
-pybreaker>=1.0.0
+# Circuit breaker — provided by backend/circuit_breaker.py.
+# The pybreaker package is incompatible with modern Tornado: its
+# ``call_async`` references the removed ``tornado.gen`` module and
+# raises NameError under Python 3.11 / Tornado >= 6.1.
 
 # Prometheus metrics
 prometheus-client>=0.20.0

@@ -8,7 +8,7 @@ from multiprocessing import AuthenticationError
 from typing import Optional, Any
 
 import httpx
-import pybreaker
+from circuit_breaker import CircuitBreaker, CircuitBreakerError
 from tenacity import stop, wait, retry, retry_if_exception, RetryCallState
 
 from core.utils import filter_by_method_signature
@@ -27,7 +27,7 @@ from config import settings
 
 # Circuit breaker for XUI API calls
 # Fails after 5 consecutive failures, resets after 30 seconds
-_xui_circuit_breaker = pybreaker.CircuitBreaker(
+_xui_circuit_breaker = CircuitBreaker(
     fail_max=5,
     reset_timeout=30,
     success_threshold=1,
@@ -370,7 +370,7 @@ class XUISession:
                         "Login выполнен успешно",
                         extra={"duration_sec": round(login_duration, 3)}
                     )
-            except pybreaker.CircuitBreakerError:
+            except CircuitBreakerError:
                 xui_api_errors_total.labels(method="login", error_type="CircuitBreakerError").inc()
                 logger.error("XUI circuit breaker open - skipping login")
                 raise
@@ -385,9 +385,13 @@ class XUISession:
                 )
             except Exception as e:
                 xui_api_errors_total.labels(method="login", error_type=type(e).__name__).inc()
+                # exc_info=True (keyword arg) forces the logger to include the
+                # full traceback in errors.log. Passing it via ``extra`` is a
+                # silent no-op — that's why we've been debugging blind.
                 logger.error(
                     "Ошибка при login",
-                    extra={"error_type": type(e).__name__, "error_message": str(e), "exc_info": True}
+                    extra={"error_type": type(e).__name__, "error_message": str(e)},
+                    exc_info=True,
                 )
                 raise
 
@@ -438,7 +442,7 @@ class XUISession:
             )
             return True
 
-        except pybreaker.CircuitBreakerError:
+        except CircuitBreakerError:
             xui_api_errors_total.labels(method="add_client", error_type="CircuitBreakerError").inc()
             logger.error("XUI circuit breaker open - add_client skipped", extra={"email": email})
             return False

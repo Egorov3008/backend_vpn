@@ -14,6 +14,19 @@ from datetime import datetime
 from backend.client import XUISession, _xui_circuit_breaker, _StandaloneClientAPI
 
 
+@pytest.fixture(autouse=True)
+def _reset_xui_circuit_breaker():
+    """Reset the shared singleton between tests to avoid state leakage.
+
+    ``_xui_circuit_breaker`` is a module-level singleton; without this
+    fixture, the "stays closed on success" test was flaky because
+    previous tests could leave it in the ``open`` state.
+    """
+    _xui_circuit_breaker.close()
+    yield
+    _xui_circuit_breaker.close()
+
+
 class TestXUICircuitBreakerStateTransitions:
     """Test circuit breaker state transitions for XUI API."""
 
