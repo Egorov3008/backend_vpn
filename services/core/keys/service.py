@@ -43,27 +43,17 @@ class KeyService:
 
             # Форматируем данные
             formatted_expiry_date = expiry_date.strftime("%d %B %Y года")
-            total_gb = round(key_details.total_gb / (1024**3), 2)
             used_traffic = round(key_details.used_traffic / (1024**3), 2)
-            usage_percent = (used_traffic / total_gb * 100) if total_gb > 0 else 0
-            progress_bar = self._get_progress_bar(usage_percent)
-
-            # Рассчитываем процент использования
 
             logger.debug(
                 "Параметры",
                 used_traffic=used_traffic,
-                limit_gb=total_gb,
-                total_gb_cache=key_details.total_gb,
             )
             return {
                 "error": False,
                 "keys": key_details.key,
                 "tariff_name": key_details.name_tariff or "Не указан",
                 "used_traffic": used_traffic,
-                "total_gb": total_gb,
-                "progress_bar": progress_bar,
-                "usage_percent": round(usage_percent, 1),
                 "expiry_date": formatted_expiry_date,
                 "status_emoji": status_emoji,
                 "status_text": status_text,
@@ -85,9 +75,3 @@ class KeyService:
                 "error": True,
                 "error_message": f"❌ Ошибка при загрузке данных: {str(e)}",
             }
-
-    def _get_progress_bar(self, usage_percent: float, width: int = 10) -> str:
-        """Генерирует текстовый прогресс-бар"""
-        filled = int(usage_percent / 100 * width)
-        empty = width - filled
-        return "█" * filled + "░" * empty

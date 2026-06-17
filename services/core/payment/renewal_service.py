@@ -103,13 +103,11 @@ class KeyRenewalService:
             )
 
             new_expiry = datetime.fromtimestamp(updated_key.expiry_time / 1000)
-            traffic_gb = round(updated_key.total_gb / (2**30))
 
             logger.info(
                 "[Цена:RenewKey] Ключ продлён",
                 email=email,
                 new_expiry=new_expiry.isoformat(),
-                traffic_gb=traffic_gb,
             )
 
             key_renewed_total.inc()
@@ -133,7 +131,6 @@ class KeyRenewalService:
             return {
                 "updated_key": updated_key,
                 "new_expiry": new_expiry,
-                "traffic_gb": traffic_gb,
             }
 
         except Exception as e:

@@ -10,7 +10,6 @@ class KeyResponse(BaseModel):
     key: str
     tariff_id: Optional[int] = None
     name_tariff: Optional[str] = None
-    total_gb: Optional[int] = None
     used_traffic: Optional[float] = None
     inbound_id: int
     public_link: Optional[str] = None
@@ -31,7 +30,6 @@ class KeyResponse(BaseModel):
             key=k.key,
             tariff_id=k.tariff_id,
             name_tariff=k.name_tariff,
-            total_gb=k.total_gb,
             used_traffic=k.used_traffic,
             inbound_id=k.inbound_id,
             public_link=public_link,

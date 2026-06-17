@@ -83,7 +83,6 @@ async def get_key(
         key=key.key,
         tariff_id=key.tariff_id,
         name_tariff=key.name_tariff,
-        total_gb=key.total_gb,
         used_traffic=key.used_traffic,
         inbound_id=key.inbound_id,
         client_id=key.client_id,

@@ -111,6 +111,7 @@ class PanelClient:
     email: str = ""
     tg_id: int = 0
     limit_ip: int = 0
+    # Значение с панели. В коде не используется: все ключи безлимитные.
     total_gb: int = 0
     expiry_time: int = 0
     inbound_id: int = 0    # Первый inbound из inboundIds (legacy compat)
@@ -410,11 +411,13 @@ class XUISession:
         limit_ip: int,
         inbound_ids: list,
         expiry_time: int,
-        total_gb: int,
         enable: bool = True,
         flow: str = "xtls-rprx-vision",
     ) -> Any:
-        """Добавляет standalone-клиента и привязывает к inbound-ам (v3.2.0 API)."""
+        """Добавляет standalone-клиента и привязывает к inbound-ам (v3.2.0 API).
+
+        Все ключи безлимитные: totalGB на панель не передаётся (3x-ui по умолчанию 0).
+        """
         await self.ensure_auth()
         await self._ensure_standalone()
         t0 = time.monotonic()
@@ -424,7 +427,6 @@ class XUISession:
                 "id": client_id,
                 "email": email,
                 "limitIp": limit_ip,
-                "totalGB": total_gb,
                 "expiryTime": expiry_time,
                 "enable": enable,
                 "tgId": tg_id,
@@ -501,7 +503,6 @@ class XUISession:
             )
 
             await self._standalone.update(key_details.email, {
-                "totalGB": key_details.total_gb,
                 "expiryTime": key_details.expiry_time,
                 "limitIp": int(key_details.limit_ip) if key_details.limit_ip is not None else 1,
                 "flow": "xtls-rprx-vision",
@@ -596,7 +597,12 @@ class XUISession:
             )
 
     async def get_traffic(self, email: str) -> Optional[int]:
-        """Получает трафик клиента через standalone API."""
+        """Получает трафик клиента через standalone API.
+
+        Note: возвращал ``totalGB`` (лимит), что было некорректно. Реальный used-трафик
+        читается из subscription endpoint (см. ``TrafficUpdater.fetch_traffic_batch``).
+        Метод сохранён для обратной совместимости, всегда возвращает 0.
+        """
         t0 = time.monotonic()
         xui_api_calls_total.labels(method="get_traffic").inc()
         try:
@@ -604,8 +610,7 @@ class XUISession:
             client = await self._get_client_or_none(email)
             if not client:
                 return None
-            # standalone API возвращает dict с camelCase или snake_case
-            return client.get("totalGB") or client.get("total_gb") or 0
+            return 0
 
         except Exception as e:
             xui_api_errors_total.labels(
@@ -748,7 +753,6 @@ class XUISession:
         inbound_ids: list[int],
         tg_id: int = 0,
         limit_ip: int = 2,
-        total_gb: int = 0,
         expiry_time: int = 0,
         enable: bool = True,
         flow: str = "xtls-rprx-vision",
@@ -757,7 +761,10 @@ class XUISession:
         comment: str = "",
         reset: int = 0,
     ) -> dict:
-        """Создаёт standalone-клиента и сразу привязывает к inbound-ам (v3.2.0 API)."""
+        """Создаёт standalone-клиента и сразу привязывает к inbound-ам (v3.2.0 API).
+
+        Все ключи безлимитные: ``totalGB`` на панель не передаётся.
+        """
         await self.ensure_auth()
         await self._ensure_standalone()
         t0 = time.monotonic()
@@ -767,7 +774,6 @@ class XUISession:
                 "id": client_id,
                 "email": email,
                 "limitIp": limit_ip,
-                "totalGB": total_gb,
                 "expiryTime": expiry_time,
                 "enable": enable,
                 "tgId": tg_id,

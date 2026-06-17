@@ -161,6 +161,22 @@ class DatabaseSynchronizer:
             stats["orphaned_keys"] = len(orphaned_keys)
             stats["deleted_orphaned"] = cleanup_stats["deleted"]
 
+            # Поля, которые ожидает бот в /admin/sync отчёте.
+            # Алиасы + недостающие счётчики (db_keys_before/after, synced).
+            # Считаем ПОСЛЕ _cleanup_orphaned_keys, чтобы cache отражал
+            # итоговое состояние БД после удаления orphaned.
+            stats["db_keys_before"] = len(self.cache_comparator.keys_cache)
+            stats["db_keys_after"] = await self.model_data.keys.count()
+            stats["synced"] = (
+                len(self.cache_comparator.keys_cache) - len(orphaned_keys)
+            )
+            stats["created"] = restore_stats["restored_keys"]
+            stats["panel_updated"] = tg_restore_stats["restored"]
+            stats["db_updated"] = stats["successful"]
+            stats["orphaned_deleted"] = cleanup_stats["deleted"]
+            stats["traffic_updated"] = stats["successful"]
+            stats["traffic_failed"] = stats["failed"]
+
             total_time = time.time() - sync_start
             logger.info(
                 "Синхронизация завершена (полная статистика)",

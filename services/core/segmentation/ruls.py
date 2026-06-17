@@ -50,14 +50,14 @@ def expiring_keys_condition(hours: int = 24) -> Condition:
 
 
 def inactive_trial_condition() -> Condition:
-    """Неактивный триал: trial=1, неиспользуемый trial-ключ старше 2 дней и 0 Гб."""
+    """Неактивный триал: trial=1, неиспользуемый trial-ключ старше 2 дней."""
     two_days_ago = (datetime.now(timezone.utc) - timedelta(days=2)).timestamp() * 1000
     return SimpleCondition(
         lambda user, keys: user.trial == 1,
         lambda user, keys: any(
             key.tariff_id == 10
             and key.created_at < two_days_ago
-            and key.total_gb == 0.0
+            and (key.used_traffic or 0) == 0
             for key in keys
         ),
     )

@@ -122,18 +122,13 @@ class TrafficUpdater:
 
             upload = int(traffic_data.get("upload", 0))
             download = int(traffic_data.get("download", 0))
-            total = int(traffic_data.get("total", 0))
             used = upload + download
 
             return {
                 "upload_bytes": upload,
                 "download_bytes": download,
-                "total_bytes": total,
                 "used_bytes": used,
                 "used_gb": used / (1024**3),
-                "total_gb": total / (1024**3),
-                "remaining_bytes": max(0, total - used),
-                "usage_percent": (used / total * 100) if total > 0 else 0,
             }
         except (ValueError, TypeError, ZeroDivisionError) as e:
             logger.debug("Ошибка парсинга трафика", error=str(e))
@@ -165,7 +160,6 @@ class TrafficUpdater:
 
             # Обновляем данные ключа
             key.used_traffic = traffic_info["used_bytes"]
-            key.total_gb = traffic_info["total_bytes"]
             key.expiry_time = client.expiry_time
             key.limit_ip = client.limit_ip
 
@@ -174,7 +168,6 @@ class TrafficUpdater:
             logger.debug(
                 "Ключ обновлён трафиком",
                 email=key.email,
-                usage_percent=traffic_info["usage_percent"],
             )
 
             return True

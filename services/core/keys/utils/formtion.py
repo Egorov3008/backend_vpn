@@ -42,7 +42,6 @@ class FormationKey:
             )
             return None
 
-        total_traffic = int((tariff.traffic_limit * (2**30)) * number_of_months)
         subscription_url = f"{server_data.get('subscription_url')}/{email}"
         inbound_ids = server_data.get("inbound_ids", [])
         # Для БД сохраняем первый inbound_id; для панели передаём весь список
@@ -58,7 +57,6 @@ class FormationKey:
             inbound_ids=inbound_ids,
             key=subscription_url,
             tariff_id=tariff.id,
-            total_gb=total_traffic,
         )
         return key
 
