@@ -13,7 +13,6 @@ def make_key(email="test@vpn.ru", tg_id=123):
         inbound_id=11,
         tariff_id=1,
         name_tariff="Free",
-        total_gb=50 * (1024 ** 3),
         used_traffic=1.0,
     )
 
@@ -279,7 +278,6 @@ async def test_list_keys_multiple(api_client, mock_service_data):
             key="vless://1",
             tariff_id=1,
             name_tariff="Free",
-            total_gb=50 * (1024 ** 3),
             used_traffic=1.0,
             inbound_id=11,
         ),
@@ -291,7 +289,6 @@ async def test_list_keys_multiple(api_client, mock_service_data):
             key="vless://2",
             tariff_id=1,
             name_tariff="Free",
-            total_gb=50 * (1024 ** 3),
             used_traffic=1.0,
             inbound_id=11,
         ),
@@ -316,7 +313,6 @@ async def test_get_key_detail(api_client, mock_service_data):
         key="vless://abc",
         tariff_id=1,
         name_tariff="Free",
-        total_gb=50 * (1024 ** 3),
         used_traffic=1.0,
         inbound_id=11,
     )

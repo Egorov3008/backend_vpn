@@ -281,7 +281,6 @@ class TestKeyRenewalServiceWithNotifier:
         key_manager = AsyncMock()
         updated_key = MagicMock()
         updated_key.expiry_time = int(datetime.now().timestamp() * 1000)
-        updated_key.total_gb = 50 * (2 ** 30)
         updated_key.name_tariff = "Premium"
         key_manager.extension_key = AsyncMock(return_value=updated_key)
 
@@ -303,4 +302,3 @@ class TestKeyRenewalServiceWithNotifier:
         assert result is not None
         assert "updated_key" in result
         assert "new_expiry" in result
-        assert "traffic_gb" in result
