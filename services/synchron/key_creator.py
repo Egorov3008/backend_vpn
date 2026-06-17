@@ -87,7 +87,6 @@ class KeyCreator:
                 email=client.email,
                 client_id=str(client.id),
                 limit_ip=client.limit_ip,
-                total_gb=client.total_gb,
                 used_traffic=used_traffic,
                 inbound_id=client.inbound_id,
                 expiry_time=client.expiry_time,

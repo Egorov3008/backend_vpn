@@ -20,6 +20,8 @@ def _make_synchronizer():
     """Собрать DatabaseSynchronizer с моками."""
     model_data = MagicMock()
     model_data.keys = MagicMock()
+    # sync_data вызывает await model_data.keys.count() для db_keys_after.
+    model_data.keys.count = AsyncMock(return_value=0)
     model_data.users = MagicMock()
     model_data.servers = MagicMock()
     pool = MagicMock()

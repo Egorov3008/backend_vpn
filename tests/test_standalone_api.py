@@ -147,7 +147,6 @@ class TestXUISessionStandaloneMethods:
                 client_id="550e8400-e29b-41d4-a716-446655440000",
                 inbound_ids=[1],
                 tg_id=123456789,
-                total_gb=10737418240,
                 comment="test",
             )
 
@@ -157,7 +156,8 @@ class TestXUISessionStandaloneMethods:
         assert client_data["email"] == "user@x.com"
         assert client_data["id"] == "550e8400-e29b-41d4-a716-446655440000"
         assert client_data["tgId"] == 123456789
-        assert client_data["totalGB"] == 10737418240
+        # totalGB не передаётся: все ключи безлимитные
+        assert "totalGB" not in client_data
         assert client_data["subId"] == "user@x.com"
         assert inbound_ids == [1]
 

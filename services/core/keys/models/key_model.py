@@ -50,20 +50,6 @@ class KeyModel:
         return round(self.key.used_traffic / (1024**3), 2)
 
     @property
-    def total_gb(self) -> float:
-        return round(self.key.total_gb / (1024**3), 2)
-
-    @property
-    def usage_percent(self) -> float:
-        total = self.total_gb
-        return round((self.used_traffic_gb / total * 100), 1) if total > 0 else 0
-
-    @property
-    def progress_bar(self, width: int = 10) -> str:
-        filled = int(self.usage_percent / 100 * width)
-        return "█" * filled + "░" * (width - filled)
-
-    @property
     def time_left_message(self) -> str:
         if self.is_expired:
             return "Осталось часов: 0"
@@ -82,9 +68,6 @@ class KeyModel:
             "keys": self.key.key,
             "tariff_name": tariff_name,
             "used_traffic": self.used_traffic_gb,
-            "total_gb": self.total_gb,
-            "progress_bar": self.progress_bar,
-            "usage_percent": self.usage_percent,
             "expiry_date": self.formatted_expiry_date,
             "status_emoji": emoji,
             "status_text": status_text,

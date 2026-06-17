@@ -46,7 +46,7 @@ class BaseCondition(Condition):
                 continue
             if expiry_filter and not expiry_filter(key.expiry_time):
                 continue
-            if usage_filter and not usage_filter(key.total_gb):
+            if usage_filter and not usage_filter(key.used_traffic):
                 continue
             result.append(key)
         return result

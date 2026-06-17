@@ -12,8 +12,6 @@ class KeyView:
             "Статистика ключа",
             email=key_model.key.email,
             used=key_model.used_traffic_gb,
-            total=key_model.total_gb,
-            percent=key_model.usage_percent,
         )
         return key_model.to_dict()
 

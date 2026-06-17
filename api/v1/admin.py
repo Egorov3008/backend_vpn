@@ -1,3 +1,4 @@
+import time
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -381,7 +382,6 @@ async def admin_change_key_tariff(
         raise HTTPException(status_code=404, detail="Tariff not found")
 
     key.tariff_id = tariff.id
-    key.total_gb = tariff.traffic_limit
     key.limit_ip = tariff.limit_ip
     key.name_tariff = tariff.name_tariff
 
@@ -621,46 +621,40 @@ async def admin_sync(
     1. Full cache reload from PostgreSQL
     2. Panel ↔ DB sync + traffic update
     """
-    import time
     from background.scheduler import SyncScheduler
 
     sync_start = time.time()
     logger.info("Ручная синхронизация запущена через admin/sync")
 
-    # Проверка на уже запущенную синхронизацию
     scheduler = SyncScheduler(service_data, pool)
-    if scheduler.is_sync_in_progress:
-        logger.warning("Синхронизация уже запущена — отклонение ручного запроса")
-        raise HTTPException(
-            status_code=409,
-            detail={"status": "conflict", "reason": "sync_already_in_progress"},
-        )
-
-    cache_result = await scheduler.sync_cache()
-    panel_result = await scheduler._sync_panel()
+    # sync_cache() сам выполнит и кэш, и панельную синхронизацию.
+    # Не вызываем _sync_panel() повторно — это удвоило бы работу
+    # (две XUI-сессии, два набора aiohttp.ClientSession).
+    result = await scheduler.sync_cache()
 
     total_time = time.time() - sync_start
+    panel_stats = (result or {}).get("panel", {}) or {}
     logger.info(
         "Ручная синхронизация завершена",
         total_time=f"{total_time:.2f}s",
-        cache_status=cache_result.get("status"),
-        panel_status=panel_result.get("status")
+        status=result.get("status"),
     )
 
-    has_error = (
-        (cache_result or {}).get("status") == "error"
-        or (panel_result or {}).get("status") == "error"
-    )
-    if has_error:
+    if (result or {}).get("status") == "error":
         raise HTTPException(
             status_code=500,
-            detail={"cache": cache_result, "panel": panel_result},
+            detail={"status": "error", "result": result},
         )
 
     return {
         "status": "success",
-        "cache": cache_result,
-        "panel": panel_result,
+        "result": result,
+        # Top-level `cache` нужен боту: он читает
+        # result.get("cache", {}).get("message", "—").
+        # Алиасим на тот же dict — `result` уже содержит
+        # message/total_time/cache_load_time.
+        "cache": result,
+        "panel": panel_stats,
         "total_time": f"{total_time:.2f}s",
     }
 

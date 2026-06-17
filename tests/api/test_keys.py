@@ -13,7 +13,6 @@ def make_key(email="test@vpn.ru", tg_id=123):
         inbound_id=11,
         tariff_id=9,
         name_tariff="Pro",
-        total_gb=50 * (1024 ** 3),
         used_traffic=1.0,
     )
 

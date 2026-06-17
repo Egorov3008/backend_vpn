@@ -42,7 +42,7 @@ async def test_extend_client_key_does_not_call_reset_traffic():
 
     session._standalone = standalone
 
-    # Ключ с безлимитным тарифом (total_gb=0) и будущей датой истечения
+    # Ключ с безлимитным тарифом и будущей датой истечения
     key = Key(
         tg_id=123456,
         client_id="test-uuid",
@@ -50,7 +50,6 @@ async def test_extend_client_key_does_not_call_reset_traffic():
         expiry_time=1783337068246,  # 5 июля 2026
         key="https://sub.example.com/test@example.com",
         inbound_id=1,
-        total_gb=0,  # Безлимитный трафик (тарификация по лимиту устройств)
         limit_ip=3,
     )
 
@@ -63,7 +62,8 @@ async def test_extend_client_key_does_not_call_reset_traffic():
     assert update_call_args.args[0] == "test@example.com"
     update_payload = update_call_args.args[1]
     assert update_payload["expiryTime"] == 1783337068246
-    assert update_payload["totalGB"] == 0
+    # totalGB не передаётся: все ключи безлимитные
+    assert "totalGB" not in update_payload
 
     # ГЛАВНОЕ: reset_traffic НЕ должен быть вызван!
     standalone.reset_traffic.assert_not_called()
@@ -72,8 +72,8 @@ async def test_extend_client_key_does_not_call_reset_traffic():
 
 
 @pytest.mark.asyncio
-async def test_extend_client_key_with_nonzero_total_gb():
-    """extend_client_key с платным тарифом (total_gb > 0) тоже НЕ вызывает reset_traffic."""
+async def test_extend_client_key_does_not_pass_total_gb():
+    """extend_client_key НЕ передаёт totalGB на панель (безлимитные ключи)."""
     from client import XUISession
     from models import Key
     from services.core.data.service import ServiceDataModel
@@ -97,7 +97,6 @@ async def test_extend_client_key_with_nonzero_total_gb():
 
     session._standalone = standalone
 
-    # Ключ с платным тарифом (10 ГБ трафика)
     key = Key(
         tg_id=123456,
         client_id="paid-uuid",
@@ -105,7 +104,6 @@ async def test_extend_client_key_with_nonzero_total_gb():
         expiry_time=1783337068246,
         key="https://sub.example.com/paid@example.com",
         inbound_id=1,
-        total_gb=10 * (1024 ** 3),  # 10 ГБ в байтах
         limit_ip=3,
     )
 
@@ -113,6 +111,8 @@ async def test_extend_client_key_with_nonzero_total_gb():
 
     # update вызван
     standalone.update.assert_awaited_once()
+    update_payload = standalone.update.await_args.args[1]
+    assert "totalGB" not in update_payload
 
     # reset_traffic НЕ вызван
     standalone.reset_traffic.assert_not_called()

@@ -68,7 +68,6 @@ class CreateKey:
                 limit_ip=key.limit_ip,
                 inbound_ids=key.inbound_ids or [key.inbound_id],
                 expiry_time=key.expiry_time,
-                total_gb=key.total_gb,
             )
 
             # Сохранение данных ключа

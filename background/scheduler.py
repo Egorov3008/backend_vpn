@@ -48,7 +48,9 @@ class SyncScheduler:
         а не до него. Это гарантирует атомарность проверки и установки.
 
         Returns:
-            Dict со статусом синхронизации
+            Dict со статусом синхронизации и подробной статистикой
+            (включая результат панельной синхронизации, чтобы caller'ы
+            не вызывали _sync_panel повторно).
         """
         # Атомарная проверка и захват блокировки
         async with self._sync_lock:
@@ -61,6 +63,7 @@ class SyncScheduler:
 
         # Выполняем синхронизацию вне lock (но флаг остается True)
         sync_start = time.time()
+        panel_stats: Dict[str, Any] = {}
         try:
             from database.service import DataService
             from services.cache.loader import LoadingService
@@ -82,17 +85,35 @@ class SyncScheduler:
             total_time = time.time() - sync_start
             self._last_sync_time = total_time
 
+            # Прокидываем детальную статистику панели в результат,
+            # чтобы итоговое сообщение было наполнено данными.
+            panel_stats = dict(panel_sync_result)
+            panel_stats.setdefault("cache_load_time", f"{cache_load_time:.2f}s")
+            panel_stats.setdefault("total_time", f"{total_time:.2f}s")
+            panel_stats.pop("sync_time", None)
+            panel_stats["sync_time"] = f"{total_time:.2f}s"
+
             logger.info(
                 "Полная синхронизация (кэш + панель) завершена",
                 total_time=f"{total_time:.2f}s",
                 cache_load_time=f"{cache_load_time:.2f}s",
-                panel_sync_time=panel_sync_result.get("sync_time", "N/A")
+                panel_sync_time=f"{total_time:.2f}s",
             )
 
-            return {"status": "success", "message": "Cache synchronized"}
+            return {
+                "status": "success",
+                "message": "Cache synchronized",
+                "total_time": f"{total_time:.2f}s",
+                "cache_load_time": f"{cache_load_time:.2f}s",
+                "panel": panel_stats,
+            }
         except Exception as e:
             logger.error("Ошибка синхронизации кеша", error=str(e), exc_info=True)
-            return {"status": "error", "error": str(e)}
+            return {
+                "status": "error",
+                "error": str(e),
+                "panel": panel_stats,
+            }
         finally:
             # Сбрасываем флаг внутри lock для атомарности
             async with self._sync_lock:

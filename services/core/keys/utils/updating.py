@@ -26,7 +26,6 @@ class KeyUpdater:
         )
 
         key.tariff_id = tariff.id
-        key.total_gb = int(tariff.traffic_limit * (2**30) * number_of_months)
         key.limit_ip = tariff.limit_ip
         key.name_tariff = tariff.name_tariff
         key.expiry_time = new_expiry_timestamp
