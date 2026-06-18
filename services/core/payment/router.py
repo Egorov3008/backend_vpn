@@ -111,7 +111,6 @@ class PaymentRouter:
                     await self.renewal_service.send_notification(
                         updated_key=renewal_data["updated_key"],
                         new_expiry=renewal_data["new_expiry"],
-                        traffic_gb=renewal_data["traffic_gb"],
                     )
 
                 logger.debug("KeyRenewalService завершен", email=data)
@@ -150,20 +149,26 @@ class PaymentRouter:
             tg_id=self.processor.tg_id,
             amount=self.processor.amount,
             operation=operation,
+            referral_discount=self.processor.referral_discount,
+            balance_discount=self.processor.balance_discount,
         )
 
-        # Списываем реферальную скидку с баланса пользователя
+        # Списываем скидку за счёт баланса (т.е. reward-баланса реферера)
+        # именно эту сумму реально вычли из users.balance при расчёте финальной цены.
+        # 10% реферальная скидка для приглашённого (referral_discount) не должна
+        # уменьшать balance — это скидка от стоимости тарифа, а не списание с баланса.
         if (
-            self.processor.referral_discount
-            and self.processor.referral_discount > 0
+            self.processor.balance_discount
+            and self.processor.balance_discount > 0
         ):
             try:
                 user = await self.processor._model_service.users.get_data(
                     self.processor.tg_id, self.processor._conn
                 )
                 if user:
+                    old_balance = user.balance
                     user.balance = round(
-                        max(0.0, user.balance - self.processor.referral_discount), 2
+                        max(0.0, user.balance - self.processor.balance_discount), 2
                     )
                     await self.processor._model_service.users.update(
                         self.processor._conn,
@@ -171,17 +176,21 @@ class PaymentRouter:
                         search_data={"tg_id": user.tg_id},
                     )
                     logger.info(
-                        "Реферальная скидка списана",
+                        "Скидка за счёт баланса списана",
                         payment_id=payment_id,
                         tg_id=self.processor.tg_id,
-                        discount=self.processor.referral_discount,
+                        discount=self.processor.balance_discount,
+                        old_balance=old_balance,
                         new_balance=user.balance,
                     )
             except Exception as e:
                 logger.warning(
-                    "Ошибка при списании реферальной скидки",
+                    "Ошибка при списании скидки за счёт баланса",
                     payment_id=payment_id,
+                    tg_id=self.processor.tg_id,
+                    discount=self.processor.balance_discount,
                     error=str(e),
+                    exc_info=True,
                 )
 
         # Начисляем реферальный бонус после успешной оплаты

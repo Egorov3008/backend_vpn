@@ -151,8 +151,8 @@ class TelegramBotNotifier(INotifier):
         tg_id: int,
         email: str,
         new_expiry: str,
-        traffic_limit_gb: int,
         tariff_name: str,
+        traffic_limit_gb: Optional[int] = None,
     ) -> None:
         """
         Отправить уведомление о продлении ключа.
@@ -179,9 +179,10 @@ class TelegramBotNotifier(INotifier):
         message = (
             f"✅ Ваш ключ <a href='https://t.me/VPNBot'>{email}</a> продлён!\n\n"
             f"📅 До: <b>{new_expiry}</b>\n"
-            f"По тарифу: <b>{tariff_name}</b>\n"
-            f"Трафик: <b>{traffic_limit_gb} GB</b>"
+            f"По тарифу: <b>{tariff_name}</b>"
         )
+        if traffic_limit_gb is not None:
+            message += f"\nТрафик: <b>{traffic_limit_gb} GB</b>"
 
         await self.send_message(tg_id, message, keyboard)
 
