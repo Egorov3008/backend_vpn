@@ -152,9 +152,14 @@ CREATE TABLE IF NOT EXISTS keys
     period INTEGER,
     used_traffic REAL NOT NULL DEFAULT 0.0,
     server_info JSONB,
+    converted_tg_id BIGINT,
+    landing_uid VARCHAR(64),
     UNIQUE (tg_id, client_id),
     UNIQUE (email)
 );
+
+CREATE INDEX IF NOT EXISTS idx_keys_landing_uid ON keys(landing_uid)
+    WHERE landing_uid IS NOT NULL;
 
 -- Ensure total_gb default matches model default (migration 008)
 DO $$

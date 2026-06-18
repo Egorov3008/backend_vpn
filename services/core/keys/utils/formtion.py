@@ -24,9 +24,20 @@ class FormationKey:
         self.expiry = expiry
 
     async def form_new_key(
-        self, tg_id: int, tariff: Tariff, server_id: int, number_of_months: int = 1
+        self,
+        tg_id: int,
+        tariff: Tariff,
+        server_id: int,
+        number_of_months: int = 1,
+        inbound_id_override: Optional[int] = None,
     ) -> Optional[Key]:
-        """Формирует новый объект ключа"""
+        """Формирует новый объект ключа.
+
+        Args:
+            inbound_id_override: если задан, используется как единственный inbound
+                (для лендинга и других специальных потоков). Иначе берётся
+                первый из server.inbound_ids.
+        """
         email = await self._generate_email()
         new_expiry_time = self.expiry.key_duration_new_key(
             tariff.period, number_of_months
@@ -43,9 +54,15 @@ class FormationKey:
             return None
 
         subscription_url = f"{server_data.get('subscription_url')}/{email}"
-        inbound_ids = server_data.get("inbound_ids", [])
-        # Для БД сохраняем первый inbound_id; для панели передаём весь список
-        primary_inbound_id = inbound_ids[0] if inbound_ids else 0
+
+        if inbound_id_override is not None:
+            # Landing-page flow: форсируем конкретный inbound.
+            inbound_ids = [inbound_id_override]
+            primary_inbound_id = inbound_id_override
+        else:
+            inbound_ids = server_data.get("inbound_ids", [])
+            # Для БД сохраняем первый inbound_id; для панели передаём весь список
+            primary_inbound_id = inbound_ids[0] if inbound_ids else 0
 
         key = Key(
             tg_id=tg_id,

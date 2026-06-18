@@ -29,6 +29,11 @@ class Key:
     used_traffic: Optional[float] = 0
     server_info: Optional[Any] = None
     notified_expired_grace: bool = False
+    # Landing-page: anonymous 24h keys generated without user registration.
+    # landing_uid — links key to the signed cookie on the landing page.
+    # converted_tg_id — set by bot when user completes /start landing_<uid>.
+    converted_tg_id: Optional[int] = None
+    landing_uid: Optional[str] = None
     _name: str = "key"
 
     def __post_init__(self):
@@ -50,6 +55,8 @@ class Key:
             "tariff_id",
             "limit_ip",
             "notified_expired_grace",
+            "converted_tg_id",
+            "landing_uid",
         }
     )
 

@@ -45,14 +45,20 @@ class CreateKey:
         server_id: int,
         conn: asyncpg.Pool,
         number_of_months: int = 1,
+        inbound_id_override: Optional[int] = None,
     ) -> Optional[dict]:
         """
         Создает новый ключ для пользователя в системе.
+
+        Args:
+            inbound_id_override: форсирует конкретный inbound (для лендинга
+                и других специальных потоков). None = стандартное поведение
+                (берётся первый из server.inbound_ids).
         """
 
         try:
             key: Optional[Key] = await self.form.form_new_key(
-                tg_id, tariff, server_id, number_of_months
+                tg_id, tariff, server_id, number_of_months, inbound_id_override
             )
             # Проверка успешного создания ключа
             if not key:

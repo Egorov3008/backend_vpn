@@ -49,6 +49,15 @@ class Settings(BaseSettings):
     xui_server_id: int = Field(default=1, alias="XUI_SERVER_ID")
     xui_skip_ssl_verify: bool = Field(default=False, alias="XUI_SKIP_SSL_VERIFY")
 
+    # Landing page
+    # Separate 3x-UI inbound for anonymous 24h keys. Must also be in
+    # AVAILABLE_CONNECTIONS so form_data can pick it up.
+    xui_inbound_id_landing: int = Field(default=0, alias="XUI_INBOUND_ID_LANDING")
+    # HMAC secret for signed landing cookies. Falls back to bot_secret_key if empty.
+    landing_cookie_secret: str = Field(default="", alias="LANDING_COOKIE_SECRET")
+    # Public URL of the landing page (used in deep-link to bot).
+    landing_public_url: str = Field(default="", alias="LANDING_PUBLIC_URL")
+
     # YooKassa — values fall back to shared core_settings if .env is missing them
     yookassa_shop_id: str = ""
     yookassa_secret_key: str = ""
