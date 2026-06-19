@@ -123,6 +123,51 @@ class PanelClient:
     comment: str = ""
 
 
+def _panel_client_from_raw(raw: dict) -> "PanelClient":
+    """Конвертирует raw dict из standalone API в PanelClient (inline, без циклического импорта)."""
+    return PanelClient(
+        id=str(raw.get("id", "")),
+        email=raw.get("email", ""),
+        tg_id=raw.get("tgId") or raw.get("tg_id") or 0,
+        limit_ip=raw.get("limitIp") or raw.get("limit_ip") or 0,
+        total_gb=raw.get("totalGB") or raw.get("total_gb") or 0,
+        expiry_time=raw.get("expiryTime") or raw.get("expiry_time") or 0,
+        inbound_id=(raw.get("inboundIds") or [0])[0] if raw.get("inboundIds") else raw.get("inbound_id", 0),
+        inbound_ids=list(raw.get("inboundIds", []) or []),
+        sub_id=raw.get("subId") or raw.get("sub_id", ""),
+        enable=raw.get("enable", True),
+        flow=raw.get("flow", ""),
+        group=raw.get("group", ""),
+        comment=raw.get("comment", ""),
+    )
+
+
+def _build_panel_update_payload(panel_client: "PanelClient", **overrides) -> dict:
+    """Build a full client update payload for 3x-ui v3.2.0 standalone API.
+
+    3x-ui treats the update body as a full replacement, so omitted fields are
+    zeroed/defaulted. This helper takes the current panel state and applies only
+    the requested overrides, preventing accidental loss of enable/expiryTime/tgId.
+    """
+    payload = {
+        "id": panel_client.id,
+        "email": panel_client.email,
+        "tgId": panel_client.tg_id,
+        "limitIp": panel_client.limit_ip,
+        "totalGB": panel_client.total_gb,
+        "expiryTime": panel_client.expiry_time,
+        "enable": panel_client.enable,
+        "flow": panel_client.flow or "xtls-rprx-vision",
+        "subId": panel_client.sub_id or panel_client.email,
+        "group": panel_client.group,
+        "comment": panel_client.comment,
+    }
+    if panel_client.inbound_ids:
+        payload["inboundIds"] = list(panel_client.inbound_ids)
+    payload.update(overrides)
+    return payload
+
+
 class _StandaloneClientAPI:
     """Native httpx client for 3x-ui v3.2.0 standalone Clients API.
 
@@ -490,7 +535,8 @@ class XUISession:
 
             # Проверяем, что клиент существует в панели
             try:
-                await self._standalone.get(key_details.email)
+                raw_client = await self._standalone.get(key_details.email)
+                panel_client = _panel_client_from_raw(raw_client.get("obj", {}).get("client", raw_client.get("obj", raw_client)))
             except Exception:
                 logger.warning("Клиент не найден", extra={"email": key_details.email})
                 return False
@@ -502,13 +548,15 @@ class XUISession:
                 extra={"expiry_time": key_details.expiry_time, "expiry_datetime": expiry_datetime}
             )
 
-            await self._standalone.update(key_details.email, {
-                "expiryTime": key_details.expiry_time,
-                "limitIp": int(key_details.limit_ip) if key_details.limit_ip is not None else 1,
-                "flow": "xtls-rprx-vision",
-                "subId": key_details.email,
-                "enable": True,
-            })
+            # Строим полный payload на основе текущего состояния панели,
+            # чтобы 3x-ui не обнулил отсутствующие поля (enable, tgId, inboundIds и т.д.)
+            await self.update_standalone_client(
+                key_details.email,
+                panel_client=panel_client,
+                expiryTime=key_details.expiry_time,
+                enable=True,
+                limitIp=int(key_details.limit_ip) if key_details.limit_ip is not None else 1,
+            )
             # reset_traffic НЕ вызываем — 3x-ui обнуляет totalGB и expiryTime (баг #6cx7ah)
             # Сброс трафика происходит через БД (used_traffic=0) после продления
 
@@ -900,14 +948,28 @@ class XUISession:
         retry=retry_if_exception(XUIRetryPolicy.is_retryable_exception),
         reraise=True,
     )
-    async def update_standalone_client(self, email: str, **fields) -> dict:
-        """Обновляет поля standalone-клиента по email (v3.2.0 API)."""
+    async def update_standalone_client(
+        self, email: str, panel_client: Optional["PanelClient"] = None, **fields
+    ) -> dict:
+        """Обновляет поля standalone-клиента по email (v3.2.0 API).
+
+        3x-ui трактует тело update как полную замену клиента, поэтому
+        непереданные поля обнуляются. Метод всегда отправляет полный payload:
+        либо использует переданный ``panel_client``, либо предварительно
+        запрашивает текущее состояние клиента с панели.
+        """
         await self.ensure_auth()
         await self._ensure_standalone()
         t0 = time.monotonic()
         xui_api_calls_total.labels(method="update_standalone_client").inc()
         try:
-            result = await self._standalone.update(email, fields)
+            if panel_client is None:
+                raw_client = await self._standalone.get(email)
+                panel_client = _panel_client_from_raw(
+                    raw_client.get("obj", {}).get("client", raw_client.get("obj", raw_client))
+                )
+            payload = _build_panel_update_payload(panel_client, **fields)
+            result = await self._standalone.update(email, payload)
             logger.info(
                 "Standalone клиент обновлён",
                 extra={"email": email, "fields": list(fields.keys())}

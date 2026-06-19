@@ -266,7 +266,9 @@ class DatabaseSynchronizer:
                 if db_key.tg_id <= 0:
                     continue
                 await xui_session.update_standalone_client(
-                    client.email, tgId=db_key.tg_id
+                    client.email,
+                    panel_client=client,
+                    tgId=db_key.tg_id,
                 )
                 restored += 1
                 logger.info(
