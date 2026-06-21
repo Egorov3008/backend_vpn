@@ -56,8 +56,7 @@ CREATE TABLE IF NOT EXISTS inbound
     server_id INTEGER NOT NULL,
     inbound_id INTEGER NOT NULL,
     name_inbound TEXT,
-    UNIQUE (server_id, inbound_id),
-    CONSTRAINT fk_inbound_server FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE RESTRICT
+    UNIQUE (server_id, inbound_id)
 );
 
 -- ============================================================================
@@ -79,8 +78,12 @@ CREATE TABLE IF NOT EXISTS users (
     server_id int4 NULL,
     check_referral bool DEFAULT false NULL,
     is_blocked bool DEFAULT false NULL,
-    CONSTRAINT users_pkey PRIMARY KEY (tg_id),
-    CONSTRAINT fk_user_server FOREIGN KEY (server_id) REFERENCES public.servers(id) ON DELETE SET NULL
+    CONSTRAINT users_pkey PRIMARY KEY (tg_id)
+    -- NOTE: FK fk_user_server (users.server_id -> servers.id) намеренно убран.
+    -- Режим single-panel: таблица servers может быть пустой, конфиг сервера
+    -- берётся из .env через get_env_server(). Жёсткий FK блокировал авто-регистрацию
+    -- новых пользователей (bot шлёт server_id=2) при пустой servers.
+    -- См. models/servers/server.py:get_env_server.
 );
 
 -- Add missing referral_id (migration 008)
@@ -109,8 +112,7 @@ CREATE TABLE IF NOT EXISTS payments
     payment_type   TEXT NOT NULL,
     number_of_months INTEGER NOT NULL DEFAULT 1,
     discount_percent INTEGER NOT NULL DEFAULT 0,
-    referral_discount REAL NOT NULL DEFAULT 0.0,
-    FOREIGN KEY (tg_id) REFERENCES users (tg_id)
+    referral_discount REAL NOT NULL DEFAULT 0.0
 );
 
 -- Backfill safety: ensure existing rows have referral_discount before any NOT NULL enforcement
@@ -133,7 +135,7 @@ END $$;
 
 CREATE TABLE IF NOT EXISTS keys
 (
-    tg_id BIGINT NOT NULL REFERENCES users(tg_id) ON DELETE CASCADE,
+    tg_id BIGINT NOT NULL,
     client_id TEXT NOT NULL,
     email TEXT NOT NULL,
     created_at BIGINT NOT NULL,
@@ -141,10 +143,10 @@ CREATE TABLE IF NOT EXISTS keys
     key TEXT NOT NULL,
     total_gb REAL NOT NULL DEFAULT 10.0,
     reset_date BIGINT NOT NULL DEFAULT 0,
-    inbound_id INTEGER NOT NULL REFERENCES inbound(id) ON DELETE CASCADE,
+    inbound_id INTEGER NOT NULL,
     notified_10h BOOLEAN NOT NULL DEFAULT FALSE,
     notified_24h BOOLEAN NOT NULL DEFAULT FALSE,
-    tariff_id INTEGER REFERENCES tariff(id) ON DELETE SET NULL,
+    tariff_id INTEGER,
     tariff_description TEXT,
     name_tariff TEXT,
     amount REAL,
@@ -194,7 +196,7 @@ CREATE TABLE IF NOT EXISTS referrals (
 CREATE TABLE IF NOT EXISTS referral_links
 (
     id SERIAL PRIMARY KEY,
-    referrer_tg_id BIGINT NOT NULL REFERENCES users(tg_id) ON DELETE CASCADE,
+    referrer_tg_id BIGINT NOT NULL,
     token TEXT NOT NULL UNIQUE,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -202,15 +204,15 @@ CREATE TABLE IF NOT EXISTS referral_links
 CREATE TABLE IF NOT EXISTS referral_redemptions
 (
     id SERIAL PRIMARY KEY,
-    referral_link_id INTEGER NOT NULL REFERENCES referral_links(id) ON DELETE CASCADE,
-    referred_tg_id BIGINT NOT NULL REFERENCES users(tg_id) ON DELETE CASCADE,
+    referral_link_id INTEGER NOT NULL,
+    referred_tg_id BIGINT NOT NULL,
     redeemed_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS referral_rewards
 (
     id SERIAL PRIMARY KEY,
-    referrer_tg_id BIGINT NOT NULL REFERENCES users(tg_id) ON DELETE CASCADE,
+    referrer_tg_id BIGINT NOT NULL,
     reward_type TEXT NOT NULL,
     reward_value TEXT NOT NULL,
     awarded_at TIMESTAMPTZ DEFAULT NOW(),
@@ -242,9 +244,7 @@ CREATE TABLE IF NOT EXISTS gift_links
     created_at      TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     recipient_tg_id BIGINT,
     email           TEXT,
-    used_at         TIMESTAMP WITH TIME ZONE,
-    CONSTRAINT fk_gift_sender FOREIGN KEY (sender_tg_id) REFERENCES users (tg_id),
-    CONSTRAINT fk_gift_recipient FOREIGN KEY (recipient_tg_id) REFERENCES users (tg_id)
+    used_at         TIMESTAMP WITH TIME ZONE
 );
 
 -- ============================================================================
@@ -255,7 +255,7 @@ CREATE TABLE IF NOT EXISTS gift_links
 -- If an old global-promo stocks table exists, leave it for migrations to handle.
 CREATE TABLE IF NOT EXISTS stocks
 (
-    tg_id       BIGINT PRIMARY KEY REFERENCES users(tg_id) ON DELETE CASCADE,
+    tg_id       BIGINT PRIMARY KEY,
     stock_type  TEXT NOT NULL CHECK (stock_type IN ('fix', 'percent')),
     value       DECIMAL(10,2) NOT NULL,
     is_active   BOOLEAN NOT NULL DEFAULT true,
@@ -282,3 +282,26 @@ CREATE INDEX IF NOT EXISTS idx_referral_links_token ON referral_links(token);
 CREATE INDEX IF NOT EXISTS idx_referral_links_referrer ON referral_links(referrer_tg_id);
 CREATE INDEX IF NOT EXISTS idx_referral_redemptions_link ON referral_redemptions(referral_link_id);
 CREATE INDEX IF NOT EXISTS idx_referral_rewards_referrer ON referral_rewards(referrer_tg_id);
+
+-- ============================================================================
+-- 11. Self-healing: убрать ВСЕ внешние ключи (single-panel / loose schema mode)
+-- Текущая рабочая БД не содержит FK; init-скрипт тоже их не объявляет выше.
+-- Этот блок гарантированно удаляет любые FK, оставшиеся от старой «строгой»
+-- схемы (например, при повторном ручном запуске поверх БД со старыми FK).
+-- ============================================================================
+DO $$
+DECLARE
+    r RECORD;
+BEGIN
+    FOR r IN
+        SELECT n.nspname AS schema_name, c.relname AS table_name, con.conname AS constraint_name
+        FROM pg_constraint con
+        JOIN pg_class c ON c.oid = con.conrelid
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE con.contype = 'f'
+          AND n.nspname = 'public'
+    LOOP
+        EXECUTE format('ALTER TABLE %I.%I DROP CONSTRAINT %I',
+                       r.schema_name, r.table_name, r.constraint_name);
+    END LOOP;
+END $$;
