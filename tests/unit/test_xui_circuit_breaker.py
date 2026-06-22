@@ -11,7 +11,7 @@ import httpx
 from unittest.mock import AsyncMock, patch, MagicMock
 from datetime import datetime
 
-from backend.client import XUISession, _xui_circuit_breaker, _StandaloneClientAPI
+from client import XUISession, _xui_circuit_breaker, _StandaloneClientAPI
 
 
 @pytest.fixture(autouse=True)

@@ -158,9 +158,10 @@ class TrafficUpdater:
                 logger.debug("Не удалось извлечь информацию о трафике", email=key.email)
                 return False
 
-            # Обновляем данные ключа
+            # Обновляем данные ключа.
+            # expiry_time берём из БД (источник истины для срока действия),
+            # чтобы панель не перезаписывала его случайным zero/stale значением.
             key.used_traffic = traffic_info["used_bytes"]
-            key.expiry_time = client.expiry_time
             key.limit_ip = client.limit_ip
 
             await self.model_data.keys.update(pool, key, {"email": key.email})

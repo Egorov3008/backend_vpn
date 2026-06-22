@@ -26,6 +26,7 @@ class PaymentProcessor:
         self.number_of_months: int = None
         self.discount_percent: int = 0
         self.referral_discount: float = 0.0
+        self.balance_discount: float = 0.0
         self.status: str = None
 
     async def load_payment_data(self, payment_id: str):
@@ -44,6 +45,7 @@ class PaymentProcessor:
         self.number_of_months = data.number_of_months
         self.discount_percent = data.discount_percent
         self.referral_discount = data.referral_discount
+        self.balance_discount = data.balance_discount
         self.status = data.status
 
         logger.debug(
@@ -56,6 +58,7 @@ class PaymentProcessor:
             number_of_months=self.number_of_months,
             discount_percent=self.discount_percent,
             referral_discount=self.referral_discount,
+            balance_discount=self.balance_discount,
         )
 
     async def update_payment(self, payment_id: str, status: str = "succeeded"):
@@ -69,6 +72,8 @@ class PaymentProcessor:
             amount=self.amount,
             number_of_months=self.number_of_months or 1,
             discount_percent=self.discount_percent,
+            referral_discount=self.referral_discount,
+            balance_discount=self.balance_discount,
             status=status,
         )
 

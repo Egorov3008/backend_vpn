@@ -34,7 +34,7 @@ class KeyRenewalService:
             email: Email ключа (опционально, извлекается из payment_type если не указан)
 
         Returns:
-            dict с данными продления (updated_key, new_expiry, traffic_gb) или None
+            dict с данными продления (updated_key, new_expiry) или None
         """
         try:
             if email is None:
@@ -147,7 +147,7 @@ class KeyRenewalService:
         self,
         updated_key,
         new_expiry: datetime,
-        traffic_gb: int,
+        traffic_gb: Optional[int] = None,
     ) -> None:
         """
         Отправить уведомление о продлении ключа.
@@ -155,7 +155,7 @@ class KeyRenewalService:
         Args:
             updated_key: Обновленный ключ из process()
             new_expiry: Новая дата истечения из process()
-            traffic_gb: Лимит трафика из process()
+            traffic_gb: Лимит трафика (опционально; все ключи безлимитные)
         """
         if self.notifier is None:
             logger.debug(
@@ -169,8 +169,8 @@ class KeyRenewalService:
                 tg_id=self.processor.tg_id,
                 email=updated_key.email,
                 new_expiry=new_expiry.strftime("%d.%m.%Y %H:%M"),
-                traffic_limit_gb=traffic_gb,
                 tariff_name=updated_key.name_tariff,
+                traffic_limit_gb=traffic_gb,
             )
         except Exception as e:
             logger.warning(

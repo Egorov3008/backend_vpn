@@ -37,8 +37,8 @@ class INotifier(ABC):
         tg_id: int,
         email: str,
         new_expiry: str,
-        traffic_limit_gb: int,
         tariff_name: str,
+        traffic_limit_gb: Optional[int] = None,
     ) -> None:
         """
         Отправить уведомление о продлении ключа.
@@ -47,8 +47,8 @@ class INotifier(ABC):
             tg_id: Telegram ID пользователя
             email: Email ключа
             new_expiry: Новая дата истечения (ISO format)
-            traffic_limit_gb: Лимит трафика в GB
             tariff_name: Название тарифа
+            traffic_limit_gb: Лимит трафика в GB (опционально; все ключи безлимитные)
         """
         pass
 
@@ -90,8 +90,8 @@ class NoOpNotifier(INotifier):
         tg_id: int,
         email: str,
         new_expiry: str,
-        traffic_limit_gb: int,
         tariff_name: str,
+        traffic_limit_gb: Optional[int] = None,
     ) -> None:
         pass
 
