@@ -84,6 +84,14 @@ class Settings(BaseSettings):
     webhook_path: str = "/api/v1/payments/webhook"
     webhook_base_url: str = ""  # Public URL of this backend, e.g. https://api.example.com
 
+    # Pending-payment sweep (safety net for missed YooKassa webhooks).
+    # Авто-поллинг из scheduler опрашивает YooKassa по pending-платежам младше
+    # payment_sweep_max_age_minutes и маршрутизирует succeeded (через payment_router).
+    # payment_sweep_exclude_ids — список payment_id, которые поллинг пропускает
+    # (напр. уже обработанные вручную админом без обновления статуса — чтобы не продлить ключ повторно).
+    payment_sweep_max_age_minutes: int = Field(default=1440, alias="PAYMENT_SWEEP_MAX_AGE_MINUTES")
+    payment_sweep_exclude_ids_raw: str = Field(default="", alias="PAYMENT_SWEEP_EXCLUDE_IDS")
+
 
 settings = Settings()
 
@@ -113,6 +121,10 @@ DISCOUNTS: int = settings.discounts
 LIMIT_IP: int = settings.limit_ip
 METRICS_PORT: int = settings.metrics_port
 WEBHOOK_PATH: str = settings.webhook_path
+PAYMENT_SWEEP_MAX_AGE_MINUTES: int = settings.payment_sweep_max_age_minutes
+PAYMENT_SWEEP_EXCLUDE_IDS: list = [
+    s.strip() for s in settings.payment_sweep_exclude_ids_raw.split(",") if s.strip()
+]
 
 ADMIN_ID: list = _parse_list(settings.admin_id_raw, [0])
 AVAILABLE_RATES_LIST: list = _parse_list(settings.available_rates_raw, [])

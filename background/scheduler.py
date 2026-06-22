@@ -25,6 +25,8 @@ class SyncScheduler:
         self._sync_in_progress = False
         self._last_sync_time: Optional[float] = None
         self._sync_count = 0
+        self._sweep_lock = asyncio.Lock()
+        self._sweep_in_progress = False
 
     @property
     def is_sync_in_progress(self) -> bool:
@@ -203,6 +205,42 @@ class SyncScheduler:
         except Exception as e:
             logger.error("Ошибка в цикле уведомлений", error=str(e), exc_info=True)
 
+    async def run_pending_payments_sweep(self) -> None:
+        """Safety net для пропущенных webhook'ов YooKassa.
+
+        Опрашивает YooKassa по свежим pending-платежам (младше
+        PAYMENT_SWEEP_MAX_AGE_MINUTES) и маршрутизирует succeeded через
+        payment_router. exclude-список PAYMENT_SWEEP_EXCLUDE_IDS — payment_id,
+        которые уже обработаны вручную (чтобы не продлить ключ повторно).
+        Исторический backlog (старше окна) этим джобом НЕ трогается —
+        его разбирают разовым скриптом scripts/sweep_pending_payments.py.
+        """
+        from config import settings
+        from services.core.payment.pending_sweep import sweep_pending_payments
+
+        async with self._sweep_lock:
+            if self._sweep_in_progress:
+                logger.warning("Sweep pending payments уже запущен — пропуск")
+                return
+            self._sweep_in_progress = True
+
+        try:
+            from config import PAYMENT_SWEEP_EXCLUDE_IDS
+
+            await sweep_pending_payments(
+                self._pool,
+                self._service_data,
+                self._service_data.cache_service,
+                dry_run=False,
+                max_age_minutes=settings.payment_sweep_max_age_minutes,
+                exclude_ids=set(PAYMENT_SWEEP_EXCLUDE_IDS),
+            )
+        except Exception as e:
+            logger.error("Ошибка в sweep pending payments", error=str(e), exc_info=True)
+        finally:
+            async with self._sweep_lock:
+                self._sweep_in_progress = False
+
 
 def create_scheduler(
     service_data: ServiceDataModel,
@@ -240,5 +278,17 @@ def create_scheduler(
         hours=1,
         id="notifications",
         replace_existing=True,
+    )
+
+    # Safety net для пропущенных webhook'ов YooKassa: опрос pending-платежей
+    # и маршрутизация succeeded. Каждые 15 минут, только свежие платежи
+    # (младше PAYMENT_SWEEP_MAX_AGE_MINUTES), exclude — PAYMENT_SWEEP_EXCLUDE_IDS.
+    scheduler.add_job(
+        sync_scheduler.run_pending_payments_sweep,
+        "interval",
+        minutes=15,
+        id="pending_payments_sweep",
+        replace_existing=True,
+        coalesce=True,
     )
     return scheduler
