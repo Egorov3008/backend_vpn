@@ -3,7 +3,27 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from client import XUISession, _StandaloneClientAPI, XUIAuthError
+from client import (
+    XUISession,
+    _StandaloneClientAPI,
+    XUIAuthError,
+    XUIAPIError,
+    _xui_circuit_breaker,
+)
+
+
+@pytest.fixture
+def reset_circuit_breaker():
+    """Сброс общего circuit breaker до/после теста (модульный singleton)."""
+    _xui_circuit_breaker._state = "closed"
+    _xui_circuit_breaker._consecutive_failures = 0
+    _xui_circuit_breaker._consecutive_successes = 0
+    _xui_circuit_breaker._opened_at = None
+    yield
+    _xui_circuit_breaker._state = "closed"
+    _xui_circuit_breaker._consecutive_failures = 0
+    _xui_circuit_breaker._consecutive_successes = 0
+    _xui_circuit_breaker._opened_at = None
 
 
 @pytest.fixture
@@ -98,6 +118,30 @@ class TestStandaloneClientAPI:
                 "inboundIds": [1, 2],
             }
 
+    @pytest.mark.asyncio
+    async def test_add_raises_on_success_false(self):
+        """3x-ui возвращает HTTP 200 с success:false (напр. несуществующий inbound).
+        Backend НЕ должен считать это успехом — иначе появится фантомный ключ в БД."""
+        api = _StandaloneClientAPI(
+            base_url="http://localhost:2053",
+            username="admin",
+            password="admin",
+            session_cookie="abc123",
+        )
+        with patch("httpx.AsyncClient.request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = MagicMock(
+                status_code=200,
+                json=MagicMock(
+                    return_value={"success": False, "msg": " (record not found)", "obj": None}
+                ),
+                raise_for_status=MagicMock(),
+            )
+            with pytest.raises(XUIAPIError):
+                await api.add(
+                    client_data={"email": "a@b.com", "id": "uuid"},
+                    inbound_ids=[100, 99],
+                )
+
 
 class TestXUISessionStandaloneMethods:
     """Unit tests for XUISession facade over standalone API."""
@@ -183,3 +227,80 @@ class TestXUISessionStandaloneMethods:
 
         assert result == {"success": True}
         mock_delete.assert_awaited_once_with("user@x.com", keep_traffic=True)
+
+    @pytest.mark.asyncio
+    async def test_add_client_returns_false_on_success_false(self, reset_circuit_breaker):
+        """Панель ответила success:false (несуществующий inbound) → add_client
+        обязан вернуть False, иначе CreateKey.proces сохранит фантомный ключ."""
+        mock_server = MagicMock()
+        mock_server.api_url = "http://localhost:8000"
+        mock_server.login = "admin"
+        mock_server.password = "admin"
+        mock_model_service = MagicMock()
+        mock_model_service.servers = MagicMock()
+        mock_model_service.servers.get_data = AsyncMock(return_value=mock_server)
+
+        session = XUISession(model_service=mock_model_service, loading=MagicMock())
+        await session.server_init()
+        session._standalone = _StandaloneClientAPI(
+            base_url="http://localhost:8000", username="admin", password="admin",
+            session_cookie="sess",
+        )
+        session._is_authenticated = True
+
+        with patch("httpx.AsyncClient.request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = MagicMock(
+                status_code=200,
+                json=MagicMock(
+                    return_value={"success": False, "msg": " (record not found)", "obj": None}
+                ),
+                raise_for_status=MagicMock(),
+            )
+            result = await session.add_client(
+                client_id="uuid", email="phantom@x.com", tg_id=1, limit_ip=1,
+                inbound_ids=[100, 99], expiry_time=0,
+            )
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_add_client_success_false_does_not_trip_circuit_breaker(
+        self, reset_circuit_breaker
+    ):
+        """Логический провал панели (success:false) — НЕ проблема доступности:
+        не должен выбивать общий circuit breaker, иначе одно неверное
+        AVAILABLE_CONNECTIONS ломает renewal/delete для существующих юзеров."""
+        mock_server = MagicMock()
+        mock_server.api_url = "http://localhost:8000"
+        mock_server.login = "admin"
+        mock_server.password = "admin"
+        mock_model_service = MagicMock()
+        mock_model_service.servers = MagicMock()
+        mock_model_service.servers.get_data = AsyncMock(return_value=mock_server)
+
+        session = XUISession(model_service=mock_model_service, loading=MagicMock())
+        await session.server_init()
+        session._standalone = _StandaloneClientAPI(
+            base_url="http://localhost:8000", username="admin", password="admin",
+            session_cookie="sess",
+        )
+        session._is_authenticated = True
+
+        # 5 последовательных success:false — достаточно чтобы открыть breaker,
+        # если бы они считались как failure (fail_max=5).
+        with patch("httpx.AsyncClient.request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = MagicMock(
+                status_code=200,
+                json=MagicMock(
+                    return_value={"success": False, "msg": " (record not found)", "obj": None}
+                ),
+                raise_for_status=MagicMock(),
+            )
+            for _ in range(6):
+                await session.add_client(
+                    client_id="uuid", email="phantom@x.com", tg_id=1, limit_ip=1,
+                    inbound_ids=[100, 99], expiry_time=0,
+                )
+
+        assert _xui_circuit_breaker._state == "closed"
+        assert _xui_circuit_breaker._consecutive_failures == 0

@@ -67,7 +67,7 @@ class CreateKey:
                 )
                 return None
 
-            await self.xui_session.add_client(
+            add_result = await self.xui_session.add_client(
                 client_id=key.client_id,
                 email=key.email,
                 tg_id=key.tg_id,
@@ -75,6 +75,19 @@ class CreateKey:
                 inbound_ids=key.inbound_ids or [key.inbound_id],
                 expiry_time=key.expiry_time,
             )
+
+            # add_client возвращает False при провале панели (success:false,
+            # circuit breaker open, сетевая ошибка). НЕ сохраняем фантомный ключ,
+            # которого нет в панели — иначе юзер получит «ключ создан», а в панели
+            # клиента не будет (баг dp5649).
+            if add_result is False:
+                logger.error(
+                    "Ключ не создан в панели — сохранение в БД отменено",
+                    tg_id=tg_id,
+                    email=key.email,
+                    tariff_id=tariff.id,
+                )
+                return None
 
             # Сохранение данных ключа
             await self.key_data.save_data(conn, key, email=key.email)

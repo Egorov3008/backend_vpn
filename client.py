@@ -99,6 +99,21 @@ class XUIAuthError(Exception):
     """Ошибка аутентификации в 3x-ui панели (standalone API)."""
 
 
+class XUIAPIError(Exception):
+    """3x-ui API вернул success:false (HTTP 200, но операция не выполнена).
+
+    3x-ui standalone API отвечает HTTP 200 с телом {"success": false, "msg": ...}
+    при провале операции (напр. добавление клиента к несуществующему inbound).
+    Без проверки этого поля операция считается успешной и в БД сохраняется
+    фантомный ключ, которого нет в панели.
+    """
+
+
+# Сигнал логического провала панели (success:false), пойманный внутри breaker-замыкания,
+# чтобы такой провал НЕ считался failure'ом circuit breaker'а (это не проблема доступности).
+_ADD_LOGICAL_FAIL = object()
+
+
 from dataclasses import dataclass
 
 @dataclass
@@ -251,6 +266,19 @@ class _StandaloneClientAPI:
 
     # ── Standalone Clients API (v3.2.0) ──
 
+    @staticmethod
+    def _check_success(data: dict, action: str) -> dict:
+        """Проверяет поле success в JSON-ответе 3x-ui.
+
+        3x-ui возвращает HTTP 200 даже при провале операции (success:false).
+        Без этой проверки операция считается успешной и в БД сохраняется
+        фантомная запись, которой нет в панели.
+        """
+        if not isinstance(data, dict) or data.get("success") is False:
+            msg = data.get("msg") if isinstance(data, dict) else None
+            raise XUIAPIError(f"{action} провален панелью: {msg!r}")
+        return data
+
     async def add(self, client_data: dict, inbound_ids: list[int]) -> dict:
         """POST /api/clients/add"""
         resp = await self._request(
@@ -259,7 +287,7 @@ class _StandaloneClientAPI:
             json={"client": client_data, "inboundIds": inbound_ids},
         )
         resp.raise_for_status()
-        return resp.json()
+        return self._check_success(resp.json(), "add_client")
 
     async def attach(self, email: str, inbound_ids: list[int]) -> dict:
         """POST /api/clients/{email}/attach"""
@@ -482,8 +510,24 @@ class XUISession:
                 "reset": 0,
             }
             async def _add():
-                return await self._standalone.add(client_data, inbound_ids)
-            await _xui_circuit_breaker.call_async(_add)
+                try:
+                    return await self._standalone.add(client_data, inbound_ids)
+                except XUIAPIError as e:
+                    # Логический провал панели (success:false, напр. несуществующий
+                    # inbound) — НЕ проблема доступности панели. Не позволяем
+                    # этому выбить общий circuit breaker: иначе неверное
+                    # AVAILABLE_CONNECTIONS ломает renewal/delete для всех юзеров.
+                    xui_api_errors_total.labels(
+                        method="add_client", error_type="XUIAPIError"
+                    ).inc()
+                    logger.error(
+                        "Панель отклонила добавление клиента (success:false)",
+                        extra={"email": email, "client_id": client_id, "error": str(e)},
+                    )
+                    return _ADD_LOGICAL_FAIL
+            result = await _xui_circuit_breaker.call_async(_add)
+            if result is _ADD_LOGICAL_FAIL:
+                return False
             logger.info(
                 "Клиент успешно добавлен", extra={"email": email, "client_id": client_id}
             )
