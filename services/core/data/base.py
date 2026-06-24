@@ -41,8 +41,6 @@ class BaseData(Generic[T]):
             return self.cache_service.tariffs
         elif self.model_name == "giftlink":
             return self.cache_service.gifts
-        elif self.model_name == "inbound":
-            return self.cache_service.inbounds
         elif self.model_name == "paymentmodel":
             return self.cache_service.payments
         elif self.model_name == "stock":
@@ -151,8 +149,6 @@ class BaseData(Generic[T]):
             return data.id
         elif self.model_name == "giftlink":
             return data.sender_tg_id
-        elif self.model_name == "inbound":
-            return (data.server_id, data.inbound_id)
         elif self.model_name == "paymentmodel":
             return data.payment_id
         elif self.model_name == "stock":
@@ -175,8 +171,6 @@ class BaseData(Generic[T]):
             return "id"
         elif self.model_name == "giftlink":
             return "sender_tg_id"
-        elif self.model_name == "inbound":
-            return "inbound_id"
         elif self.model_name == "paymentmodel":
             return "payment_id"
         elif self.model_name == "stock":
@@ -198,14 +192,6 @@ class BaseData(Generic[T]):
             return self.key_manager.tariff(identifier)
         elif self.model_name == "giftlink":
             return self.key_manager.gift(identifier)
-        elif self.model_name == "inbound":
-            # Inbound требует (server_id, inbound_id)
-            if isinstance(identifier, tuple) and len(identifier) == 2:
-                return self.key_manager.inbound(identifier[0], identifier[1])
-            else:
-                raise ValueError(
-                    f"Inbound требует кортеж (server_id, inbound_id), получен: {identifier}"
-                )
         elif self.model_name == "paymentmodel":
             return self.key_manager.payment(identifier)
         elif self.model_name == "stock":

@@ -1,6 +1,6 @@
 from database.base import BaseRepository
 from database.protocols import DatabaseProtocol
-from models import User, Key, Server, PaymentModel, Tariff, Inbound, GiftLink, LoginCode
+from models import User, Key, Server, PaymentModel, Tariff, GiftLink, LoginCode
 from models import ReferralLink, ReferralRedemption, ReferralReward
 from models.stocks.stock import Stock
 
@@ -23,9 +23,6 @@ class DataService:
         )
         self.tariffs: DatabaseProtocol[Tariff] = BaseRepository[Tariff](
             table_name="tariff", model=Tariff
-        )
-        self.inbounds: DatabaseProtocol[Inbound] = BaseRepository[Inbound](
-            table_name="inbound", model=Inbound
         )
         self.gifts: DatabaseProtocol[GiftLink] = BaseRepository[GiftLink](
             table_name="gift_links", model=GiftLink

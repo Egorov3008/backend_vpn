@@ -1,12 +1,7 @@
-import random
 from typing import Dict, Any, Optional, List
-
-import asyncpg
 
 from config import LIST_AVAILABLE_CONNECTIONS, settings
 from logger import logger
-from models import Inbound
-from services.cache.key_manager import CacheKeyManager
 from services.cache.service import CacheService
 from services.core.data.service import ServiceDataModel
 
@@ -17,40 +12,11 @@ class FormConnectionData:
     def __init__(self, cache: CacheService, model_data: ServiceDataModel):
         self.cache = cache
         self.server_data = model_data.servers
-        self.inbound_data = model_data.inbounds
-        self._pool: Optional[asyncpg.Pool] = None
         self._xui = None
-
-    def set_pool(self, pool: asyncpg.Pool) -> None:
-        """Устанавливает пул соединений для прямого доступа к БД."""
-        self._pool = pool
 
     def set_xui_session(self, xui) -> None:
         """Устанавливает XUISession для получения inbounds из панели."""
         self._xui = xui
-
-    async def _get_inbounds_from_db(self, server_id: int) -> List[Inbound]:
-        """Получает inbounds напрямую из БД для сервера (legacy fallback)."""
-        if not self._pool:
-            logger.error(
-                "Пул соединений не установлен для получения inbounds из БД",
-                class_name=self.__class__.__name__,
-                method="_get_inbounds_from_db",
-                server_id=server_id
-            )
-            return []
-
-        try:
-            # Получаем все inbounds из БД и фильтруем по server_id
-            all_inbounds = await self.inbound_data.service.get_all(self._pool)
-            return [i for i in all_inbounds if i.server_id == server_id]
-        except Exception as e:
-            logger.error(
-                "Ошибка при получении inbounds из БД",
-                server_id=server_id,
-                error=str(e),
-            )
-            return []
 
     async def _get_available_inbound_ids_from_panel(self) -> List[int]:
         """Получает список inbound IDs из 3x-UI панели и фильтрует по .env"""
@@ -93,18 +59,7 @@ class FormConnectionData:
         if panel_inbounds:
             return panel_inbounds
 
-        # 2. Fallback: legacy DB
-        inbounds = await self._get_inbounds_from_db(server_id)
-        available_inbounds = [
-            i.inbound_id
-            for i in inbounds
-            if i.inbound_id in LIST_AVAILABLE_CONNECTIONS
-        ]
-
-        if available_inbounds:
-            return available_inbounds
-
-        # 3. Hard fallback: direct .env list
+        # 2. Fallback: direct .env list
         if LIST_AVAILABLE_CONNECTIONS:
             logger.warning(
                 "Используем LIST_AVAILABLE_CONNECTIONS из .env напрямую",

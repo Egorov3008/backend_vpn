@@ -45,7 +45,6 @@ PostgreSQL + 3x-UI Panel
 
 - **User** → `tg_id` (Telegram ID)
 - **Key** → `email` (not id!) — unique identifier in 3x-UI
-- **Inbound** → `(server_id, inbound_id)` — composite key
 - **Payment** → `payment_id` (not id!) — YooKassa transaction ID
 
 ### Core Services
@@ -67,7 +66,7 @@ PostgreSQL + 3x-UI Panel
 
 **`CacheService` (`services/cache/service.py`):**
 - In-memory cache with TTL (loaded at startup)
-- Holds users, tariffs, keys, servers, inbounds, stocks
+- Holds users, tariffs, keys, servers, stocks
 - Updated on every mutation (create/delete/renew key, update payment status)
 
 ### API Endpoints
@@ -142,7 +141,6 @@ PostgreSQL + 3x-UI Panel
 - `tariffs` (id, name_tariff, amount, duration_months, traffic_gb, is_active)
 - `payments` (payment_id, tg_id, amount, status, payment_type, created_at, updated_at)
 - `servers` (id, url, api_url, availability)
-- `inbounds` (id, server_id, inbound_id, protocol, traffic_gb, available)
 - `stocks` (id, name, amount, description, created_at)
 - (and others — see `models.py`)
 
@@ -191,7 +189,7 @@ PostgreSQL + 3x-UI Panel
 
 **On Startup:**
 - `LoadingService.load_all()` fetches all data from PostgreSQL
-- CacheService stores: users, tariffs, keys, servers, inbounds, stocks
+- CacheService stores: users, tariffs, keys, servers, stocks
 
 **On Mutation:**
 - Create key → add to cache
@@ -285,7 +283,8 @@ Required in `.env`:
 - `BOT_SECRET_KEY` — shared secret with bot/web clients
 - `TELEGRAM_BOT_TOKEN` — for sending user notifications
 - `XUI_API_URL` / `XUI_LOGIN` / `XUI_PASSWORD` — 3x-UI panel credentials
-- `XUI_INBOUND_ID` — default inbound ID for new keys
+- `AVAILABLE_CONNECTIONS` — JSON/list of panel inbound IDs allowed for new keys (used by `FormConnectionData`; panel inbounds are filtered by this)
+- `XUI_INBOUND_ID_LANDING` — fixed panel inbound ID for landing keys
 - `DEFAULT_PRICING_PLAN` — default tariff ID for trial keys
 - `YOOKASSA_SHOP_ID` / `YOOKASSA_SECRET_KEY` — payment processing
 - `WEBHOOK_BASE_URL` — public URL for YooKassa callbacks (e.g., https://api.example.com)

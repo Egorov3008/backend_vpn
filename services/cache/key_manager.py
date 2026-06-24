@@ -22,7 +22,6 @@ class CacheKeyManager:
     - Server: id
     - Tariff: id
     - GiftLink: id или token
-    - Inbound: (server_id, inbound_id)
     - PaymentModel: payment_id
     - Stock: tg_id
     """
@@ -53,11 +52,6 @@ class CacheKeyManager:
     def gift(gift_id: Union[int, str]) -> str:
         """Ключ подарка по id (или token)"""
         return f"gift_{gift_id}"
-
-    @staticmethod
-    def inbound(server_id: Union[int, str], inbound_id: Union[int, str]) -> str:
-        """Ключ inbound'а по (server_id, inbound_id)"""
-        return f"inbound_{server_id}_{inbound_id}"
 
     @staticmethod
     def payment(payment_id: str) -> str:
@@ -103,11 +97,6 @@ class CacheKeyManager:
         """Ключ для временного хранения данных тарифа перед оплатой (TTL: 10 минут)"""
         return f"temporary_tariff_{tg_id}"
 
-    @staticmethod
-    def temporary_inbound(tg_id: Union[int, str]) -> str:
-        """Ключ для временного хранения inbound_id пользователя"""
-        return f"temporary_inbound_{tg_id}"
-
     # === ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ===
 
     @staticmethod
@@ -131,7 +120,6 @@ class CacheKeyManager:
 # Server.id → CacheKeyManager.server(id)
 # Tariff.id → CacheKeyManager.tariff(id)
 # GiftLink.id → CacheKeyManager.gift(id)
-# Inbound(server_id, inbound_id) → CacheKeyManager.inbound(server_id, inbound_id)
 # PaymentModel.payment_id → CacheKeyManager.payment(payment_id)
 # Stock.tg_id → CacheKeyManager.stock(tg_id)
 # ReferralLink.token → CacheKeyManager.referral_link(token)

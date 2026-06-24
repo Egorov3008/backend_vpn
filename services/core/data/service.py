@@ -1,5 +1,5 @@
 from database import DataService
-from models import User, Key, Server, Inbound, PaymentModel, GiftLink, Tariff, ReferralLink, LoginCode
+from models import User, Key, Server, PaymentModel, GiftLink, Tariff, ReferralLink, LoginCode
 from models.stocks.stock import Stock
 from services.cache.service import CacheService
 from services.core.data.base import BaseData
@@ -23,9 +23,6 @@ class ServiceDataModel:
         )
         self.servers: DataProtocol[Server] = BaseData[Server](
             Server, self.cache_service, self.data_service.servers
-        )
-        self.inbounds: DataProtocol[Inbound] = BaseData[Inbound](
-            Inbound, self.cache_service, self.data_service.inbounds
         )
         self.payments: DataProtocol[PaymentModel] = BaseData[PaymentModel](
             PaymentModel, self.cache_service, self.data_service.payments

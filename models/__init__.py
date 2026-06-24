@@ -5,7 +5,6 @@
 from .users.user import User
 from .keys.key import Key
 from .servers.server import Server
-from .servers.inbound import Inbound
 from .tariffs.tariff import Tariff
 from .payments.payment import PaymentModel
 from .referrals.referral import Referral

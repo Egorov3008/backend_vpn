@@ -263,22 +263,13 @@ async def admin_generate_key(
     if not tariff:
         raise HTTPException(status_code=404, detail="Tariff not found")
 
-    server_id = body.server_id
-    if body.inbound_id:
-        inbound = await service_data.inbounds.get_data((server_id, body.inbound_id))
-        if not inbound:
-            inbound = await service_data.data_service.inbounds.get(pool, inbound_id=body.inbound_id)
-        if inbound:
-            server_id = inbound.server_id
-            await cache.users.set(CacheKeyManager.temporary_inbound(body.tg_id), str(body.inbound_id))
-
     data_service = DataService()
     create_key, _, _ = build_key_services(pool, service_data, cache, data_service)
 
     result = await create_key.proces(
         tg_id=body.tg_id,
         tariff=tariff,
-        server_id=server_id,
+        server_id=body.server_id,
         conn=pool,
         number_of_months=body.number_of_months,
     )
@@ -442,15 +433,6 @@ async def admin_list_gifts(
             for g in gifts
         ]
     }
-
-
-@router.get("/inbounds")
-async def admin_list_inbounds(
-    service_data: ServiceDataModel = Depends(get_service_data),
-):
-    """Admin: list all inbounds."""
-    inbounds = await service_data.inbounds.get_all()
-    return {"inbounds": inbounds}
 
 
 @router.get("/tariffs/{tariff_id}")

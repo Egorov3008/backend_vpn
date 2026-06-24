@@ -50,15 +50,6 @@ CREATE TABLE IF NOT EXISTS tariff
     traffic_limit REAL NOT NULL DEFAULT 0.0
 );
 
-CREATE TABLE IF NOT EXISTS inbound
-(
-    id SERIAL PRIMARY KEY,
-    server_id INTEGER NOT NULL,
-    inbound_id INTEGER NOT NULL,
-    name_inbound TEXT,
-    UNIQUE (server_id, inbound_id)
-);
-
 -- ============================================================================
 -- 3. Users (depends on servers)
 -- ============================================================================
@@ -130,7 +121,7 @@ BEGIN
 END $$;
 
 -- ============================================================================
--- 5. Keys (depends on users, inbound, tariff)
+-- 5. Keys (depends on users, tariff)
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS keys

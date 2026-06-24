@@ -23,7 +23,6 @@ class LoadingService(LoaderFactory):
         self.tariff_srv = data_service.tariffs
         self.gifts = data_service.gifts
         self.server_srv = data_service.servers
-        self.inbound_repo = data_service.inbounds
         self.payments = data_service.payments
         self.referral_links = data_service.referral_links
         self.stock_srv = data_service.stocks
@@ -43,12 +42,6 @@ class LoadingService(LoaderFactory):
                 lambda t: self.cache.tariffs.set(self.keys.tariff(t.id), t),
             ),
             (self.gifts, lambda g: self.cache.gifts.set(self.keys.gift(g.id), g)),
-            (
-                self.inbound_repo,
-                lambda i: self.cache.inbounds.set(
-                    self.keys.inbound(i.server_id, i.inbound_id), i
-                ),
-            ),
             (
                 self.payments,
                 lambda p: self.cache.payments.set(self.keys.payment(p.payment_id), p),

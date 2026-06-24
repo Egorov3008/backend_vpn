@@ -1,12 +1,11 @@
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List
 
 
 class AdminGenerateKeyRequest(BaseModel):
     tg_id: int
     tariff_id: int
     server_id: int = 2
-    inbound_id: Optional[int] = None
     number_of_months: int = 1
 
 

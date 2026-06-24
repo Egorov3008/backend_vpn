@@ -4,7 +4,7 @@ from datetime import timedelta
 from models.stocks.stock import Stock
 from services.cache.storage import CacheStorage
 from services.cache.protocols import CacheProtocol
-from models import User, Key, Server, Tariff, GiftLink, Inbound, PaymentModel, ReferralLink
+from models import User, Key, Server, Tariff, GiftLink, PaymentModel, ReferralLink
 
 T = TypeVar("T")
 
@@ -67,7 +67,6 @@ class CacheService:
     - servers: CacheProtocol[Server]
     - tariffs: CacheProtocol[Tariff]
     - gifts: CacheProtocol[GiftLink]
-    - inbounds: CacheProtocol[Inbound]
     - payments: CacheProtocol[PaymentModel]
     - stocks: CacheProtocol[Stock]
     - referral_links: CacheProtocol[ReferralLink]
@@ -95,7 +94,6 @@ class CacheService:
         self.gifts: CacheProtocol[GiftLink] = ModelCache[GiftLink](
             storage, "gift_links"
         )
-        self.inbounds: CacheProtocol[Inbound] = ModelCache[Inbound](storage, "inbounds")
         self.payments: CacheProtocol[PaymentModel] = ModelCache[PaymentModel](
             storage, "payments"
         )

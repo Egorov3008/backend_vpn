@@ -37,7 +37,6 @@ def build_key_services(
     xui = XUISession(model_service=service_data, loading=loading)
 
     connected_data = FormConnectionData(cache=cache, model_data=service_data)
-    connected_data.set_pool(pool)
     connected_data.set_xui_session(xui)
     formation = FormationKey(cache=cache, connected_data=connected_data, expiry=expiry)
     create_key = CreateKey(
