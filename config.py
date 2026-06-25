@@ -53,6 +53,8 @@ class Settings(BaseSettings):
     # Separate 3x-UI inbound for anonymous 24h keys. Must also be in
     # AVAILABLE_CONNECTIONS so form_data can pick it up.
     xui_inbound_id_landing: int = Field(default=0, alias="XUI_INBOUND_ID_LANDING")
+    # Grace period (days) of telegram-only access after a paid subscription expires.
+    grace_period_days: int = Field(default=7, alias="GRACE_PERIOD_DAYS")
     # HMAC secret for signed landing cookies. Falls back to bot_secret_key if empty.
     landing_cookie_secret: str = Field(default="", alias="LANDING_COOKIE_SECRET")
     # Public URL of the landing page (used in deep-link to bot).
@@ -119,6 +121,7 @@ DEFAULT_PRICING_PLAN: str = settings.default_pricing_plan
 TRIAL_TIME: int = settings.trial_time
 DISCOUNTS: int = settings.discounts
 LIMIT_IP: int = settings.limit_ip
+GRACE_PERIOD_DAYS: int = settings.grace_period_days
 METRICS_PORT: int = settings.metrics_port
 WEBHOOK_PATH: str = settings.webhook_path
 PAYMENT_SWEEP_MAX_AGE_MINUTES: int = settings.payment_sweep_max_age_minutes
