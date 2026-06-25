@@ -32,7 +32,7 @@ from pydantic import BaseModel
 from app.auth import verify_bot_secret
 from app.dependencies import get_cache, get_pool, get_service_data
 from app.factories import build_key_services
-from config import settings
+from config import DEFAULT_PRICING_PLAN, settings
 from database.service import DataService
 from logger import logger
 from models import Tariff
@@ -40,6 +40,7 @@ from services.cache.key_manager import CacheKeyManager
 from services.cache.service import CacheService
 from services.core.data.service import ServiceDataModel
 from services.core.user.utils.saver import SeverUser
+from services.core.user.utils.trial import TrialService
 
 router = APIRouter(
     prefix="/landing",
@@ -172,10 +173,10 @@ async def _get_key_by_landing_uid(
     landing_uid: str,
 ):
     """Достать ключ из БД по landing_uid (fallback кеш→БД)."""
-    # Сначала ищем в кеше (быстро)
-    all_keys = service_data.cache_service.keys.all() if hasattr(
-        service_data.cache_service.keys, "all"
-    ) else []
+    # Сначала ищем в кеше (быстро) — CacheService.keys.all() асинхронен.
+    all_keys = []
+    if hasattr(service_data.cache_service.keys, "all"):
+        all_keys = await service_data.cache_service.keys.all()
     for k in all_keys:
         if getattr(k, "landing_uid", None) == landing_uid:
             return k
@@ -357,6 +358,13 @@ async def get_state(
     if not key_obj:
         return LandingStateResponse(state="expired")
 
+    # Ключ уже привязан к реальному tg_id (claim выполнен) → юзер дошёл до бота
+    # и забрал ключ. mark-converted (существующий юзер) НЕ переносит tg_id, поэтому
+    # для него ключ остаётся на псевдо-tg_id (<0) и лендинг продолжает показывать
+    # активный 24ч ключ — как и требуется («ключ не отключается до истечения 24ч»).
+    if key_obj.converted_tg_id is not None and key_obj.tg_id and key_obj.tg_id > 0:
+        return LandingStateResponse(state="converted")
+
     now_ms = int(time.time() * 1000)
     expiry_ms = int(key_obj.expiry_time or 0)
 
@@ -397,14 +405,20 @@ async def mark_converted(
 ):
     """Проставить converted_tg_id для ключа, найденного по landing_uid.
 
-    Вызывается ботом, когда юзер приходит по /start landing_<uid>.
-    Временный ключ НЕ отключается — продолжает жить до 24ч.
+    Вызывается ботом, когда СУЩЕСТВУЮЩИЙ юзер приходит по /start landing_<uid>.
+    Временный ключ НЕ отключается и НЕ переносится на реальный tg_id —
+    продолжает жить до 24ч на псевдо-tg_id.
     """
     key_obj = await _get_key_by_landing_uid(service_data, pool, landing_uid)
     if not key_obj:
         raise HTTPException(status_code=404, detail="Landing key not found")
 
-    # Не перезаписываем, если уже был привязан (идемпотентность)
+    # Идемпотентность: тот же юзер повторно кликнул по ссылке
+    if key_obj.converted_tg_id == body.tg_id:
+        return {"ok": True, "already": True, "email": key_obj.email}
+
+    # Ключ уже привязан к другому аккаунту — НЕ перезаписываем (защита от гонок и
+    # повторного использования одной ссылки разными юзерами).
     if key_obj.converted_tg_id is not None and key_obj.converted_tg_id != body.tg_id:
         logger.warning(
             "Landing key уже привязан к другому tg_id",
@@ -412,6 +426,7 @@ async def mark_converted(
             current=key_obj.converted_tg_id,
             new=body.tg_id,
         )
+        return {"ok": False, "status": "already_claimed_other", "email": key_obj.email}
 
     key_obj.converted_tg_id = body.tg_id
     # НЕ удаляем из x-ui — ключ продолжает работать до 24ч
@@ -426,3 +441,117 @@ async def mark_converted(
     )
 
     return {"ok": True, "email": key_obj.email}
+
+
+# =============================================================================
+# POST /landing/claim/{landing_uid} — вызывается ботом для НОВОГО юзера
+# =============================================================================
+class ClaimRequest(BaseModel):
+    tg_id: int
+
+
+@router.post("/claim/{landing_uid}")
+async def claim_key(
+    landing_uid: str,
+    body: ClaimRequest,
+    pool: asyncpg.Pool = Depends(get_pool),
+    service_data: ServiceDataModel = Depends(get_service_data),
+    cache: CacheService = Depends(get_cache),
+):
+    """Привязать 24ч лендинг-ключ к реальному tg_id и продлить по trial-тарифу.
+
+    Вызывается ботом, когда НОВЫЙ юзер приходит по /start landing_<uid> (бот
+    сначала авто-регистрирует юзера, затем вызывает этот эндпоинт).
+
+    - Переносит владельца: tg_id pseudo → реальный (тот же ключ, что в Happ).
+    - Продлевает срок на trial-период (7 дней) от текущего expiry (или от now,
+      если ключ уже истёк).
+    - Ставит tariff_id = trial, trial=1, converted_tg_id = реальный tg_id.
+    - Выравнивает user.server_id с сервером ключа (иначе продление из бота
+      сломается — /keys/{email}/renew берёт сервер из user.server_id).
+    """
+    key_obj = await _get_key_by_landing_uid(service_data, pool, landing_uid)
+    if not key_obj:
+        raise HTTPException(status_code=404, detail="Landing key not found")
+
+    # Идемпотентность: тот же юзер повторно кликнул — отдаём его ключ
+    if key_obj.converted_tg_id == body.tg_id:
+        return {
+            "status": "already_claimed",
+            "email": key_obj.email,
+            "key_value": key_obj.key,
+            "expires_at_ms": int(key_obj.expiry_time or 0),
+        }
+
+    # Ключ уже привязан к другому аккаунту — не отдаём
+    if key_obj.converted_tg_id is not None and key_obj.converted_tg_id != body.tg_id:
+        logger.warning(
+            "Landing key уже привязан к другому tg_id",
+            landing_uid=landing_uid,
+            current=key_obj.converted_tg_id,
+            new=body.tg_id,
+        )
+        return {"status": "already_claimed_other", "email": key_obj.email}
+
+    # Юзер должен быть зарегистрирован ботом заранее
+    user = await service_data.users.get_data(body.tg_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not registered")
+
+    # Trial-тариф (DEFAULT_PRICING_PLAN, обычно id=10, period=7 дней)
+    trial_tariff = await service_data.tariffs.get_data(
+        int(DEFAULT_PRICING_PLAN), conn=pool
+    )
+    if not trial_tariff:
+        raise HTTPException(status_code=404, detail="Trial tariff not found")
+
+    now_ms = int(time.time() * 1000)
+    period_ms = int(trial_tariff.period) * 86400 * 1000
+    # Продлить на trial-период от текущего срока (сохраняя остаток 24ч);
+    # если ключ уже истёк — от now.
+    base_expiry = max(int(key_obj.expiry_time or 0), now_ms)
+    new_expiry_ms = base_expiry + period_ms
+
+    # 1. Продлеваем клиент в панели 3x-UI (та же запись, что импортирована в Happ)
+    key_obj.expiry_time = new_expiry_ms
+    _, _, xui = build_key_services(pool, service_data, cache, DataService())
+    extended = await xui.extend_client_key(key_obj)
+    if not extended:
+        raise HTTPException(
+            status_code=500, detail="Failed to extend key in 3x-ui panel"
+        )
+
+    # 2. Перенос владения + тариф
+    key_obj.tg_id = body.tg_id
+    key_obj.tariff_id = trial_tariff.id
+    key_obj.name_tariff = trial_tariff.name_tariff
+    key_obj.period = trial_tariff.period
+    key_obj.amount = trial_tariff.amount
+    key_obj.limit_ip = trial_tariff.limit_ip or LANDING_KEY_LIMIT_IP
+    key_obj.converted_tg_id = body.tg_id
+    await service_data.keys.update(pool, key_obj, search_data={"email": key_obj.email})
+    await cache.keys.set(CacheKeyManager.key(key_obj.email), key_obj)
+
+    # 3. trial=1 (как в /keys/trial)
+    await TrialService(service_data).installation_trial(body.tg_id, pool, trial=1)
+
+    # 4. Выровнять server_id с сервером ключа, чтобы продление из бота работало
+    if user.server_id != settings.xui_server_id:
+        user.server_id = settings.xui_server_id
+        await service_data.users.update(pool, user, {"tg_id": body.tg_id})
+        await cache.users.set(CacheKeyManager.user(body.tg_id), user)
+
+    logger.info(
+        "Landing key привязан к юзеру и продлён по trial",
+        landing_uid=landing_uid,
+        tg_id=body.tg_id,
+        email=key_obj.email,
+        new_expiry_ms=new_expiry_ms,
+    )
+
+    return {
+        "status": "claimed",
+        "email": key_obj.email,
+        "key_value": key_obj.key,
+        "expires_at_ms": new_expiry_ms,
+    }
