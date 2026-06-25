@@ -215,8 +215,11 @@ class BaseRepository(Generic[T]):
         typed_values = [where_value] + [filtered_kwargs[k] for k in filtered_kwargs]
 
         # Определяем primary key для ON CONFLICT
-        # Для таблицы keys это (tg_id, client_id)
-        if self.table_name == "keys":
+        # Для таблицы keys UPSERT по (tg_id, client_id) применим только когда
+        # апдейт ищется по этому же ключу. При апдейте по email (перенос владельца
+        # ключа с pseudo_tg_id на реальный tg_id) UPSERT вставил бы новую строку с
+        # тем же email и упал в uq_keys_email — поэтому здесь нужен обычный UPDATE.
+        if self.table_name == "keys" and where_key in ("tg_id", "client_id"):
             # Используем UPSERT для обработки гонки
             set_clause_with_excluded = ", ".join(
                 [f"{k} = EXCLUDED.{k}" for k in filtered_kwargs.keys()]
