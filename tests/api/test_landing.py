@@ -447,3 +447,77 @@ async def test_state_active_after_mark_converted_only(api_client, mock_service_d
     data = resp.json()
     assert data["state"] in ("active", "expiring")
     assert data["key_value"] == "vless://test@example.com"
+
+
+@pytest.mark.asyncio
+async def test_state_already_registered_after_mark_converted(api_client, mock_service_data):
+    """mark-converted (converted_tg_id set, tg_id<0), ключ жив → already_registered=True + bot_url."""
+    from api.v1.landing import _sign_cookie
+
+    landing_uid = "ar_state"
+    key = make_landing_key(email="ar_state@anon", landing_uid=landing_uid)
+    key.converted_tg_id = 999  # mark-converted, tg_id остался псевдо (<0)
+    mock_service_data.cache_service.keys.all = AsyncMock(return_value=[key])
+
+    cookie = _sign_cookie(landing_uid)
+    resp = await api_client.get(
+        "/api/v1/landing/state", cookies={"tg_landing_id": cookie}
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["state"] in ("active", "expiring")
+    assert data["already_registered"] is True
+    assert data["key_value"] == "vless://test@example.com"
+    assert data["bot_url"].startswith("https://t.me/")
+    assert "start=landing_" not in data["bot_url"]
+
+
+@pytest.mark.asyncio
+async def test_state_fresh_key_not_already_registered(api_client, mock_service_data):
+    """Свежий ключ (converted_tg_id=None), жив → already_registered=False, bot_url есть."""
+    from api.v1.landing import _sign_cookie
+
+    landing_uid = "fresh_state"
+    key = make_landing_key(email="fresh_state@anon", landing_uid=landing_uid)
+    # converted_tg_id не выставлен
+    mock_service_data.cache_service.keys.all = AsyncMock(return_value=[key])
+
+    cookie = _sign_cookie(landing_uid)
+    resp = await api_client.get(
+        "/api/v1/landing/state", cookies={"tg_landing_id": cookie}
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["state"] in ("active", "expiring")
+    assert data["already_registered"] is False
+    assert data["bot_url"].startswith("https://t.me/")
+
+
+@pytest.mark.asyncio
+async def test_state_expired_converted_no_already_registered(api_client, mock_service_data):
+    """Истёкший ключ с converted_tg_id (tg_id<0) → expired, already_registered=False."""
+    from api.v1.landing import _sign_cookie
+    from models import Key
+
+    landing_uid = "ar_exp"
+    key = Key(
+        tg_id=-999,
+        client_id="uuid-are",
+        email="ar_exp@anon",
+        expiry_time=int((time.time() - 3600) * 1000),  # 1ч назад — истёк
+        key="vless://ar",
+        inbound_id=13,
+        limit_ip=1,
+        landing_uid=landing_uid,
+        converted_tg_id=999,
+    )
+    mock_service_data.cache_service.keys.all = AsyncMock(return_value=[key])
+
+    cookie = _sign_cookie(landing_uid)
+    resp = await api_client.get(
+        "/api/v1/landing/state", cookies={"tg_landing_id": cookie}
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["state"] == "expired"
+    assert data["already_registered"] is False

@@ -77,6 +77,7 @@ class LandingStateResponse(BaseModel):
     deep_link_happ: Optional[str] = None
     deep_link_bot: Optional[str] = None
     bot_url: Optional[str] = None
+    already_registered: bool = False
 
 
 # =============================================================================
@@ -375,8 +376,14 @@ async def get_state(
     remaining_seconds = (expiry_ms - now_ms) // 1000
 
     deep_link_happ, deep_link_bot = _build_deep_links(key_obj.key, landing_uid)
+    bot_url = f"{LANDING_BOT_LINK_PREFIX}{settings.bot_name or 'TolkoDlyaSv0ih_Bot'}"
 
     state = "expiring" if remaining_seconds < EXPIRING_THRESHOLD_HOURS * 3600 else "active"
+
+    # already_registered: mark-converted (существующий юзер) или already_claimed_other
+    # — converted_tg_id выставлен, но tg_id остался псевдо (<0). 24ч-ключ живёт,
+    # но бесплатное продление по claim недоступно → фронт показывает баннер.
+    already_registered = key_obj.converted_tg_id is not None
 
     return LandingStateResponse(
         state=state,
@@ -385,6 +392,8 @@ async def get_state(
         remaining_seconds=remaining_seconds,
         deep_link_happ=deep_link_happ,
         deep_link_bot=deep_link_bot,
+        bot_url=bot_url,
+        already_registered=already_registered,
     )
 
 
