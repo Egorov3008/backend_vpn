@@ -7,6 +7,7 @@ from models import Tariff, Key
 from services.cache.service import CacheService
 from services.core.connect_module.repositories.form_data import FormConnectionData
 from services.core.keys.utils.calculator import ExpiryCalculator
+from services.core.keys.utils.inbounds import paid_inbound_ids, is_subscription, GRACE_PERIOD_MS
 
 
 class FormationKey:
@@ -59,10 +60,12 @@ class FormationKey:
             # Landing-page flow: форсируем конкретный inbound.
             inbound_ids = [inbound_id_override]
             primary_inbound_id = inbound_id_override
+            grace_expiry = None  # landing 24h — не подписка
         else:
-            inbound_ids = server_data.get("inbound_ids", [])
-            # Для БД сохраняем первый inbound_id; для панели передаём весь список
+            inbound_ids = paid_inbound_ids() if is_subscription(tariff) else (
+                server_data.get("inbound_ids", []))
             primary_inbound_id = inbound_ids[0] if inbound_ids else 0
+            grace_expiry = (int(new_expiry_time) + GRACE_PERIOD_MS) if is_subscription(tariff) else None
 
         key = Key(
             tg_id=tg_id,
@@ -74,6 +77,7 @@ class FormationKey:
             inbound_ids=inbound_ids,
             key=subscription_url,
             tariff_id=tariff.id,
+            grace_expiry=grace_expiry,
         )
         return key
 
