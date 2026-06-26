@@ -67,13 +67,16 @@ class CreateKey:
                 )
                 return None
 
+            # Панельный expiryTime = grace_expiry для подписок (pre-emptive grace),
+            # иначе = оплаченный/бесплатный срок.
+            panel_expiry = key.grace_expiry if key.grace_expiry is not None else key.expiry_time
             add_result = await self.xui_session.add_client(
                 client_id=key.client_id,
                 email=key.email,
                 tg_id=key.tg_id,
                 limit_ip=key.limit_ip,
                 inbound_ids=key.inbound_ids or [key.inbound_id],
-                expiry_time=key.expiry_time,
+                expiry_time=panel_expiry,
             )
 
             # add_client возвращает False при провале панели (success:false,
