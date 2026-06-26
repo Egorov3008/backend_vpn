@@ -10,6 +10,7 @@ from services.core.data.service import ServiceDataModel
 from services.core.keys.utils.calculator import ExpiryCalculator
 from services.core.keys.utils.create_key import CreateKey
 from services.core.keys.utils.formtion import FormationKey
+from services.core.keys.utils.grace import GraceManager
 from services.core.keys.utils.renewal import KeyRenewal
 from services.core.keys.utils.reset import KeyResetter
 from services.core.keys.utils.updating import KeyUpdater
@@ -48,14 +49,38 @@ def build_key_services(
 
     updater = KeyUpdater(expiry_calculator=expiry)
     resetter = KeyResetter(cache_service=cache)
+    grace_manager = build_grace_manager(pool, service_data, cache, data_service, xui=xui)
     key_renewal = KeyRenewal(
         model_data=service_data,
         xui_session=xui,
         refresh_key=updater,
         resetter=resetter,
+        grace_manager=grace_manager,
     )
 
     return (create_key, key_renewal, xui)
+
+
+def build_grace_manager(
+    pool: asyncpg.Pool,
+    service_data: ServiceDataModel,
+    cache: CacheService,
+    data_service: DataService,
+    xui: Optional[XUISession] = None,
+) -> GraceManager:
+    """Constructs a GraceManager. Reuses the given xui if provided (avoids a
+    second auth session); otherwise builds one. Used by build_payment_router
+    and landing.claim_key."""
+    if xui is None:
+        loading = LoadingService(cache=cache, data_service=data_service, pool=pool)
+        xui = XUISession(model_service=service_data, loading=loading)
+    return GraceManager(
+        xui_session=xui,
+        model_data=service_data,
+        cache=cache,
+        expiry=ExpiryCalculator(),
+        pool=pool,
+    )
 
 
 def build_payment_router(
@@ -82,10 +107,14 @@ def build_payment_router(
     create_key, key_renewal, xui = build_key_services(
         pool, service_data, cache, data_service
     )
+    grace_manager = build_grace_manager(pool, service_data, cache, data_service, xui=xui)
 
     processor = PaymentProcessor(conn=pool, model_service=service_data, cache=cache)
     creation_svc = KeyCreationService(
-        processor=processor, create_key=create_key, notifier=notifier
+        processor=processor,
+        create_key=create_key,
+        notifier=notifier,
+        grace_manager=grace_manager,
     )
     renewal_svc = KeyRenewalService(
         processor=processor, key_manager=key_renewal, notifier=notifier

@@ -20,10 +20,13 @@ class KeyCreationService:
         processor: PaymentProcessor,
         create_key: CreateKey,
         notifier: Optional[INotifier] = None,
+        grace_manager=None,
     ):
         self.processor = processor
         self.create_key = create_key
         self.notifier = notifier
+        # landing-upgrade flow is implemented in Task 9 (KeyCreationService.process).
+        self.grace_manager = grace_manager
 
     async def process(self, tariff_id: str = None) -> Optional[Dict[str, Any]]:
         """
