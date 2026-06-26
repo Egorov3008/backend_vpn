@@ -301,7 +301,7 @@ async def test_claim_key_not_found(api_client, mock_service_data):
 
 @pytest.mark.asyncio
 async def test_claim_panel_extend_fails(api_client, mock_service_data, monkeypatch):
-    """upgrade_from_landing вернул False → 500."""
+    """upgrade_from_landing вернул None → 500, converted_tg_id откатывается."""
     from api.v1 import landing as landing_module
 
     landing_uid = "claimuid_xuifail"
@@ -325,8 +325,9 @@ async def test_claim_panel_extend_fails(api_client, mock_service_data, monkeypat
         f"/api/v1/landing/claim/{landing_uid}", json={"tg_id": 999}
     )
     assert resp.status_code == 500
-    # converted_tg_id выставляется до вызова upgrade (поведение нового claim_key)
-    assert key.converted_tg_id == 999
+    # При провале upgrade converted_tg_id откатывается, чтобы повторный клик
+    # мог retry (иначе already_claimed без рабочего ключа).
+    assert key.converted_tg_id is None
 
 
 # =============================================================================

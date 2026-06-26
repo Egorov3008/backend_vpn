@@ -516,10 +516,15 @@ async def claim_key(
 
     # Апгрейд того же клиента: attach [11,12], trial expiry, grace_expiry,
     # перенос tg_id на реальный. Happ-URL (key.key) сохраняется.
+    # converted_tg_id ставится до вызова — upgrade_from_landing читает его,
+    # чтобы перенести tg_id (transfer_tg). При провале откатываем, иначе
+    # key_obj (живой объект кеша на cache-hit) остался бы «привязанным» и
+    # повторный клик упёрся бы в already_claimed без рабочего ключа.
     key_obj.converted_tg_id = body.tg_id
     grace = build_grace_manager(pool, service_data, cache, DataService())
     upgraded = await grace.upgrade_from_landing(key_obj, trial_tariff, number_of_months=1)
     if not upgraded:
+        key_obj.converted_tg_id = None  # откат, чтобы повторный клик мог retry
         raise HTTPException(status_code=500, detail="Failed to upgrade landing key")
 
     # trial=1 (как в /keys/trial)
