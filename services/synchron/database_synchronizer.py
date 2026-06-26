@@ -13,6 +13,20 @@ from services.synchron.traffic import TrafficUpdater
 from services.core.data.service import ServiceDataModel
 
 
+def _build_grace_manager(model_data, pool, xui_session):
+    """Builds a GraceManager reusing the panel_sync's authenticated XUI session.
+    Patchable in tests."""
+    from app.factories import build_grace_manager
+    from database.service import DataService
+    return build_grace_manager(
+        pool=pool,
+        service_data=model_data,
+        cache=model_data.cache_service,
+        data_service=DataService(),
+        xui=xui_session,
+    )
+
+
 class DatabaseSynchronizer:
     """
     Основной оркестратор синхронизации данных.
@@ -76,7 +90,28 @@ class DatabaseSynchronizer:
         """
         import time
         sync_start = time.time()
+        reconciled_count = 0
         try:
+            # Grace reconcile: converge each subscription key's inbound set to its
+            # DB-derived status. Runs even if panel client fetch later fails.
+            reconcile_start = time.time()
+            try:
+                all_keys = await self.model_data.keys.get_all()
+                grace = _build_grace_manager(self.model_data, self.pool, xui_session)
+                for key in all_keys or []:
+                    if getattr(key, "grace_expiry", None) is None:
+                        continue
+                    try:
+                        await grace.reconcile(key)
+                        reconciled_count += 1
+                    except Exception as e:
+                        logger.warning("grace reconcile провален",
+                                       extra={"email": getattr(key, "email", "?"), "error": str(e)})
+            except Exception as e:
+                logger.error("grace reconcile pass провален", error=str(e))
+            logger.info("Grace reconcile завершён", reconciled=reconciled_count,
+                        reconcile_time=f"{time.time() - reconcile_start:.2f}s")
+
             # 1. Получаем клиентов с XUI
             fetch_start = time.time()
             clients = await self.xui_fetcher.extract_clients(xui_session)
@@ -87,7 +122,7 @@ class DatabaseSynchronizer:
                     method="extract_clients",
                     server_id=getattr(xui_session, "server_id", "unknown")
                 )
-                return {"total": 0, "successful": 0, "failed": 0}
+                return {"total": 0, "successful": 0, "failed": 0, "grace_reconciled": reconciled_count}
 
             logger.info("Начало синхронизации", total_clients=len(clients), fetch_clients_time=f"{fetch_time:.2f}s")
 
@@ -176,6 +211,7 @@ class DatabaseSynchronizer:
             stats["orphaned_deleted"] = cleanup_stats["deleted"]
             stats["traffic_updated"] = stats["successful"]
             stats["traffic_failed"] = stats["failed"]
+            stats["grace_reconciled"] = reconciled_count
 
             total_time = time.time() - sync_start
             logger.info(
@@ -193,7 +229,7 @@ class DatabaseSynchronizer:
 
         except Exception as e:
             logger.error("Критическая ошибка синхронизации", error=str(e))
-            return {"total": 0, "successful": 0, "failed": 0, "error": str(e)}
+            return {"total": 0, "successful": 0, "failed": 0, "error": str(e), "grace_reconciled": reconciled_count}
 
     async def _restore_missing_data(
         self, clients: List[PanelClient], out_keys: List[str], out_users: List[int]
