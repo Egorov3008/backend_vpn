@@ -31,7 +31,7 @@ from pydantic import BaseModel
 
 from app.auth import verify_bot_secret
 from app.dependencies import get_cache, get_pool, get_service_data
-from app.factories import build_key_services
+from app.factories import build_key_services, build_grace_manager
 from config import DEFAULT_PRICING_PLAN, settings
 from database.service import DataService
 from logger import logger
@@ -502,11 +502,6 @@ async def claim_key(
         )
         return {"status": "already_claimed_other", "email": key_obj.email}
 
-    # Юзер должен быть зарегистрирован ботом заранее
-    user = await service_data.users.get_data(body.tg_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not registered")
-
     # Trial-тариф (DEFAULT_PRICING_PLAN, обычно id=10, period=7 дней)
     trial_tariff = await service_data.tariffs.get_data(
         int(DEFAULT_PRICING_PLAN), conn=pool
@@ -514,53 +509,37 @@ async def claim_key(
     if not trial_tariff:
         raise HTTPException(status_code=404, detail="Trial tariff not found")
 
-    now_ms = int(time.time() * 1000)
-    period_ms = int(trial_tariff.period) * 86400 * 1000
-    # Продлить на trial-период от текущего срока (сохраняя остаток 24ч);
-    # если ключ уже истёк — от now.
-    base_expiry = max(int(key_obj.expiry_time or 0), now_ms)
-    new_expiry_ms = base_expiry + period_ms
+    # Юзер должен быть зарегистрирован ботом заранее
+    user = await service_data.users.get_data(body.tg_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not registered")
 
-    # 1. Продлеваем клиент в панели 3x-UI (та же запись, что импортирована в Happ)
-    key_obj.expiry_time = new_expiry_ms
-    _, _, xui = build_key_services(pool, service_data, cache, DataService())
-    extended = await xui.extend_client_key(key_obj)
-    if not extended:
-        raise HTTPException(
-            status_code=500, detail="Failed to extend key in 3x-ui panel"
-        )
-
-    # 2. Перенос владения + тариф
-    key_obj.tg_id = body.tg_id
-    key_obj.tariff_id = trial_tariff.id
-    key_obj.name_tariff = trial_tariff.name_tariff
-    key_obj.period = trial_tariff.period
-    key_obj.amount = trial_tariff.amount
-    key_obj.limit_ip = trial_tariff.limit_ip or LANDING_KEY_LIMIT_IP
+    # Апгрейд того же клиента: attach [11,12], trial expiry, grace_expiry,
+    # перенос tg_id на реальный. Happ-URL (key.key) сохраняется.
     key_obj.converted_tg_id = body.tg_id
-    await service_data.keys.update(pool, key_obj, search_data={"email": key_obj.email})
-    await cache.keys.set(CacheKeyManager.key(key_obj.email), key_obj)
+    grace = build_grace_manager(pool, service_data, cache, DataService())
+    upgraded = await grace.upgrade_from_landing(key_obj, trial_tariff, number_of_months=1)
+    if not upgraded:
+        raise HTTPException(status_code=500, detail="Failed to upgrade landing key")
 
-    # 3. trial=1 (как в /keys/trial)
+    # trial=1 (как в /keys/trial)
     await TrialService(service_data).installation_trial(body.tg_id, pool, trial=1)
 
-    # 4. Выровнять server_id с сервером ключа, чтобы продление из бота работало
+    # Выровнять server_id с сервером ключа, чтобы продление из бота работало
     if user.server_id != settings.xui_server_id:
         user.server_id = settings.xui_server_id
         await service_data.users.update(pool, user, {"tg_id": body.tg_id})
         await cache.users.set(CacheKeyManager.user(body.tg_id), user)
 
     logger.info(
-        "Landing key привязан к юзеру и продлён по trial",
-        landing_uid=landing_uid,
-        tg_id=body.tg_id,
-        email=key_obj.email,
-        new_expiry_ms=new_expiry_ms,
+        "Landing key привязан к юзеру и апгрейдирован (trial + grace)",
+        landing_uid=landing_uid, tg_id=body.tg_id, email=upgraded.email,
+        new_expiry_ms=upgraded.expiry_time, grace_expiry_ms=upgraded.grace_expiry,
     )
 
     return {
         "status": "claimed",
-        "email": key_obj.email,
-        "key_value": key_obj.key,
-        "expires_at_ms": new_expiry_ms,
+        "email": upgraded.email,
+        "key_value": upgraded.key,
+        "expires_at_ms": int(upgraded.expiry_time or 0),
     }

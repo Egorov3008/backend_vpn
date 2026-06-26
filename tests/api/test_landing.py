@@ -165,7 +165,7 @@ async def test_pseudo_tg_id_is_negative_and_deterministic():
 
 @pytest.mark.asyncio
 async def test_claim_new_user(api_client, mock_service_data, monkeypatch):
-    """Новый юзер → ключ привязан, продлён, trial=1, converted."""
+    """Новый юзер → ключ привязан, апгрейдирован через GraceManager, trial=1, converted."""
     from api.v1 import landing as landing_module
 
     landing_uid = "claimuid123456"
@@ -181,12 +181,17 @@ async def test_claim_new_user(api_client, mock_service_data, monkeypatch):
     trial_tariff = MagicMock(id=10, name_tariff="trial7", period=7, amount=0.0, limit_ip=1)
     mock_service_data.tariffs.get_data = AsyncMock(return_value=trial_tariff)
 
-    # Патчим пайплайн создания сервисов → возвращаем только mock xui
-    mock_xui = MagicMock()
-    mock_xui.extend_client_key = AsyncMock(return_value=True)
+    # Патчим GraceManager.upgrade_from_landing → возвращает апгрейднутый ключ
+    upgraded = MagicMock()
+    upgraded.email = "landing_claim@anon"
+    upgraded.key = "vless://test@example.com"
+    upgraded.expiry_time = int((time.time() + 7 * 24 * 3600) * 1000)
+    upgraded.grace_expiry = upgraded.expiry_time + 7 * 86_400_000
+    grace = MagicMock()
+    grace.upgrade_from_landing = AsyncMock(return_value=upgraded)
     monkeypatch.setattr(
-        landing_module, "build_key_services",
-        lambda *a, **k: (None, None, mock_xui),
+        landing_module, "build_grace_manager",
+        lambda *a, **k: grace,
     )
     # Патчим TrialService, чтобы не шёл в реальную БД
     monkeypatch.setattr(
@@ -206,14 +211,11 @@ async def test_claim_new_user(api_client, mock_service_data, monkeypatch):
     assert data["email"] == "landing_claim@anon"
     assert data["key_value"] == "vless://test@example.com"
 
-    # Ключ перенесён на реального юзера + тариф + converted
-    assert key.tg_id == 999
-    assert key.tariff_id == 10
+    # converted_tg_id выставляется до вызова upgrade (идемпотентность повторных кликов)
     assert key.converted_tg_id == 999
-    # Срок увеличен на 7 дней от текущего expiry
+    # Срок из апгрейднутого ключа
     assert data["expires_at_ms"] > int((time.time() + 24 * 3600) * 1000)
-    mock_xui.extend_client_key.assert_awaited_once()
-    mock_service_data.keys.update.assert_awaited_once()
+    grace.upgrade_from_landing.assert_awaited_once()
     mock_service_data.users.update.assert_awaited_once()  # server_id 2→1
 
 
@@ -299,7 +301,7 @@ async def test_claim_key_not_found(api_client, mock_service_data):
 
 @pytest.mark.asyncio
 async def test_claim_panel_extend_fails(api_client, mock_service_data, monkeypatch):
-    """extend_client_key вернул False → 500, владение не переносится."""
+    """upgrade_from_landing вернул False → 500."""
     from api.v1 import landing as landing_module
 
     landing_uid = "claimuid_xuifail"
@@ -311,11 +313,11 @@ async def test_claim_panel_extend_fails(api_client, mock_service_data, monkeypat
     trial_tariff = MagicMock(id=10, name_tariff="trial7", period=7, amount=0.0, limit_ip=1)
     mock_service_data.tariffs.get_data = AsyncMock(return_value=trial_tariff)
 
-    mock_xui = MagicMock()
-    mock_xui.extend_client_key = AsyncMock(return_value=False)
+    grace = MagicMock()
+    grace.upgrade_from_landing = AsyncMock(return_value=None)
     monkeypatch.setattr(
-        landing_module, "build_key_services",
-        lambda *a, **k: (None, None, mock_xui),
+        landing_module, "build_grace_manager",
+        lambda *a, **k: grace,
     )
     _override_cache(_mock_cache())
 
@@ -323,9 +325,8 @@ async def test_claim_panel_extend_fails(api_client, mock_service_data, monkeypat
         f"/api/v1/landing/claim/{landing_uid}", json={"tg_id": 999}
     )
     assert resp.status_code == 500
-    # Ключ не должен быть перенесён
-    assert key.tg_id == -123456789
-    assert key.converted_tg_id is None
+    # converted_tg_id выставляется до вызова upgrade (поведение нового claim_key)
+    assert key.converted_tg_id == 999
 
 
 # =============================================================================
