@@ -44,3 +44,5 @@ async def test_free_non_trial_key_has_no_grace():
     free_tariff = MagicMock(id=2, amount=0.0, period=1, limit_ip=1)
     key = await f.form_new_key(tg_id=1, tariff=free_tariff, server_id=1, number_of_months=1)
     assert key.grace_expiry is None
+    # Free non-subscription keys keep the server's offered inbounds (old behavior).
+    assert key.inbound_ids == [11, 12]
