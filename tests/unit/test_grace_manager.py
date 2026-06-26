@@ -78,6 +78,15 @@ async def test_expire_after_grace_tolerates_missing_client():
 
 
 @pytest.mark.asyncio
+async def test_expire_after_grace_real_failure_returns_false_and_keeps_cache():
+    mgr, xui, md, cache, _ = _mgr()
+    xui.delete_client = AsyncMock(side_effect=Exception("panel returned 503"))
+    ok = await mgr.expire_after_grace(_key())
+    assert ok is False  # real panel failure is NOT swallowed as success
+    cache.keys.delete.assert_not_called()  # leave entry for retry
+
+
+@pytest.mark.asyncio
 async def test_renew_from_grace_reattaches_and_sets_expiry_grace():
     mgr, xui, md, cache, expiry = _mgr()
     k = _key(expiry=2000, grace_expiry=9000, tariff_id=5)

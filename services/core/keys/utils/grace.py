@@ -1,7 +1,6 @@
 """GraceManager — transitions a Key/Client between active/grace/expired
 by attaching/detaching 3x-ui inbounds. Panel expiryTime is pre-set to
 grace_expiry at creation, so active->grace is just a detach."""
-import time
 from typing import Optional
 
 from client import XUISession
@@ -41,15 +40,24 @@ class GraceManager:
 
     async def expire_after_grace(self, key: Key) -> bool:
         await self.xui.set_inbounds(key.email, expired_inbound_ids())
+        deleted = True
         try:
             await self.xui.delete_client(key.email, 0, key.client_id)
         except Exception as e:
-            if "not found" not in str(e).lower():
-                logger.warning("expire_after_grace: delete провален, считаем уже удалённым",
+            if "not found" in str(e).lower():
+                # Client already gone on the panel — treat as deleted.
+                logger.info("expire_after_grace: клиент уже удалён",
+                            extra={"email": key.email})
+            else:
+                # Real panel failure (network/auth/5xx) — do NOT claim
+                # success: leave the cache entry so a later run can retry.
+                logger.warning("expire_after_grace: delete провален",
                                extra={"email": key.email, "error": str(e)})
-        await self.cache.keys.delete(CacheKeyManager.key(key.email))
-        logger.info("expire_after_grace", extra={"email": key.email})
-        return True
+                deleted = False
+        if deleted:
+            await self.cache.keys.delete(CacheKeyManager.key(key.email))
+        logger.info("expire_after_grace", extra={"email": key.email, "deleted": deleted})
+        return deleted
 
     async def renew_from_grace(self, key: Key, tariff: Tariff,
                                number_of_months: int = 1) -> Optional[Key]:
