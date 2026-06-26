@@ -10,6 +10,22 @@ from logger import logger
 from services.core.data.service import ServiceDataModel
 
 
+def _build_grace_manager(service_data, pool):
+    """Builds a GraceManager for the scheduler. Patchable in tests.
+
+    Delegates to app.factories.build_grace_manager so the construction lives
+    in one place (no copy to drift out of sync).
+    """
+    from app.factories import build_grace_manager
+    from database.service import DataService
+    return build_grace_manager(
+        pool=pool,
+        service_data=service_data,
+        cache=service_data.cache_service,
+        data_service=DataService(),
+    )
+
+
 class SyncScheduler:
     """
     Инкапсулирует состояние синхронизации и предотвращает race conditions.
@@ -205,6 +221,29 @@ class SyncScheduler:
         except Exception as e:
             logger.error("Ошибка в цикле уведомлений", error=str(e), exc_info=True)
 
+    async def run_grace_transitions(self) -> None:
+        """Converge each subscription key's panel inbound set to its DB-derived status.
+
+        active→paid_inbound_ids() (baseline 7 + paid overlay), grace→grace_inbound_ids()
+        (baseline 7 only), expired→[] (+ delete). Idempotent; safe to run hourly.
+        """
+        try:
+            keys = await self._service_data.keys.get_all()
+        except Exception as e:
+            logger.error("grace_transitions: get_keys провален", error=str(e))
+            return
+        if not keys:
+            return
+        grace = _build_grace_manager(self._service_data, self._pool)
+        for key in keys:
+            if getattr(key, "grace_expiry", None) is None:
+                continue  # landing/free — не подписка
+            try:
+                await grace.reconcile(key)
+            except Exception as e:
+                logger.warning("grace_transitions: reconcile провален",
+                               extra={"email": getattr(key, "email", "?"), "error": str(e)})
+
     async def run_pending_payments_sweep(self) -> None:
         """Safety net для пропущенных webhook'ов YooKassa.
 
@@ -278,6 +317,16 @@ def create_scheduler(
         hours=1,
         id="notifications",
         replace_existing=True,
+    )
+
+    # Grace transitions: converge panel inbound set to DB-derived status (hourly)
+    scheduler.add_job(
+        sync_scheduler.run_grace_transitions,
+        "interval",
+        hours=1,
+        id="grace_transitions",
+        replace_existing=True,
+        coalesce=True,
     )
 
     # Safety net для пропущенных webhook'ов YooKassa: опрос pending-платежей
