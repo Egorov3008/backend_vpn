@@ -34,6 +34,9 @@ class Key:
     # converted_tg_id — set by bot when user completes /start landing_<uid>.
     converted_tg_id: Optional[int] = None
     landing_uid: Optional[str] = None
+    # Planned end of the telegram-only grace window (ms). None = no grace
+    # (landing-24h, free non-subscription keys, legacy already-expired).
+    grace_expiry: Optional[int] = None
     _name: str = "key"
 
     def __post_init__(self):
@@ -57,6 +60,7 @@ class Key:
             "notified_expired_grace",
             "converted_tg_id",
             "landing_uid",
+            "grace_expiry",
         }
     )
 

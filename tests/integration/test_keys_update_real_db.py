@@ -44,7 +44,8 @@ CREATE TABLE IF NOT EXISTS keys (
     server_info            jsonb,
     notified_expired_grace boolean NOT NULL DEFAULT false,
     landing_uid            varchar(64),
-    converted_tg_id        bigint
+    converted_tg_id        bigint,
+    grace_expiry           bigint
 );
 CREATE UNIQUE INDEX IF NOT EXISTS keys_pkey   ON keys (tg_id, client_id);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_keys_email ON keys (email);
