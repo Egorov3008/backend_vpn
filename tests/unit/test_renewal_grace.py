@@ -50,6 +50,7 @@ async def test_active_renewal_sets_grace_expiry_and_reconciles():
     xui.extend_client_key.assert_awaited_once()
     md.keys.update.assert_awaited_once()
     resetter.reset_key_after_renewal.assert_awaited_once()
+    grace.renew_from_grace.assert_not_awaited()  # active path must not delegate
 
 
 @pytest.mark.asyncio
@@ -61,13 +62,19 @@ async def test_grace_renewal_delegates_to_grace_manager():
     out = await kr.extension_key(k, conn=MagicMock(), server=MagicMock(), tariff=tariff, number_of_months=1)
     grace.renew_from_grace.assert_awaited_once()
     xui.extend_client_key.assert_not_awaited()  # grace path does not use the normal extend
+    md.keys.update.assert_not_awaited()  # grace path delegates DB write to grace_manager
     resetter.reset_key_after_renewal.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_expired_renewal_raises():
-    kr, *_ = _renewal(_key("expired"))
+    kr, xui, md, refresh, resetter, grace = _renewal(_key("expired"))
     k = _key("expired", expiry=2000, grace_expiry=2000)
     tariff = MagicMock(id=5, period=30, amount=100.0, name_tariff="m", limit_ip=3)
     with pytest.raises(ValueError):
         await kr.extension_key(k, conn=MagicMock(), server=MagicMock(), tariff=tariff, number_of_months=1)
+    # EXPIRED branch returns early — no panel/DB side effects, no delegation.
+    xui.extend_client_key.assert_not_awaited()
+    xui.set_inbounds.assert_not_awaited()
+    md.keys.update.assert_not_awaited()
+    grace.renew_from_grace.assert_not_awaited()
