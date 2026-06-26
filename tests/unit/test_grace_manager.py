@@ -119,6 +119,57 @@ async def test_upgrade_from_landing_transfers_tg_and_reattaches():
 
 
 @pytest.mark.asyncio
+async def test_apply_paid_sets_panel_expiry_to_grace_expiry():
+    """The panel expiryTime passed to extend_client_key MUST be grace_expiry
+    (pre-emptive), not the paid expiry — otherwise the active->grace auto-
+    transition never fires. Capture at call time: _apply_paid restores
+    key.expiry_time to the paid expiry AFTER the extend call, so the live
+    arg object can't be inspected post-hoc."""
+    for method, kwn in [
+        ("renew_from_grace", dict(tariff=MagicMock(id=5, period=30, amount=100.0,
+                                                   name_tariff="m", limit_ip=3), number_of_months=1)),
+        ("upgrade_from_landing", dict(tariff=MagicMock(id=10, period=7, amount=0.0,
+                                                       name_tariff="trial", limit_ip=1), number_of_months=1)),
+    ]:
+        mgr, xui, md, cache, expiry = _mgr()
+        k = _key(inbound_ids=[7], converted_tg_id=42, landing_uid="abc",
+                 grace_expiry=None, tg_id=-1) if method == "upgrade_from_landing" \
+            else _key(expiry=2000, grace_expiry=9000, tariff_id=5)
+
+        captured = {}
+
+        async def _capture(key):
+            captured["expiry_time"] = key.expiry_time
+            return True
+
+        xui.extend_client_key = AsyncMock(side_effect=_capture)
+
+        out = await getattr(mgr, method)(k, **kwn)
+        assert out is not None
+        # panel expiryTime at extend-time == grace_expiry (pre-emptive)
+        assert captured["expiry_time"] == out.grace_expiry
+        # DB expiry restored to the paid expiry, not left at grace_expiry
+        assert out.expiry_time != out.grace_expiry
+
+
+@pytest.mark.asyncio
+async def test_apply_paid_restores_expiry_on_extend_failure():
+    """If extend_client_key fails, _apply_paid must restore key.expiry_time to
+    its pre-extend value — the key may be the live cached object."""
+    mgr, xui, md, cache, expiry = _mgr()
+    k = _key(expiry=2000, grace_expiry=9000, tariff_id=5)
+    pre_expiry = k.expiry_time
+
+    xui.extend_client_key = AsyncMock(return_value=False)
+
+    out = await mgr.renew_from_grace(k, MagicMock(id=5, period=30, amount=100.0,
+                                                  name_tariff="m", limit_ip=3), 1)
+    assert out is None
+    assert k.expiry_time == pre_expiry  # restored, not left at grace_expiry
+    md.keys.update.assert_not_awaited()  # no DB write on failure
+
+
+@pytest.mark.asyncio
 async def test_reconcile_converges_to_active():
     mgr, xui, md, cache, _ = _mgr()
     k = _key(expiry=10**13, grace_expiry=10**13 + 1)  # far future => active

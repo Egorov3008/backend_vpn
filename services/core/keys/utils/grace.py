@@ -79,9 +79,14 @@ class GraceManager:
             logger.error("_apply_paid: set_inbounds провален", extra={"email": key.email})
             return None
         # 2. Set panel expiryTime = grace_expiry (pre-emptive), enable=True.
+        #    extend_client_key reads key.expiry_time but does not mutate it,
+        #    so save the pre-extend value and restore it on failure (the key
+        #    may be the live cached object — don't leave it at grace_exp).
+        saved_expiry = key.expiry_time
         key.expiry_time = grace_exp
         if not await self.xui.extend_client_key(key):
             logger.error("_apply_paid: extend_client_key провален", extra={"email": key.email})
+            key.expiry_time = saved_expiry
             return None
         # 3. DB: store paid expiry + planned grace + tariff fields.
         key.expiry_time = new_expiry
