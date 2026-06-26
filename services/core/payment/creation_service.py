@@ -5,6 +5,7 @@ from logger import logger
 from services.core.keys.utils.create_key import CreateKey
 from services.core.payment.processor import PaymentProcessor
 from services.core.notifications.protocols import INotifier
+from services.core.keys.utils.inbounds import grace_inbound_ids
 
 
 class KeyCreationService:
@@ -27,6 +28,23 @@ class KeyCreationService:
         self.notifier = notifier
         # landing-upgrade flow is implemented in Task 9 (KeyCreationService.process).
         self.grace_manager = grace_manager
+
+    async def _find_landing_origin_key(self, tg_id: int):
+        """Найти landing-ключ юзера, готовый к апгрейду:
+        landing_uid set, converted_tg_id == tg_id, grace_expiry is None,
+        inbound set == baseline (telegram-only)."""
+        try:
+            keys = await self.processor._model_service.keys.get_all()
+        except Exception:
+            return None
+        baseline = set(grace_inbound_ids())
+        for k in keys or []:
+            if (getattr(k, "landing_uid", None)
+                    and getattr(k, "converted_tg_id", None) == tg_id
+                    and getattr(k, "grace_expiry", None) is None
+                    and set(getattr(k, "inbound_ids", None) or []) == baseline):
+                return k
+        return None
 
     async def process(self, tariff_id: str = None) -> Optional[Dict[str, Any]]:
         """
@@ -61,6 +79,31 @@ class KeyCreationService:
                 number_of_months=self.processor.number_of_months,
                 paid_amount=self.processor.amount,
             )
+
+            # Landing-upgrade: если у юзера есть landing-ключ [7] без grace —
+            # апгрейдим тот же клиент (Happ-URL сохраняется), не создаём новый.
+            if self.grace_manager is not None:
+                landing_key = await self._find_landing_origin_key(self.processor.tg_id)
+                if landing_key is not None:
+                    upgraded = await self.grace_manager.upgrade_from_landing(
+                        landing_key, tariff, self.processor.number_of_months
+                    )
+                    if upgraded is not None:
+                        logger.info(
+                            "[Цена:CreateKey] Landing-ключ апгрейдирован",
+                            tg_id=self.processor.tg_id,
+                            email=upgraded.email,
+                        )
+                        return {
+                            "public_link": upgraded.key,
+                            "days": 0,
+                            "link_to_connect": upgraded.key,
+                            "email": upgraded.email,
+                        }
+                    logger.warning(
+                        "[Цена:CreateKey] upgrade_from_landing провален, создаём новый ключ",
+                        tg_id=self.processor.tg_id,
+                    )
 
             key_data = await self.create_key.proces(
                 tg_id=self.processor.tg_id,
