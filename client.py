@@ -621,6 +621,51 @@ class XUISession:
                 time.monotonic() - t0
             )
 
+    async def set_inbounds(self, email: str, target_inbound_ids: list) -> bool:
+        """Idempotently converge a client's inbound set to target_inbound_ids.
+
+        Attaches missing inbounds, detaches extra ones. Returns False if the
+        client is missing or any panel op fails (logs, does not raise).
+        """
+        try:
+            await self.ensure_auth()
+            await self._ensure_standalone()
+            raw = await self._standalone.get(email)
+            obj = raw.get("obj", {}) if isinstance(raw, dict) else {}
+            client = obj.get("client", obj) if isinstance(obj, dict) else {}
+            current = list(client.get("inboundIds", []) or [])
+        except Exception as e:
+            logger.warning(
+                "set_inbounds: клиент не найден",
+                extra={"email": email, "error": str(e)},
+            )
+            return False
+
+        target = [int(i) for i in (target_inbound_ids or [])]
+        current_i = [int(i) for i in current]
+        to_attach = [i for i in target if i not in current_i]
+        to_detach = [i for i in current_i if i not in target]
+
+        if not to_attach and not to_detach:
+            return True
+
+        ok = True
+        for i in to_attach:
+            try:
+                await self._standalone.attach(email, [i])
+            except Exception as e:
+                logger.error("set_inbounds: attach провален",
+                             extra={"email": email, "inbound_id": i, "error": str(e)})
+                ok = False
+        for i in to_detach:
+            try:
+                await self._standalone.detach(email, [i])
+            except Exception as e:
+                logger.error("set_inbounds: detach провален",
+                             extra={"email": email, "inbound_id": i, "error": str(e)})
+                ok = False
+        return ok
+
     @filter_by_method_signature
     async def delete_client(self, email: str, inbound_id: int, client_id: str) -> bool:
         """Удаляет standalone-клиента с сервера по email (v3.2.0 API).
