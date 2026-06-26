@@ -59,3 +59,28 @@ async def test_creates_new_key_when_no_landing_key():
     create_key.proces.assert_awaited_once()
     grace.upgrade_from_landing.assert_not_awaited()
     assert result["email"] == "new@x.c"
+
+
+@pytest.mark.asyncio
+async def test_falls_back_to_create_when_upgrade_returns_none():
+    p = _processor()
+    landing_key = MagicMock()
+    landing_key.landing_uid = "abc"
+    landing_key.converted_tg_id = 42
+    landing_key.grace_expiry = None
+    landing_key.inbound_ids = [7]
+    landing_key.email = "a@b.c"
+    p._model_service.keys.get_all = AsyncMock(return_value=[landing_key])
+
+    create_key = MagicMock()
+    create_key.proces = AsyncMock(return_value={"email": "new@x.c"})
+    grace = MagicMock()
+    grace.upgrade_from_landing = AsyncMock(return_value=None)  # upgrade failed
+
+    svc = KeyCreationService(processor=p, create_key=create_key, notifier=None, grace_manager=grace)
+    result = await svc.process(tariff_id="5")
+
+    # Landing key was found and upgrade attempted, but it failed → create a new key.
+    grace.upgrade_from_landing.assert_awaited_once()
+    create_key.proces.assert_awaited_once()
+    assert result["email"] == "new@x.c"
