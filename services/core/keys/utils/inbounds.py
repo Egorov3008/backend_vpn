@@ -1,7 +1,7 @@
 """Inbound-set helpers for the grace model.
 
 XUI_INBOUND_ID_LANDING (7) is the always-on baseline inbound.
-AVAILABLE_CONNECTIONS ([11,12]) is the paid overlay, toggled by subscription state.
+AVAILABLE_CONNECTIONS (env; [2,3,4,5] in this deployment) is the paid overlay, toggled by subscription state.
 """
 from config import (
     LIST_AVAILABLE_CONNECTIONS,

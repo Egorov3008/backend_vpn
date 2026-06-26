@@ -5,9 +5,11 @@ repo-root .env, not hardcoded to any particular inbound list.
 """
 from unittest.mock import MagicMock
 
-from config import LIST_AVAILABLE_CONNECTIONS, settings
+from config import DEFAULT_PRICING_PLAN, LIST_AVAILABLE_CONNECTIONS, settings
 
 from services.core.keys.utils import inbounds as ib
+
+TRIAL_ID = int(DEFAULT_PRICING_PLAN)
 
 
 def test_baseline_and_overlay():
@@ -51,7 +53,7 @@ def test_expected_inbound_ids_by_status():
 
 def test_is_subscription_paid_and_trial():
     paid = MagicMock(id=5, amount=100.0)
-    trial = MagicMock(id=10, amount=0.0)
+    trial = MagicMock(id=TRIAL_ID, amount=0.0)
     free = MagicMock(id=2, amount=0.0)
     assert ib.is_subscription(paid) is True
     assert ib.is_subscription(trial) is True
@@ -59,5 +61,5 @@ def test_is_subscription_paid_and_trial():
 
 
 def test_grace_period_ms():
-    assert ib.GRACE_PERIOD_DAYS == 7
-    assert ib.GRACE_PERIOD_MS == 7 * 86_400_000
+    assert ib.GRACE_PERIOD_DAYS == settings.grace_period_days
+    assert ib.GRACE_PERIOD_MS == settings.grace_period_days * 86_400_000
