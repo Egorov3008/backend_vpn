@@ -632,8 +632,13 @@ class XUISession:
             await self._ensure_standalone()
             raw = await self._standalone.get(email)
             obj = raw.get("obj", {}) if isinstance(raw, dict) else {}
-            client = obj.get("client", obj) if isinstance(obj, dict) else {}
-            current = list(client.get("inboundIds", []) or [])
+            # 3x-ui v3.2.0 /api/clients/get returns inboundIds as a top-level
+            # field of obj (sibling of `client`), NOT inside obj.client.
+            # Reading from obj.client.inboundIds left `current` always empty,
+            # so to_detach was always [] and nothing was ever detached — the
+            # paid overlay stayed attached through grace, and stale inbounds
+            # (e.g. after AVAILABLE_CONNECTIONS changes) lingered forever.
+            current = list(obj.get("inboundIds", []) or []) if isinstance(obj, dict) else []
         except Exception as e:
             logger.warning(
                 "set_inbounds: клиент не найден",

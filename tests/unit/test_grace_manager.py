@@ -176,3 +176,17 @@ async def test_reconcile_converges_to_active():
     await mgr.reconcile(k)
     target = xui.set_inbounds.call_args.args[1]
     assert target == paid_inbound_ids()
+
+
+@pytest.mark.asyncio
+async def test_reconcile_expired_deletes_client():
+    """EXPIRED keys must be physically removed from the panel, not just
+    detached — reconcile delegates to expire_after_grace (delete + cache drop)."""
+    mgr, xui, md, cache, _ = _mgr()
+    k = _key(expiry=1000, grace_expiry=2000)  # both in the past => EXPIRED
+    ok = await mgr.reconcile(k)
+    assert ok is True
+    xui.delete_client.assert_awaited_once()
+    cache.keys.delete.assert_awaited_once()
+    # expire_after_grace detaches [] before deleting
+    assert xui.set_inbounds.call_args.args[1] == []

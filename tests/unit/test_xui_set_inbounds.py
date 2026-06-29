@@ -6,7 +6,9 @@ from client import XUISession
 def _xui_with_panel(inbound_ids, attach_ok=True, detach_ok=True):
     xui = XUISession.__new__(XUISession)
     xui._standalone = MagicMock()
-    raw = {"obj": {"client": {"inboundIds": inbound_ids}}}
+    # Real 3x-ui v3.2.0 /api/clients/get/{email} returns inboundIds as a
+    # top-level field of obj, sibling of `client` (which has no inboundIds).
+    raw = {"obj": {"client": {"email": "a@b.c"}, "inboundIds": inbound_ids}}
     xui._standalone.get = AsyncMock(return_value=raw)
     xui._standalone.attach = AsyncMock(return_value={"success": attach_ok})
     xui._standalone.detach = AsyncMock(return_value={"success": detach_ok})

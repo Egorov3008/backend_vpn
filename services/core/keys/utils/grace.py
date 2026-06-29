@@ -109,11 +109,12 @@ class GraceManager:
 
     async def reconcile(self, key: Key) -> bool:
         st = KeyStatus.of(key)
+        if st == KeyStatus.EXPIRED:
+            # Grace window elapsed — physically remove the panel client
+            # (idempotent: a missing client is treated as deleted). The DB row
+            # is kept for history; only the cache entry is cleared.
+            return await self.expire_after_grace(key)
         target = expected_inbound_ids(st)
         ok = await self.xui.set_inbounds(key.email, target)
-        if st == KeyStatus.EXPIRED:
-            # client should be gone; ensure cache reflects it
-            await self.cache.keys.delete(CacheKeyManager.key(key.email))
-        else:
-            await self.cache.keys.set(CacheKeyManager.key(key.email), key)
+        await self.cache.keys.set(CacheKeyManager.key(key.email), key)
         return ok
