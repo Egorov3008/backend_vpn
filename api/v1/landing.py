@@ -225,22 +225,17 @@ def _extract_vless_url(subscription_url: str) -> Optional[str]:
 
 
 def _build_deep_links(key_value: str, landing_uid: str) -> tuple[str, str]:
-    """Формирует deep-link в Happ (открыть и импортировать) и в Telegram-бота."""
-    # Пробуем формат happ://import/<vless-url>.
-    # Для этого извлекаем vless:// конфиг из subscription URL, если key_value — ссылка на подписку.
-    vless_url: Optional[str] = None
-    if key_value.startswith("vless://"):
-        vless_url = key_value
-    elif key_value.startswith(("http://", "https://")):
-        vless_url = _extract_vless_url(key_value)
+    """Формирует deep-link в Happ (открыть и импортировать) и в Telegram-бота.
 
-    if vless_url:
-        # Happ import для vless:// конфига: передаём vless-ссылку как есть
-        # (уже содержит percent-encoded спецсимволы из subscription-ответа).
-        deep_link_happ = f"happ://import/{vless_url}"
-    else:
-        # Fallback: прежний формат для подписок (plain subscription URL).
-        deep_link_happ = f"happ://add/{key_value}"
+    Happ-клиент принимает subscription URL через `happ://add/<url>` **без**
+    URL-кодирования — см. апстрим 3x-ui (PR MHSanaei/3x-ui#3863,
+    «Fix DeepLink for Happ, remove encoding URL»). Любое кодирование или
+    иные действия (happ://import/, извлечение vless://) Happ отвергает
+    ошибкой «Неизвестное действие DeepLink».
+
+    В проде key.key — это subscription URL (http(s)://…), отдаём его как есть.
+    """
+    deep_link_happ = f"happ://add/{key_value}"
 
     # Telegram-бот: /start landing_<uid> — бот подхватит и привяжет/выдаст trial
     bot_name = settings.bot_name or "TolkoDlyaSv0ih_Bot"
