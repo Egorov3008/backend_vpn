@@ -81,24 +81,74 @@ async def test_state_active_with_valid_cookie(api_client, mock_service_data):
     assert "deep_link_happ" in data
     assert "deep_link_bot" in data
     assert "landing_abc123" in data["deep_link_bot"]
-    # happ://add/<plain-url> — без percent-encoding (Happ отвергает encoded/base64)
-    assert data["deep_link_happ"].startswith("happ://add/")
-    assert "%" not in data["deep_link_happ"]
-    assert data["deep_link_happ"] == f"happ://add/{data['key_value']}"
+    # vless:// URL встраивается в happ://import/<vless-url> как есть
+    assert data["deep_link_happ"].startswith("happ://import/")
+    assert "vless://" in data["deep_link_happ"]
 
 
 @pytest.mark.asyncio
-async def test_build_deep_links_happ_plain_subscription_url():
-    """Happ deep-link для подписки — plain URL, без encoding."""
+async def test_build_deep_links_happ_vless_plain():
+    """Happ deep-link для vless:// конфига — plain vless в happ://import/."""
     from api.v1.landing import _build_deep_links
 
-    subscription_url = "https://tds-pro.space:2096/TolkoDlyaSv0ih_Bot/token123"
-    deep_link_happ, deep_link_bot = _build_deep_links(subscription_url, "uid123")
+    vless_url = "vless://uuid@example.com:443?encryption=none&security=tls"
+    deep_link_happ, deep_link_bot = _build_deep_links(vless_url, "uid123")
 
-    assert deep_link_happ == f"happ://add/{subscription_url}"
-    assert "%" not in deep_link_happ
+    assert deep_link_happ == f"happ://import/{vless_url}"
+    assert deep_link_happ.startswith("happ://import/vless://")
     assert deep_link_bot.startswith("https://t.me/")
     assert "start=landing_uid123" in deep_link_bot
+
+
+@pytest.mark.asyncio
+async def test_build_deep_links_happ_subscription_extracts_vless(monkeypatch):
+    """Если subscription URL отдаёт vless, извлекаем и вставляем в happ://import/."""
+    from api.v1 import landing as landing_module
+
+    vless_url = "vless://fa5faf41-dc2b-4f26-9802-d520a27c5560@45.8.159.52:443?security=tls&type=tcp"
+
+    def mock_extract(url: str):
+        return vless_url
+
+    monkeypatch.setattr(landing_module, "_extract_vless_url", mock_extract)
+
+    from api.v1.landing import _build_deep_links
+    subscription_url = "https://tds-pro.space:2096/TolkoDlyaSv0ih_Bot/token123"
+    deep_link_happ, _ = _build_deep_links(subscription_url, "uid123")
+
+    assert deep_link_happ == f"happ://import/{vless_url}"
+
+
+@pytest.mark.asyncio
+async def test_extract_vless_url_decodes_base64():
+    """_extract_vless_url декодирует base64-encoded subscription."""
+    import base64
+    from api.v1.landing import _extract_vless_url
+
+    vless_url = "vless://uuid@example.com:443?security=tls"
+    encoded = base64.b64encode(f"{vless_url}\n".encode()).decode()
+
+    class FakeResponse:
+        def read(self):
+            return encoded.encode()
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+
+    # monkeypatch urllib.request.urlopen
+    import urllib.request
+    original_urlopen = urllib.request.urlopen
+
+    def fake_urlopen(url, timeout=None):
+        return FakeResponse()
+
+    urllib.request.urlopen = fake_urlopen
+    try:
+        result = _extract_vless_url("https://example.com/sub")
+        assert result == vless_url
+    finally:
+        urllib.request.urlopen = original_urlopen
 
 
 @pytest.mark.asyncio

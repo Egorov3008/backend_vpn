@@ -56,6 +56,11 @@ LANDING_COOKIE_MAX_AGE = 90 * 24 * 3600  # 90 дней
 EXPIRING_THRESHOLD_HOURS = 6
 LANDING_BOT_LINK_PREFIX = "https://t.me/"  # дополняется settings.bot_name
 
+# In-memory TTL-кеш vless-конфигов по subscription URL.
+# Ключи landing-24h живут недолго, поэтому кеш не растёт бесконтрольно.
+_VLESS_CACHE: dict[str, tuple[str, float]] = {}
+_VLESS_CACHE_TTL_SECONDS = 300
+
 
 # Схемы ответов
 class QuickKeyResponse(BaseModel):
@@ -140,11 +145,102 @@ def _pseudo_tg_id(landing_uid: str) -> int:
     return -n
 
 
+def _extract_vless_url(subscription_url: str) -> Optional[str]:
+    """Скачивает subscription URL и извлекает первую vless:// строку.
+
+    Поддерживает plain-text и base64-encoded subscription-ответы.
+    Повторяет попытки при кратковременных сетевых/3x-UI сбоях.
+    Результат кешируется в памяти 5 минут по subscription URL.
+    Возвращает None, если скачать не удалось или vless-конфиг не найден.
+    """
+    import base64
+    import time
+    import urllib.request
+
+    now = time.time()
+    cached = _VLESS_CACHE.get(subscription_url)
+    if cached is not None:
+        vless_url, expires_at = cached
+        if expires_at > now:
+            return vless_url
+        _VLESS_CACHE.pop(subscription_url, None)
+
+    last_error = None
+    body: Optional[bytes] = None
+    for attempt in range(1, 4):
+        try:
+            with urllib.request.urlopen(subscription_url, timeout=8) as response:
+                body = response.read()
+            break
+        except Exception as e:
+            last_error = e
+            logger.warning(
+                "Попытка скачать subscription URL не удалась",
+                url=subscription_url,
+                attempt=attempt,
+                error=str(e),
+            )
+            if attempt < 3:
+                time.sleep(0.5 * attempt)
+            else:
+                logger.warning(
+                    "Не удалось скачать subscription URL для vless",
+                    url=subscription_url,
+                    error=str(last_error),
+                )
+                return None
+
+    result: Optional[str] = None
+
+    # Пробуем plain text
+    for encoding in ("utf-8", "utf-8-sig"):
+        try:
+            text = body.decode(encoding, errors="ignore")
+            for line in text.splitlines():
+                line = line.strip()
+                if line.startswith("vless://"):
+                    result = line
+                    break
+        except Exception:
+            continue
+        if result:
+            break
+
+    # Пробуем base64 (Happ/Sing-box часто отдают подписку в base64)
+    if result is None:
+        try:
+            decoded = base64.b64decode(body, validate=True).decode("utf-8", errors="ignore")
+            for line in decoded.splitlines():
+                line = line.strip()
+                if line.startswith("vless://"):
+                    result = line
+                    break
+        except Exception:
+            pass
+
+    if result is not None:
+        _VLESS_CACHE[subscription_url] = (result, now + _VLESS_CACHE_TTL_SECONDS)
+
+    return result
+
+
 def _build_deep_links(key_value: str, landing_uid: str) -> tuple[str, str]:
     """Формирует deep-link в Happ (открыть и импортировать) и в Telegram-бота."""
-    # Happ: deep-link "add" для импорта подписки по URL.
-    # Формат: happ://add/<plain-subscription-url> (Happ отвергает percent-encoded/base64).
-    deep_link_happ = f"happ://add/{key_value}"
+    # Пробуем формат happ://import/<vless-url>.
+    # Для этого извлекаем vless:// конфиг из subscription URL, если key_value — ссылка на подписку.
+    vless_url: Optional[str] = None
+    if key_value.startswith("vless://"):
+        vless_url = key_value
+    elif key_value.startswith(("http://", "https://")):
+        vless_url = _extract_vless_url(key_value)
+
+    if vless_url:
+        # Happ import для vless:// конфига: передаём vless-ссылку как есть
+        # (уже содержит percent-encoded спецсимволы из subscription-ответа).
+        deep_link_happ = f"happ://import/{vless_url}"
+    else:
+        # Fallback: прежний формат для подписок (plain subscription URL).
+        deep_link_happ = f"happ://add/{key_value}"
 
     # Telegram-бот: /start landing_<uid> — бот подхватит и привяжет/выдаст trial
     bot_name = settings.bot_name or "TolkoDlyaSv0ih_Bot"
