@@ -81,6 +81,24 @@ async def test_state_active_with_valid_cookie(api_client, mock_service_data):
     assert "deep_link_happ" in data
     assert "deep_link_bot" in data
     assert "landing_abc123" in data["deep_link_bot"]
+    # happ://add/<plain-url> — без percent-encoding (Happ отвергает encoded/base64)
+    assert data["deep_link_happ"].startswith("happ://add/")
+    assert "%" not in data["deep_link_happ"]
+    assert data["deep_link_happ"] == f"happ://add/{data['key_value']}"
+
+
+@pytest.mark.asyncio
+async def test_build_deep_links_happ_plain_subscription_url():
+    """Happ deep-link для подписки — plain URL, без encoding."""
+    from api.v1.landing import _build_deep_links
+
+    subscription_url = "https://tds-pro.space:2096/TolkoDlyaSv0ih_Bot/token123"
+    deep_link_happ, deep_link_bot = _build_deep_links(subscription_url, "uid123")
+
+    assert deep_link_happ == f"happ://add/{subscription_url}"
+    assert "%" not in deep_link_happ
+    assert deep_link_bot.startswith("https://t.me/")
+    assert "start=landing_uid123" in deep_link_bot
 
 
 @pytest.mark.asyncio

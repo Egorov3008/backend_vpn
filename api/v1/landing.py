@@ -142,11 +142,9 @@ def _pseudo_tg_id(landing_uid: str) -> int:
 
 def _build_deep_links(key_value: str, landing_uid: str) -> tuple[str, str]:
     """Формирует deep-link в Happ (открыть и импортировать) и в Telegram-бота."""
-    import urllib.parse
-
-    # Happ: deep-link "import" для импорта ключа из буфера обмена / URL
-    # Формат: happ://import/<url-encoded-config>
-    deep_link_happ = f"happ://import/{urllib.parse.quote(key_value, safe='')}"
+    # Happ: deep-link "add" для импорта подписки по URL.
+    # Формат: happ://add/<plain-subscription-url> (Happ отвергает percent-encoded/base64).
+    deep_link_happ = f"happ://add/{key_value}"
 
     # Telegram-бот: /start landing_<uid> — бот подхватит и привяжет/выдаст trial
     bot_name = settings.bot_name or "TolkoDlyaSv0ih_Bot"
