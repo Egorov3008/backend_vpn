@@ -64,6 +64,11 @@ TG_REF_COOKIE_NAME = "tg_ref"
 TG_REF_COOKIE_MAX_AGE = 90 * 24 * 3600  # 90 дней
 _REF_TOKEN_REGEX = re.compile(r"^ref_[0-9a-f]{12}$")
 
+# In-memory TTL-кеш vless-конфигов по subscription URL.
+# Ключи landing-24h живут недолго, поэтому кеш не растёт бесконтрольно.
+_VLESS_CACHE: dict[str, tuple[str, float]] = {}
+_VLESS_CACHE_TTL_SECONDS = 300
+
 
 # Схемы ответов
 class QuickKeyResponse(BaseModel):
@@ -313,13 +318,97 @@ def _pseudo_tg_id(landing_uid: str) -> int:
     return -n
 
 
-def _build_deep_links(key_value: str, landing_uid: str) -> tuple[str, str]:
-    """Формирует deep-link в Happ (открыть и импортировать) и в Telegram-бота."""
-    import urllib.parse
+def _extract_vless_url(subscription_url: str) -> Optional[str]:
+    """Скачивает subscription URL и извлекает первую vless:// строку.
 
-    # Happ: deep-link "import" для импорта ключа из буфера обмена / URL
-    # Формат: happ://import/<url-encoded-config>
-    deep_link_happ = f"happ://import/{urllib.parse.quote(key_value, safe='')}"
+    Поддерживает plain-text и base64-encoded subscription-ответы.
+    Повторяет попытки при кратковременных сетевых/3x-UI сбоях.
+    Результат кешируется в памяти 5 минут по subscription URL.
+    Возвращает None, если скачать не удалось или vless-конфиг не найден.
+    """
+    import base64
+    import time
+    import urllib.request
+
+    now = time.time()
+    cached = _VLESS_CACHE.get(subscription_url)
+    if cached is not None:
+        vless_url, expires_at = cached
+        if expires_at > now:
+            return vless_url
+        _VLESS_CACHE.pop(subscription_url, None)
+
+    last_error = None
+    body: Optional[bytes] = None
+    for attempt in range(1, 4):
+        try:
+            with urllib.request.urlopen(subscription_url, timeout=8) as response:
+                body = response.read()
+            break
+        except Exception as e:
+            last_error = e
+            logger.warning(
+                "Попытка скачать subscription URL не удалась",
+                url=subscription_url,
+                attempt=attempt,
+                error=str(e),
+            )
+            if attempt < 3:
+                time.sleep(0.5 * attempt)
+            else:
+                logger.warning(
+                    "Не удалось скачать subscription URL для vless",
+                    url=subscription_url,
+                    error=str(last_error),
+                )
+                return None
+
+    result: Optional[str] = None
+
+    # Пробуем plain text
+    for encoding in ("utf-8", "utf-8-sig"):
+        try:
+            text = body.decode(encoding, errors="ignore")
+            for line in text.splitlines():
+                line = line.strip()
+                if line.startswith("vless://"):
+                    result = line
+                    break
+        except Exception:
+            continue
+        if result:
+            break
+
+    # Пробуем base64 (Happ/Sing-box часто отдают подписку в base64)
+    if result is None:
+        try:
+            decoded = base64.b64decode(body, validate=True).decode("utf-8", errors="ignore")
+            for line in decoded.splitlines():
+                line = line.strip()
+                if line.startswith("vless://"):
+                    result = line
+                    break
+        except Exception:
+            pass
+
+    if result is not None:
+        _VLESS_CACHE[subscription_url] = (result, now + _VLESS_CACHE_TTL_SECONDS)
+
+    return result
+
+
+def _build_deep_links(key_value: str, landing_uid: str) -> tuple[str, str]:
+    """Формирует deep-link в Happ (открыть и импортировать) и в Telegram-бота.
+
+    Happ-клиент принимает subscription URL через `happ://add/<url>` **без**
+    URL-кодирования — см. апстрим 3x-ui (PR MHSanaei/3x-ui#3863,
+    «Fix DeepLink for Happ, remove encoding URL»). Любое кодирование или
+    иные действия (happ://import/, извлечение vless://) Happ отвергает
+    ошибкой «Неизвестное действие DeepLink».
+
+    В проде key.key — это subscription URL (http(s)://…), отдаём его как есть.
+    """
+    deep_link_happ = f"happ://add/{key_value}"
 
     # Telegram-бот: /start landing_<uid> — бот подхватит и привяжет/выдаст trial
     bot_name = settings.bot_name or "TolkoDlyaSv0ih_Bot"
@@ -743,7 +832,7 @@ async def claim_key(
         raise HTTPException(status_code=404, detail="Trial tariff not found")
 
     # Юзер должен быть зарегистрирован ботом заранее
-    user = await service_data.users.get_data(body.tg_id, conn=pool)
+    user = await service_data.users.get_data(body.tg_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not registered")
 
@@ -766,7 +855,7 @@ async def claim_key(
     # Выровнять server_id с сервером ключа, чтобы продление из бота работало
     if user.server_id != settings.xui_server_id:
         user.server_id = settings.xui_server_id
-        await service_data.users.update(pool, user, search_data={"tg_id": body.tg_id})
+        await service_data.users.update(pool, user, {"tg_id": body.tg_id})
         await cache.users.set(CacheKeyManager.user(body.tg_id), user)
 
     # Merge referral из tg_ref куки или ref_token в теле (бот пробрасывает из deeplink).

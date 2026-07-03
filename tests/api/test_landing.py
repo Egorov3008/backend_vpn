@@ -81,6 +81,65 @@ async def test_state_active_with_valid_cookie(api_client, mock_service_data):
     assert "deep_link_happ" in data
     assert "deep_link_bot" in data
     assert "landing_abc123" in data["deep_link_bot"]
+    # Happ deep-link: happ://add/<subscription-url> без кодирования (апстрим 3x-ui PR#3863)
+    assert data["deep_link_happ"] == f"happ://add/{key.key}"
+
+
+@pytest.mark.asyncio
+async def test_build_deep_links_happ_vless_plain():
+    """Happ deep-link для одиночного vless://-конфига → happ://add/<plain>."""
+    from api.v1.landing import _build_deep_links
+
+    vless_url = "vless://uuid@example.com:443?encryption=none&security=tls"
+    deep_link_happ, deep_link_bot = _build_deep_links(vless_url, "uid123")
+
+    assert deep_link_happ == f"happ://add/{vless_url}"
+    assert deep_link_happ.startswith("happ://add/vless://")
+    assert deep_link_bot.startswith("https://t.me/")
+    assert "start=landing_uid123" in deep_link_bot
+
+
+@pytest.mark.asyncio
+async def test_build_deep_links_happ_subscription_url():
+    """Subscription URL отдаём в happ://add/ как есть, без кодирования."""
+    from api.v1.landing import _build_deep_links
+
+    subscription_url = "https://tds-pro.space:2096/TolkoDlyaSv0ih_Bot/token123"
+    deep_link_happ, _ = _build_deep_links(subscription_url, "uid123")
+
+    assert deep_link_happ == f"happ://add/{subscription_url}"
+
+
+@pytest.mark.asyncio
+async def test_extract_vless_url_decodes_base64():
+    """_extract_vless_url декодирует base64-encoded subscription."""
+    import base64
+    from api.v1.landing import _extract_vless_url
+
+    vless_url = "vless://uuid@example.com:443?security=tls"
+    encoded = base64.b64encode(f"{vless_url}\n".encode()).decode()
+
+    class FakeResponse:
+        def read(self):
+            return encoded.encode()
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+
+    # monkeypatch urllib.request.urlopen
+    import urllib.request
+    original_urlopen = urllib.request.urlopen
+
+    def fake_urlopen(url, timeout=None):
+        return FakeResponse()
+
+    urllib.request.urlopen = fake_urlopen
+    try:
+        result = _extract_vless_url("https://example.com/sub")
+        assert result == vless_url
+    finally:
+        urllib.request.urlopen = original_urlopen
 
 
 @pytest.mark.asyncio
