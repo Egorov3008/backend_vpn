@@ -40,8 +40,22 @@ class FormationKey:
                 первый из server.inbound_ids.
         """
         email = await self._generate_email()
+
+        # Защита от дрейфа данных: все платные тарифы должны быть 30-дневными.
+        # Если в БД оказался period != 30, логируем warning и приводим к 30,
+        # чтобы ключи не создавались на 37/45/... дней.
+        tariff_period = tariff.period
+        if tariff.id != 10 and tariff_period != 30:
+            logger.warning(
+                "Некорректный period платного тарифа, приводим к 30 дням",
+                tariff_id=tariff.id,
+                name_tariff=tariff.name_tariff,
+                original_period=tariff_period,
+            )
+            tariff_period = 30
+
         new_expiry_time = self.expiry.key_duration_new_key(
-            tariff.period, number_of_months
+            tariff_period, number_of_months
         )
         client_id = self._generate_client_id()
         server_data = await self.connected_data.data(user_id=tg_id, server_id=server_id)
