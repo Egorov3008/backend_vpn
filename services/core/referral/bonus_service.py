@@ -233,7 +233,7 @@ class ReferralBonusService:
                 await conn.execute(
                     """
                     UPDATE users
-                    SET balance = ROUND(balance + $1, 2)
+                    SET balance = ROUND((balance + $1)::numeric, 2)
                     WHERE tg_id = $2
                     """,
                     reward_value, referrer_tg_id,

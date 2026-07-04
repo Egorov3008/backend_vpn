@@ -166,8 +166,19 @@ def _sign_ref_cookie(ref_token: str) -> str:
     return f"{payload_b64}.{sig}"
 
 
-def _verify_ref_cookie(cookie_value: str) -> Optional[str]:
-    """Верифицировать tg_ref cookie → ref_token или None."""
+def _verify_ref_cookie(cookie_value) -> Optional[str]:
+    """Верифицировать tg_ref cookie → ref_token или None.
+
+    Принимает строку или объект, приводимый к строке (например, Starlette Cookie).
+    Некорректные/пустые/просроченные куки молча возвращают None.
+    """
+    if not isinstance(cookie_value, str):
+        if cookie_value is None:
+            return None
+        try:
+            cookie_value = str(cookie_value)
+        except Exception:
+            return None
     if not cookie_value or "." not in cookie_value:
         return None
     payload_b64, sig = cookie_value.rsplit(".", 1)

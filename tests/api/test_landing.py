@@ -683,6 +683,11 @@ async def test_ref_cookie_verify_rejects_garbage():
     assert _verify_ref_cookie(None) is None  # type: ignore[arg-type]
     assert _verify_ref_cookie("invalid") is None
     assert _verify_ref_cookie("foo.bar") is None
+    # Объекты, приводимые к строке (например, Starlette Cookie), не падают.
+    class WeirdCookie:
+        def __str__(self):
+            return "weird.value"
+    assert _verify_ref_cookie(WeirdCookie()) is None
 
 
 @pytest.mark.asyncio

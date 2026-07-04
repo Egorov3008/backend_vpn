@@ -201,7 +201,7 @@ CREATE TABLE IF NOT EXISTS referral_redemptions
 (
     id SERIAL PRIMARY KEY,
     referral_link_id INTEGER NOT NULL,
-    referred_tg_id BIGINT NOT NULL,
+    referred_tg_id BIGINT NOT NULL UNIQUE,
     redeemed_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -210,7 +210,7 @@ CREATE TABLE IF NOT EXISTS referral_rewards
     id SERIAL PRIMARY KEY,
     referrer_tg_id BIGINT NOT NULL,
     reward_type TEXT NOT NULL,
-    reward_value TEXT NOT NULL,
+    reward_value DECIMAL(10,2) NOT NULL,
     awarded_at TIMESTAMPTZ DEFAULT NOW(),
     is_claimed BOOLEAN DEFAULT FALSE
 );

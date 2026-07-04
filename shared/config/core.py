@@ -85,6 +85,9 @@ class CoreSettings(BaseSettings):
         default="/api/v1/payments/webhook", alias="WEBHOOK_PATH"
     )
 
+    # ── Landing / Referral ──
+    landing_public_url: str = Field(default="", alias="LANDING_PUBLIC_URL")
+
     def get_admin_tg_ids(self) -> List[int]:
         """Parse admin_tg_ids_raw as a JSON list of ints."""
         import ast
