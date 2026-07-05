@@ -94,6 +94,9 @@ class Settings(BaseSettings):
     payment_sweep_max_age_minutes: int = Field(default=1440, alias="PAYMENT_SWEEP_MAX_AGE_MINUTES")
     payment_sweep_exclude_ids_raw: str = Field(default="", alias="PAYMENT_SWEEP_EXCLUDE_IDS")
 
+    # Promo: +N days for subscribing to Telegram channel
+    channel_bonus_days: int = Field(default=7, alias="CHANNEL_BONUS_DAYS")
+
 
 settings = Settings()
 

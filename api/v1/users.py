@@ -21,17 +21,37 @@ router = APIRouter(
 async def get_user(
     tg_id: int,
     service_data: ServiceDataModel = Depends(get_service_data),
+    pool=Depends(get_pool),
 ) -> UserResponse:
     try:
-        user = await service_data.users.get_data(tg_id)
+        user = await service_data.users.get_data(tg_id, conn=pool)
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
+        user.channel_bonus_claimed = await _is_channel_bonus_claimed(pool, tg_id)
         return UserResponse.from_user(user)
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error getting user tg_id={tg_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+async def _is_channel_bonus_claimed(pool, tg_id: int) -> bool:
+    """Проверяет, получил ли пользователь канальный бонус."""
+    try:
+        row = await pool.fetchrow(
+            """
+            SELECT 1 FROM user_promo_claims
+            WHERE tg_id = $1 AND promo_id = $2
+            LIMIT 1
+            """,
+            tg_id,
+            "channel_subscription_bonus",
+        )
+        return row is not None
+    except Exception as e:
+        logger.warning(f"Failed to check channel bonus claim for tg_id={tg_id}: {e}")
+        return False
 
 
 @router.post("/register")

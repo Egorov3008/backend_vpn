@@ -57,3 +57,11 @@ class KeyRenewRequest(BaseModel):
     tg_id: int
     tariff_id: int
     number_of_months: int
+
+
+class ChannelBonusResponse(BaseModel):
+    status: str
+    email: Optional[str] = None
+    new_expiry_time: Optional[int] = None
+    new_expiry_date: Optional[str] = None
+    keys: Optional[list] = None

@@ -6,13 +6,20 @@ import asyncpg
 from app.auth import verify_bot_secret
 from app.dependencies import get_service_data, get_pool, get_cache
 from app.factories import build_key_services
-from app.schemas.keys import KeyResponse, KeyDetailResponse, KeyCreateRequest, KeyRenewRequest
+from app.schemas.keys import (
+    KeyResponse,
+    KeyDetailResponse,
+    KeyCreateRequest,
+    KeyRenewRequest,
+    ChannelBonusResponse,
+)
 from config import DEFAULT_PRICING_PLAN, settings
 from services.cache.key_manager import CacheKeyManager
 from services.core.data.service import ServiceDataModel
 from services.core.keys.service import KeyService
 from services.core.user.utils.trial import TrialService
 from services.core.gift import GiftLinkProvider
+from services.core.promotions.channel_bonus_service import ChannelBonusService
 from database.service import DataService
 from services.cache.service import CacheService
 
@@ -274,3 +281,43 @@ async def renew_key(
         raise HTTPException(status_code=500, detail="Renewed key not found in database")
 
     return KeyResponse.from_key(renewed_key)
+
+
+@router.post("/channel-bonus", response_model=ChannelBonusResponse)
+async def claim_channel_bonus(
+    tg_id: int = Query(..., description="Telegram user ID"),
+    email: Optional[str] = Query(None, description="Target key email if multiple keys"),
+    pool: asyncpg.Pool = Depends(get_pool),
+    service_data: ServiceDataModel = Depends(get_service_data),
+    cache: CacheService = Depends(get_cache),
+):
+    """Промо-бонус: +7 дней за подписку на Telegram-канал."""
+    user = await service_data.users.get_data(tg_id, pool)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    data_service = DataService()
+    _, _, xui = build_key_services(pool, service_data, cache, data_service)
+    bonus_service = ChannelBonusService(
+        pool=pool,
+        service_data=service_data,
+        cache=cache,
+        xui=xui,
+    )
+
+    try:
+        result = await bonus_service.claim(tg_id, email)
+    except RuntimeError as e:
+        logger.error("channel-bonus runtime error", tg_id=tg_id, email=email, error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.error("channel-bonus failed", tg_id=tg_id, email=email, error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to apply channel bonus")
+
+    return ChannelBonusResponse(
+        status=result.status,
+        email=result.email,
+        new_expiry_time=result.new_expiry_time,
+        new_expiry_date=result.new_expiry_date,
+        keys=result.keys,
+    )

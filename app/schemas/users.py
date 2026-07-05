@@ -15,6 +15,7 @@ class UserResponse(BaseModel):
     is_admin: bool = False
     is_blocked: bool = False
     created_at: Optional[datetime] = None
+    channel_bonus_claimed: bool = False
 
     @classmethod
     def from_user(cls, u) -> "UserResponse":
@@ -28,6 +29,7 @@ class UserResponse(BaseModel):
             is_admin=u.is_admin,
             is_blocked=u.is_blocked,
             created_at=getattr(u, "created_at", None),
+            channel_bonus_claimed=getattr(u, "channel_bonus_claimed", False),
         )
 
 
