@@ -103,7 +103,8 @@ CREATE TABLE IF NOT EXISTS payments
     payment_type   TEXT NOT NULL,
     number_of_months INTEGER NOT NULL DEFAULT 1,
     discount_percent INTEGER NOT NULL DEFAULT 0,
-    referral_discount REAL NOT NULL DEFAULT 0.0
+    referral_discount REAL NOT NULL DEFAULT 0.0,
+    balance_discount REAL NOT NULL DEFAULT 0.0
 );
 
 -- Backfill safety: ensure existing rows have referral_discount before any NOT NULL enforcement
@@ -147,12 +148,30 @@ CREATE TABLE IF NOT EXISTS keys
     server_info JSONB,
     converted_tg_id BIGINT,
     landing_uid VARCHAR(64),
+    -- Planned end of the telegram-only grace window (ms). NULL = no grace.
+    grace_expiry BIGINT,
+    -- Флаг отправки уведомления об окончании grace-окна (см. key_expired_grace funnel).
+    notified_expired_grace BOOLEAN DEFAULT FALSE,
     UNIQUE (tg_id, client_id),
     UNIQUE (email)
 );
 
 CREATE INDEX IF NOT EXISTS idx_keys_landing_uid ON keys(landing_uid)
     WHERE landing_uid IS NOT NULL;
+
+-- ============================================================================
+-- 5a. User promo claims (one-time bonuses like +7 days for channel subscribe)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS user_promo_claims
+(
+    id SERIAL PRIMARY KEY,
+    tg_id BIGINT NOT NULL REFERENCES users(tg_id) ON DELETE CASCADE,
+    promo_id TEXT NOT NULL,
+    claimed_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (tg_id, promo_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_promo_claims_tg_id ON user_promo_claims(tg_id);
 
 -- Ensure total_gb default matches model default (migration 008)
 DO $$
