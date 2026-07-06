@@ -29,6 +29,28 @@ def _ms(days: int) -> int:
     return days * 24 * 60 * 60 * 1000
 
 
+async def is_channel_bonus_claimed(pool, tg_id: int) -> bool:
+    """Переиспользуемая проверка: получил ли пользователь канальный бонус.
+
+    ``pool`` здесь — соединение asyncpg (как используется в api/v1/users.py
+    через Depends(get_pool)); вызывается pool.fetchrow напрямую, без acquire.
+    """
+    try:
+        row = await pool.fetchrow(
+            """
+            SELECT 1 FROM user_promo_claims
+            WHERE tg_id = $1 AND promo_id = $2
+            LIMIT 1
+            """,
+            tg_id,
+            PROMO_ID,
+        )
+        return row is not None
+    except Exception as e:
+        logger.warning("Failed to check channel bonus claim", tg_id=tg_id, error=str(e))
+        return False
+
+
 @dataclass
 class ChannelBonusResult:
     status: str

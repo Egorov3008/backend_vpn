@@ -37,21 +37,10 @@ async def get_user(
 
 
 async def _is_channel_bonus_claimed(pool, tg_id: int) -> bool:
-    """Проверяет, получил ли пользователь канальный бонус."""
-    try:
-        row = await pool.fetchrow(
-            """
-            SELECT 1 FROM user_promo_claims
-            WHERE tg_id = $1 AND promo_id = $2
-            LIMIT 1
-            """,
-            tg_id,
-            "channel_subscription_bonus",
-        )
-        return row is not None
-    except Exception as e:
-        logger.warning(f"Failed to check channel bonus claim for tg_id={tg_id}: {e}")
-        return False
+    """Проверяет, получил ли пользователь канальный бонус (делегирует в сервис)."""
+    from services.core.promotions.channel_bonus_service import is_channel_bonus_claimed
+
+    return await is_channel_bonus_claimed(pool, tg_id)
 
 
 @router.post("/register")
