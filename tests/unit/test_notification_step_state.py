@@ -34,8 +34,9 @@ async def test_get_state_returns_none_when_no_row(pool, conn):
 
 @pytest.mark.asyncio
 async def test_get_state_returns_dict(pool, conn):
+    # asyncpg возвращает jsonb как JSON-строку — реалистичный мок.
     conn.fetchrow = AsyncMock(
-        return_value={"value": {"step": 2, "last_sent_ms": 1000, "key_email": "a@x.c"}}
+        return_value={"value": json.dumps({"step": 2, "last_sent_ms": 1000, "key_email": "a@x.c"})}
     )
     s = StepState(pool)
     state = await s.get_state("f1", 123)
@@ -60,7 +61,7 @@ async def test_advance_step_from_empty(pool, conn):
 @pytest.mark.asyncio
 async def test_advance_step_increments_existing(pool, conn):
     conn.fetchrow = AsyncMock(
-        return_value={"value": {"step": 1, "last_sent_ms": 1000, "key_email": "old@x.c"}}
+        return_value={"value": json.dumps({"step": 1, "last_sent_ms": 1000, "key_email": "old@x.c"})}
     )
     s = StepState(pool)
     new_step = await s.advance_step(

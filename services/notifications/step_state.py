@@ -32,7 +32,11 @@ class StepState:
         if not row:
             return None
         value = row["value"]
-        return dict(value) if value is not None else None
+        if value is None:
+            return None
+        # asyncpg возвращает jsonb как JSON-строку — парсим, а не dict(value)
+        # (dict(str) итерирует посимвольно и падает с ValueError).
+        return json.loads(value) if isinstance(value, str) else dict(value)
 
     async def advance_step(
         self,
@@ -45,7 +49,12 @@ class StepState:
         key = self._key(funnel_id, tg_id)
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow("SELECT value FROM cache WHERE key = $1", key)
-            current = dict(row["value"]) if row and row["value"] is not None else {}
+            current = (
+                json.loads(row["value"]) if (row and row["value"] is not None)
+                else {}
+            )
+            if not isinstance(current, dict):
+                current = {}
             new_step = int(current.get("step", 0)) + 1
             value = {"step": new_step, "last_sent_ms": last_sent_ms, "key_email": key_email}
             expires_at = datetime.now(timezone.utc) + ttl
