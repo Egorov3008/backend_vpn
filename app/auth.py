@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import Optional
 
 from fastapi import Header, HTTPException
@@ -25,3 +26,26 @@ async def verify_admin_or_bot(
     if x_bot_secret and x_bot_secret == settings.bot_secret_key:
         return
     raise HTTPException(status_code=401, detail="Invalid credentials")
+
+
+@dataclass
+class AdminPrincipal:
+    admin_tg_id: Optional[int]
+
+
+async def verify_admin_actor(
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    x_admin_tg_id: Optional[str] = Header(None, alias="X-Admin-Tg-Id"),
+    x_bot_secret: Optional[str] = Header(None, alias="X-Bot-Secret"),
+) -> AdminPrincipal:
+    """Деструктивные admin-операции: только X-API-Key. Bot-secret не принимается."""
+    if not x_api_key or x_api_key != settings.admin_api_key:
+        raise HTTPException(status_code=401, detail="Invalid admin API key")
+
+    admin_tg_id: Optional[int] = None
+    if x_admin_tg_id:
+        try:
+            admin_tg_id = int(x_admin_tg_id)
+        except (ValueError, TypeError):
+            admin_tg_id = None
+    return AdminPrincipal(admin_tg_id=admin_tg_id)
