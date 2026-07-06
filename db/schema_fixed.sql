@@ -189,6 +189,24 @@ CREATE TABLE IF NOT EXISTS grace_renewal_log
 CREATE INDEX IF NOT EXISTS idx_grace_renewal_log_occurred_at
     ON grace_renewal_log(occurred_at);
 
+-- ============================================================================
+-- 5c. Admin audit log — журнал деструктивных admin-операций
+-- ============================================================================
+-- См. миграцию 019. Сбой логирования не должен рвать операцию.
+CREATE TABLE IF NOT EXISTS admin_audit_log
+(
+    id SERIAL PRIMARY KEY,
+    admin_tg_id BIGINT,
+    action TEXT NOT NULL,
+    target TEXT,
+    occurred_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_admin_audit_log_occurred_at
+    ON admin_audit_log(occurred_at);
+CREATE INDEX IF NOT EXISTS idx_admin_audit_log_action
+    ON admin_audit_log(action);
+
 -- Ensure total_gb default matches model default (migration 008)
 DO $$
 BEGIN
