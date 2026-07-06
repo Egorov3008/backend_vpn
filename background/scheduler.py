@@ -3,11 +3,24 @@
 import asyncio
 import asyncpg
 import time
+import uuid
+from dataclasses import dataclass, field
 from typing import Optional, Dict, Any
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from logger import logger
 from services.core.data.service import ServiceDataModel
+
+
+@dataclass
+class JobState:
+    """Состояние фоновой джобы синхронизации (см. SyncScheduler._jobs)."""
+
+    job_id: str
+    status: str = "running"  # running | done | error
+    result: Optional[dict] = None
+    error: Optional[str] = None
+    started_at: float = field(default_factory=time.time)
 
 
 def _build_grace_manager(service_data, pool):
@@ -43,6 +56,9 @@ class SyncScheduler:
         self._sync_count = 0
         self._sweep_lock = asyncio.Lock()
         self._sweep_in_progress = False
+        # In-memory реестр запусков admin/sync: job_id -> JobState.
+        self._jobs: Dict[str, "JobState"] = {}
+        self._jobs_lock = asyncio.Lock()
 
     @property
     def is_sync_in_progress(self) -> bool:
@@ -136,6 +152,69 @@ class SyncScheduler:
             # Сбрасываем флаг внутри lock для атомарности
             async with self._sync_lock:
                 self._sync_in_progress = False
+
+    async def run_sync_job(self, job_id: str) -> None:
+        """Обёртка над sync_cache: обновляет JobState по завершении.
+
+        Запускается как asyncio.Task из start_job. sync_cache сама управляет
+        _sync_in_progress (выставляет в lock, сбрасывает в finally) — здесь мы
+        только отражаем результат в _jobs.
+        """
+        try:
+            result = await self.sync_cache()
+            status = "done" if (result or {}).get("status") != "error" else "error"
+            await self._set_job(job_id, status=status, result=result)
+        except Exception as e:
+            await self._set_job(job_id, status="error", error=str(e))
+
+    async def _set_job(
+        self,
+        job_id: str,
+        status: str,
+        result: Optional[dict] = None,
+        error: Optional[str] = None,
+    ) -> None:
+        """Обновляет JobState; prune последних 20 завершённых."""
+        async with self._jobs_lock:
+            js = self._jobs.get(job_id)
+            if js is None:
+                js = JobState(job_id=job_id)
+                self._jobs[job_id] = js
+            js.status = status
+            js.result = result
+            js.error = error
+            done = [j for j in self._jobs.values() if j.status in ("done", "error")]
+            if len(done) > 20:
+                for j in done[:-20]:
+                    self._jobs.pop(j.job_id, None)
+
+    async def get_job(self, job_id: str) -> Optional[JobState]:
+        async with self._jobs_lock:
+            return self._jobs.get(job_id)
+
+    async def start_job(self) -> tuple[Optional[str], Optional[str]]:
+        """Запуск фоновой sync_cache как asyncio.Task.
+
+        Returns:
+            (job_id, None) — джоба запущена.
+            (None, existing_job_id) — синхронизация уже идёт (или считаем, что идёт).
+
+        Координация: проверка _sync_in_progress под _sync_lock атомарна. Сам флаг
+        выставляет sync_cache() (тоже под _sync_lock). Здесь мы только регистрируем
+        JobState и пинаем Task; если уже идёт — отдаём существующий running job_id.
+        """
+        async with self._sync_lock:
+            if self._sync_in_progress:
+                running = next(
+                    (j for j in self._jobs.values() if j.status == "running"),
+                    None,
+                )
+                return None, (running.job_id if running else "unknown")
+            job_id = uuid.uuid4().hex
+            self._jobs[job_id] = JobState(job_id=job_id, status="running")
+            # _sync_in_progress выставит сама sync_cache() внутри своего lock.
+            asyncio.create_task(self.run_sync_job(job_id))
+        return job_id, None
 
     async def _sync_panel(self) -> Dict[str, Any]:
         """Sync panel clients with DB+cache and clean up orphaned keys."""

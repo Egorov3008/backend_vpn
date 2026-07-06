@@ -1,4 +1,3 @@
-import time
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -654,51 +653,59 @@ async def admin_list_payments(
     return {"payments": payments}
 
 
+def _get_sync_scheduler():
+    """Достаёт живой SyncScheduler из app.state (см. app/main.py lifespan).
+
+    lifespan сохраняет create_scheduler().sync_scheduler как app.state.sync_scheduler.
+    В тестах туда можно подсунуть фейк.
+    """
+    from app.main import app
+    return getattr(app.state, "sync_scheduler", None)
+
+
 @router.post("/sync")
 async def admin_sync(
-    pool=Depends(get_pool),
-    service_data: ServiceDataModel = Depends(get_service_data),
+    principal: AdminPrincipal = Depends(verify_admin_actor),
+    pool: asyncpg.Pool = Depends(get_pool),
 ):
-    """Trigger manual cache and panel synchronization.
+    """Запуск фоновой синхронизации. 202 + job_id; 409 если уже идёт.
 
-    Runs the same pipeline as the background scheduler (every 3h):
-    1. Full cache reload from PostgreSQL
-    2. Panel ↔ DB sync + traffic update
+    Раньше был синхронным (блокировал request на время sync_cache). Теперь
+    запускает asyncio.Task через SyncScheduler.start_job и сразу отдаёт job_id.
+    Статус — через GET /admin/sync/{job_id}.
     """
-    from background.scheduler import SyncScheduler
+    scheduler = _get_sync_scheduler()
+    if scheduler is None:
+        raise HTTPException(status_code=503, detail="Scheduler unavailable")
 
-    sync_start = time.time()
-    logger.info("Ручная синхронизация запущена через admin/sync")
-
-    scheduler = SyncScheduler(service_data, pool)
-    # sync_cache() сам выполнит и кэш, и панельную синхронизацию.
-    # Не вызываем _sync_panel() повторно — это удвоило бы работу
-    # (две XUI-сессии, два набора aiohttp.ClientSession).
-    result = await scheduler.sync_cache()
-
-    total_time = time.time() - sync_start
-    panel_stats = (result or {}).get("panel", {}) or {}
-    logger.info(
-        "Ручная синхронизация завершена",
-        total_time=f"{total_time:.2f}s",
-        status=result.get("status"),
-    )
-
-    if (result or {}).get("status") == "error":
+    job_id, existing = await scheduler.start_job()
+    if job_id is None:
+        # Уже идёт: отдаём существующий job_id для статуса.
         raise HTTPException(
-            status_code=500,
-            detail={"status": "error", "result": result},
+            status_code=409,
+            detail={"detail": "sync already running", "job_id": existing},
         )
 
-    return {
-        "status": "success",
-        "result": result,
-        # Top-level `cache` нужен боту: он читает
-        # result.get("cache", {}).get("message", "—").
-        # Алиасим на тот же dict — `result` уже содержит
-        # message/total_time/cache_load_time.
-        "cache": result,
-        "panel": panel_stats,
-        "total_time": f"{total_time:.2f}s",
-    }
+    await AuditLogger(pool).record(principal.admin_tg_id, "sync", job_id)
+    return Response(
+        status_code=202,
+        content=f'{{"job_id":"{job_id}","status":"running"}}',
+        media_type="application/json",
+    )
+
+
+@router.get("/sync/{job_id}")
+async def admin_sync_status(
+    job_id: str,
+    principal: AdminPrincipal = Depends(verify_admin_actor),
+):
+    """Статус фоновой синхронизации по job_id."""
+    scheduler = _get_sync_scheduler()
+    if scheduler is None:
+        raise HTTPException(status_code=503, detail="Scheduler unavailable")
+
+    js = await scheduler.get_job(job_id)
+    if js is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"status": js.status, "result": js.result, "error": js.error}
 

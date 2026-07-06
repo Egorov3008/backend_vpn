@@ -49,6 +49,9 @@ async def lifespan(app: FastAPI):
         scheduler = create_scheduler(service_data=service_data, pool=pool)
         scheduler.start()
         app.state.scheduler = scheduler
+        # SyncScheduler instance for admin/sync async-launch endpoint.
+        # create_scheduler() вешает sync_scheduler атрибутом на AsyncIOScheduler.
+        app.state.sync_scheduler = scheduler.sync_scheduler  # type: ignore[attr-defined]
     except Exception:
         await storage.stop()
         await pool.close()
