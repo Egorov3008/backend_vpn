@@ -3,7 +3,13 @@ from httpx import AsyncClient, ASGITransport
 from unittest.mock import AsyncMock, MagicMock
 
 from app.main import app
-from app.auth import verify_bot_secret, verify_api_key, verify_admin_or_bot
+from app.auth import (
+    verify_bot_secret,
+    verify_api_key,
+    verify_admin_or_bot,
+    verify_admin_actor,
+    AdminPrincipal,
+)
 from app.dependencies import get_service_data, get_pool, get_cache
 
 
@@ -48,6 +54,7 @@ async def api_client(mock_service_data, monkeypatch):
     app.dependency_overrides[verify_bot_secret] = lambda: None
     app.dependency_overrides[verify_api_key] = lambda: None
     app.dependency_overrides[verify_admin_or_bot] = lambda: None
+    app.dependency_overrides[verify_admin_actor] = lambda: AdminPrincipal(admin_tg_id=1)
 
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"

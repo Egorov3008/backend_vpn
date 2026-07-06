@@ -154,6 +154,7 @@ async def admin_register_user(
 async def admin_update_user(
     tg_id: int,
     body: UserUpdateRequest,
+    principal: AdminPrincipal = Depends(verify_admin_actor),
     service_data: ServiceDataModel = Depends(get_service_data),
     pool=Depends(get_pool),
 ) -> UserResponse:
@@ -173,6 +174,7 @@ async def admin_update_user(
         user.is_admin = body.is_admin
 
     await service_data.users.update(pool, user, search_data={"tg_id": tg_id})
+    await AuditLogger(pool).record(principal.admin_tg_id, "update_user", str(tg_id))
     return UserResponse.from_user(user)
 
 
@@ -238,6 +240,7 @@ async def list_inactive_users(
 
 @router.post("/users/inactive/delete")
 async def delete_inactive_users(
+    principal: AdminPrincipal = Depends(verify_admin_actor),
     service_data: ServiceDataModel = Depends(get_service_data),
     pool=Depends(get_pool),
     cache: CacheService = Depends(get_cache),
@@ -259,12 +262,14 @@ async def delete_inactive_users(
         await service_data.cache_service.users.delete(CacheKeyManager.user(user.tg_id))
         deleted += 1
 
+    await AuditLogger(pool).record(principal.admin_tg_id, "delete_inactive", str(deleted))
     return {"deleted": deleted}
 
 
 @router.post("/keys/generate")
 async def admin_generate_key(
     body: AdminGenerateKeyRequest,
+    principal: AdminPrincipal = Depends(verify_admin_actor),
     pool=Depends(get_pool),
     service_data: ServiceDataModel = Depends(get_service_data),
     cache: CacheService = Depends(get_cache),
@@ -298,12 +303,16 @@ async def admin_generate_key(
     )
     if not result:
         raise HTTPException(status_code=500, detail="Failed to create key")
+    await AuditLogger(pool).record(
+        principal.admin_tg_id, "generate_key", f"{body.tg_id}:{body.tariff_id}"
+    )
     return result
 
 
 @router.post("/keys/mass-renew")
 async def admin_mass_renew(
     body: AdminMassRenewRequest,
+    principal: AdminPrincipal = Depends(verify_admin_actor),
     pool=Depends(get_pool),
     service_data: ServiceDataModel = Depends(get_service_data),
     cache: CacheService = Depends(get_cache),
@@ -341,6 +350,9 @@ async def admin_mass_renew(
             results.append({"email": email, "success": False, "error": str(e)})
 
     success_count = sum(1 for r in results if r["success"])
+    await AuditLogger(pool).record(
+        principal.admin_tg_id, "mass_renew", f"{success_count}/{len(body.emails)}"
+    )
     return {"total": len(body.emails), "success": success_count, "failed": len(body.emails) - success_count, "results": results}
 
 
@@ -348,6 +360,7 @@ async def admin_mass_renew(
 async def admin_change_key_date(
     email: str,
     body: AdminChangeDateRequest,
+    principal: AdminPrincipal = Depends(verify_admin_actor),
     pool=Depends(get_pool),
     service_data: ServiceDataModel = Depends(get_service_data),
     cache: CacheService = Depends(get_cache),
@@ -369,6 +382,7 @@ async def admin_change_key_date(
         raise HTTPException(status_code=500, detail="Failed to update key in panel")
     await service_data.keys.update(pool, key, {"email": key.email})
     await resetter.reset_key_after_renewal(pool, key)
+    await AuditLogger(pool).record(principal.admin_tg_id, "change_date", email)
     return {"email": email, "expiry_time": body.expiry_time}
 
 
@@ -376,6 +390,7 @@ async def admin_change_key_date(
 async def admin_change_key_tariff(
     email: str,
     body: AdminChangeTariffRequest,
+    principal: AdminPrincipal = Depends(verify_admin_actor),
     pool=Depends(get_pool),
     service_data: ServiceDataModel = Depends(get_service_data),
     cache: CacheService = Depends(get_cache),
@@ -404,6 +419,7 @@ async def admin_change_key_tariff(
         raise HTTPException(status_code=500, detail="Failed to update key in panel")
     await service_data.keys.update(pool, key, {"email": key.email})
     await resetter.reset_key_after_renewal(pool, key)
+    await AuditLogger(pool).record(principal.admin_tg_id, "change_tariff", email)
     return {"email": email, "tariff_id": tariff.id}
 
 
