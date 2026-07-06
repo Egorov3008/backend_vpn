@@ -1,12 +1,13 @@
 import time
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 import asyncpg
 
-from app.auth import verify_admin_or_bot
+from app.auth import verify_admin_or_bot, verify_admin_actor, AdminPrincipal
 from app.dependencies import get_service_data, get_pool, get_cache
 from app.factories import build_key_services
+from services.admin_audit import AuditLogger
 from app.schemas.users import UserResponse, UserUpdateRequest, UserRegisterRequest
 from app.schemas.admin import (
     AdminGenerateKeyRequest,
@@ -178,11 +179,15 @@ async def admin_update_user(
 @router.post("/keys/{email}/delete", status_code=204)
 async def admin_delete_key(
     email: str,
+    principal: AdminPrincipal = Depends(verify_admin_actor),
     pool=Depends(get_pool),
     service_data: ServiceDataModel = Depends(get_service_data),
     cache: CacheService = Depends(get_cache),
 ):
-    """Admin: delete any VPN key (no tg_id ownership check)."""
+    """Admin: delete any VPN key (no tg_id ownership check).
+
+    409 если панель не удалила — ключ остаётся в БД (orphan не возникает).
+    """
     key = await service_data.keys.get_data(email)
     if not key:
         key = await service_data.data_service.keys.get(pool, email=email)
@@ -194,13 +199,20 @@ async def admin_delete_key(
     data_service = DataService()
     _, _, xui = build_key_services(pool, service_data, cache, data_service)
 
-    deleted = await xui.delete_client(email, key.inbound_id, key.client_id)
+    try:
+        deleted = await xui.delete_client(email, key.inbound_id, key.client_id)
+    except Exception as e:
+        raise HTTPException(
+            status_code=409, detail=f"Failed to delete key from panel: {e}"
+        )
+
     if not deleted:
-        raise HTTPException(status_code=500, detail="Failed to delete key from server")
+        raise HTTPException(status_code=409, detail="Failed to delete key from panel")
 
     await service_data.data_service.keys.delete(pool, email=email)
     await service_data.cache_service.keys.delete(CacheKeyManager.key(email))
-    return None
+    await AuditLogger(pool).record(principal.admin_tg_id, "delete_key", email)
+    return Response(status_code=204)
 
 
 @router.get("/users/inactive")
@@ -550,13 +562,20 @@ async def admin_list_tariffs(
     return {"tariffs": tariffs}
 
 
-@router.post("/users/{tg_id}/delete", status_code=204)
+@router.post("/users/{tg_id}/delete")
 async def admin_delete_user(
     tg_id: int,
+    principal: AdminPrincipal = Depends(verify_admin_actor),
     pool=Depends(get_pool),
     service_data: ServiceDataModel = Depends(get_service_data),
+    cache: CacheService = Depends(get_cache),
 ):
-    """Admin: delete a user and all their keys."""
+    """Admin: delete a user and all their keys.
+
+    User удаляется всегда. Per-key XUI delete: success → key row+cache удалены;
+    fail → key row остаётся (orphan, sweep в фоновой задаче), фиксируется в
+    keys_failed. Возвращает {deleted_user, keys_deleted, keys_failed}.
+    """
     user = await service_data.users.get_data(tg_id)
     if not user:
         user = await service_data.data_service.users.get(pool, tg_id=tg_id)
@@ -564,7 +583,6 @@ async def admin_delete_user(
         raise HTTPException(status_code=404, detail="User not found")
 
     keys_result = await service_data.keys.get_by(tg_id=tg_id)
-    keys = []
     if keys_result is None:
         keys = []
     elif isinstance(keys_result, list):
@@ -575,14 +593,31 @@ async def admin_delete_user(
     data_service = DataService()
     _, _, xui = build_key_services(pool, service_data, service_data.cache_service, data_service)
 
+    keys_deleted = 0
+    keys_failed: list[dict] = []
     for key in keys:
-        await xui.delete_client(key.email, key.inbound_id, key.client_id)
-        await service_data.data_service.keys.delete(pool, email=key.email)
-        await service_data.cache_service.keys.delete(CacheKeyManager.key(key.email))
+        try:
+            ok = await xui.delete_client(key.email, key.inbound_id, key.client_id)
+        except Exception as e:
+            ok = False
+            keys_failed.append({"email": key.email, "error": str(e)})
+            continue
+        if ok:
+            await service_data.data_service.keys.delete(pool, email=key.email)
+            await service_data.cache_service.keys.delete(CacheKeyManager.key(key.email))
+            keys_deleted += 1
+        else:
+            keys_failed.append({"email": key.email, "error": "panel delete returned False"})
 
     await service_data.data_service.users.delete(pool, tg_id=tg_id)
     await service_data.cache_service.users.delete(CacheKeyManager.user(tg_id))
-    return None
+    await AuditLogger(pool).record(principal.admin_tg_id, "delete_user", str(tg_id))
+    if keys_failed:
+        logger.warning(
+            "delete_user: часть ключей не удалена из панели",
+            extra={"tg_id": tg_id, "failed": keys_failed},
+        )
+    return {"deleted_user": True, "keys_deleted": keys_deleted, "keys_failed": keys_failed}
 
 
 @router.get("/keys")
