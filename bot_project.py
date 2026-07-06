@@ -40,6 +40,48 @@ class _TelegramBot:
         except Exception as e:
             logger.error("Telegram sendMessage error", extra={"chat_id": chat_id, "error": str(e)})
 
+    async def get_chat_member(self, chat_id: str, user_id: int) -> dict | None:
+        """Проверяет статус пользователя в чате через Bot API getChatMember.
+
+        Возвращает result-объект (с полем ``status``) при ``{ok:true}``.
+        Возвращает ``None`` при network error / не-200 / ``{ok:false}`` /
+        пустом токене — это сигнал «не удалось проверить», НЕ «не подписан».
+        Не-участник приходит как ``{status: "left"}`` (ok=true) — это валидный
+        результат, НЕ None.
+        """
+        if not self._token:
+            logger.warning("bot_token not configured, skipping get_chat_member")
+            return None
+        try:
+            cid = int(user_id)
+        except (ValueError, TypeError):
+            logger.warning("Invalid user_id for get_chat_member", user_id=user_id)
+            return None
+        payload = {"chat_id": chat_id, "user_id": cid}
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(f"{self._base_url}/getChatMember", json=payload)
+                if resp.status_code != 200:
+                    logger.warning(
+                        f"Telegram getChatMember failed: status={resp.status_code} body={resp.text[:300]}",
+                        chat_id=chat_id, user_id=cid,
+                    )
+                    return None
+                data = resp.json()
+                if not data.get("ok"):
+                    logger.warning(
+                        f"Telegram getChatMember not ok: {data.get('description')}",
+                        chat_id=chat_id, user_id=cid,
+                    )
+                    return None
+                return data.get("result")
+        except Exception as e:
+            logger.error(
+                "Telegram getChatMember error",
+                extra={"chat_id": chat_id, "user_id": cid, "error": str(e)},
+            )
+            return None
+
     async def send_document(self, *args: object, **kwargs: object) -> None:
         pass
 
