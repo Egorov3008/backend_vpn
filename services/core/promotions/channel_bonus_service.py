@@ -56,21 +56,23 @@ class ChannelBonusService:
         self.resetter = KeyResetter(cache_service=cache)
 
     async def claim(self, tg_id: int, email: Optional[str] = None) -> ChannelBonusResult:
-        """Атомарно начисляет бонус или возвращает статус выбора/отказа."""
+        """Атомарно начисляет бонус или возвращает статус выбора/отказа.
+
+        Флаг ``user_promo_claims`` фиксируется ONLY когда ключ реально
+        продлён на +bonus_days. Пути ``choose_key`` и ``no_active_keys``
+        флаг не ставят — иначе повторный вызов с выбранным email попадал
+        в ``already_claimed`` без фактического начисления бонуса
+        (баг для пользователей с несколькими ключами).
+        """
         async with self.pool.acquire() as conn:
             async with conn.transaction():
-                # 1. Атомарно ставим флаг "бонус получен"
-                row = await conn.fetchrow(
-                    """
-                    INSERT INTO user_promo_claims (tg_id, promo_id)
-                    VALUES ($1, $2)
-                    ON CONFLICT (tg_id, promo_id) DO NOTHING
-                    RETURNING id
-                    """,
+                # 1. Уже получал бонус?
+                already = await conn.fetchval(
+                    "SELECT 1 FROM user_promo_claims WHERE tg_id = $1 AND promo_id = $2",
                     tg_id,
                     PROMO_ID,
                 )
-                if not row:
+                if already:
                     logger.info("Канальный бонус уже получен", tg_id=tg_id)
                     return ChannelBonusResult(status="already_claimed")
 
@@ -78,17 +80,13 @@ class ChannelBonusService:
                 keys = await self._load_user_keys(conn, tg_id)
                 eligible = [k for k in keys if KeyStatus.of(k) in (KeyStatus.ACTIVE, KeyStatus.GRACE)]
                 if not eligible:
-                    # Нет активных ключей — отменяем флаг, чтобы пользователь
-                    # мог получить бонус позже, когда создаст ключ.
-                    await conn.execute(
-                        "DELETE FROM user_promo_claims WHERE tg_id = $1 AND promo_id = $2",
-                        tg_id,
-                        PROMO_ID,
-                    )
+                    # Нет активных ключей — флаг не ставим, пользователь
+                    # сможет получить бонус позже, когда создаст ключ.
                     logger.info("Нет активных ключей для канального бонуса", tg_id=tg_id)
                     return ChannelBonusResult(status="no_active_keys")
 
-                # 3. Если ключей несколько и email не указан — просим выбрать
+                # 3. Если ключей несколько и email не указан — просим выбрать.
+                #    Флаг НЕ ставим: бонус ещё не начислен.
                 if email is None and len(eligible) > 1:
                     return ChannelBonusResult(
                         status="choose_key",
@@ -103,9 +101,26 @@ class ChannelBonusService:
                         keys=[self._key_info(k) for k in eligible],
                     )
 
-                # 5. Продлеваем ключ
-                result = await self._extend_key(conn, target)
-                return result
+                # 5. Атомарно фиксируем флаг "бонус получен".
+                #    ON CONFLICT защищает от гонки двух одновременных вызовов:
+                #    проигравший получит already_claimed без продления.
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO user_promo_claims (tg_id, promo_id)
+                    VALUES ($1, $2)
+                    ON CONFLICT (tg_id, promo_id) DO NOTHING
+                    RETURNING id
+                    """,
+                    tg_id,
+                    PROMO_ID,
+                )
+                if not row:
+                    logger.info("Канальный бонус уже получен (гонка)", tg_id=tg_id)
+                    return ChannelBonusResult(status="already_claimed")
+
+                # 6. Продлеваем ключ. При ошибке транзакция откатит флаг,
+                #    и пользователь сможет повторить попытку.
+                return await self._extend_key(conn, target)
 
     async def _load_user_keys(self, conn: asyncpg.Connection, tg_id: int) -> List[Key]:
         """Загружает ключи пользователя напрямую из БД (не кеш)."""

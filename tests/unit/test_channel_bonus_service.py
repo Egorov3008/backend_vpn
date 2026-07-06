@@ -32,6 +32,9 @@ def mock_conn():
     conn.transaction = MagicMock()
     conn.transaction.return_value.__aenter__ = AsyncMock(return_value=None)
     conn.transaction.return_value.__aexit__ = AsyncMock(return_value=False)
+    # По умолчанию: бонус ещё не получен (SELECT user_promo_claims → пусто),
+    # INSERT флага проходит (возвращается новая строка).
+    conn.fetchval = AsyncMock(return_value=None)
     conn.fetchrow = AsyncMock(return_value={"id": 1})
     conn.fetch = AsyncMock(return_value=[])
     conn.execute = AsyncMock(return_value="UPDATE 1")
@@ -65,12 +68,31 @@ def mock_service_data():
 
 @pytest.mark.asyncio
 async def test_claim_already_claimed(mock_pool, mock_conn, mock_xui, mock_service_data):
-    mock_conn.fetchrow = AsyncMock(return_value=None)  # conflict, no row
+    # SELECT user_promo_claims → уже есть запись (бонус получен ранее)
+    mock_conn.fetchval = AsyncMock(return_value=1)
     svc = ChannelBonusService(pool=mock_pool, service_data=mock_service_data, cache=mock_service_data.cache_service, xui=mock_xui)
 
     result = await svc.claim(tg_id=123)
 
     assert result.status == "already_claimed"
+    # Флаг не трогаем (ни INSERT, ни DELETE), ключи не грузим
+    mock_conn.fetch.assert_not_called()
+    mock_xui.extend_client_key.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_claim_race_on_insert(mock_pool, mock_conn, mock_xui, mock_service_data):
+    # SELECT говорит "не получен", но параллельный вызов успел вставить флаг —
+    # INSERT ... ON CONFLICT DO NOTHING не вернул строку → already_claimed.
+    key = make_key(expiry_offset_days=30, grace_offset_days=37)
+    mock_conn.fetch = AsyncMock(return_value=[dict(key.to_dict())])
+    mock_conn.fetchrow = AsyncMock(return_value=None)  # INSERT конфликт
+    svc = ChannelBonusService(pool=mock_pool, service_data=mock_service_data, cache=mock_service_data.cache_service, xui=mock_xui)
+
+    result = await svc.claim(tg_id=123)
+
+    assert result.status == "already_claimed"
+    mock_xui.extend_client_key.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -92,11 +114,12 @@ async def test_claim_no_active_keys(mock_pool, mock_conn, mock_xui, mock_service
     result = await svc.claim(tg_id=123)
 
     assert result.status == "no_active_keys"
-    mock_conn.execute.assert_any_call(
-        "DELETE FROM user_promo_claims WHERE tg_id = $1 AND promo_id = $2",
-        123,
-        PROMO_ID,
-    )
+    # Флаг НЕ ставим (и ничего не удаляем — его и не было):
+    # пользователь сможет получить бонус после создания ключа.
+    delete_calls = [c for c in mock_conn.execute.call_args_list if "DELETE FROM user_promo_claims" in str(c)]
+    assert delete_calls == []
+    insert_calls = [c for c in mock_conn.fetchrow.call_args_list if "INSERT INTO user_promo_claims" in str(c)]
+    assert insert_calls == []
 
 
 @pytest.mark.asyncio
@@ -134,6 +157,10 @@ async def test_claim_multiple_keys_choose(mock_pool, mock_conn, mock_xui, mock_s
     assert result.keys[1]["email"] == "key2@vpn.ru"
     # Панель не трогали
     mock_xui.extend_client_key.assert_not_called()
+    # Флаг НЕ ставим на этапе выбора ключа — иначе повторный вызов с
+    # выбранным email попадал бы в already_claimed без начисления бонуса.
+    insert_calls = [c for c in mock_conn.fetchrow.call_args_list if "INSERT INTO user_promo_claims" in str(c)]
+    assert insert_calls == []
 
 
 @pytest.mark.asyncio
