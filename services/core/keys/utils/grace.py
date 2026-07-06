@@ -62,8 +62,27 @@ class GraceManager:
     async def renew_from_grace(self, key: Key, tariff: Tariff,
                                number_of_months: int = 1) -> Optional[Key]:
         new_expiry = self.expiry.key_duration(key, tariff.period, number_of_months)
-        return await self._apply_paid(key, tariff, new_expiry, number_of_months,
-                                       transfer_tg=False)
+        result = await self._apply_paid(key, tariff, new_expiry, number_of_months,
+                                        transfer_tg=False)
+        if result is not None:
+            await self._log_renewal(result)
+        return result
+
+    async def _log_renewal(self, key: Key) -> None:
+        """Записывает факт платного продления из grace в grace_renewal_log.
+
+        Используется метрикой «Продлены из grace». Сброй логирования не должен
+        рвать продление — ошибка только логируется.
+        """
+        try:
+            async with self.pool.acquire() as conn:
+                await conn.execute(
+                    "INSERT INTO grace_renewal_log (email, tg_id) VALUES ($1, $2)",
+                    key.email, key.tg_id,
+                )
+        except Exception as e:
+            logger.warning("grace_renewal_log: insert провален",
+                           extra={"email": key.email, "error": str(e)})
 
     async def upgrade_from_landing(self, key: Key, tariff: Tariff,
                                     number_of_months: int = 1) -> Optional[Key]:

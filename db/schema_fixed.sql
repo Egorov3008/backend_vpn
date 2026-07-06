@@ -173,6 +173,22 @@ CREATE TABLE IF NOT EXISTS user_promo_claims
 
 CREATE INDEX IF NOT EXISTS idx_user_promo_claims_tg_id ON user_promo_claims(tg_id);
 
+-- ============================================================================
+-- 5b. Grace renewal log — журнал продлений ключей из состояния grace
+-- ============================================================================
+-- См. миграцию 018. Поле keys.grace_expiry переписывается при продлении, поэтому
+-- историю «продлено из grace» нельзя вывести из текущих данных.
+CREATE TABLE IF NOT EXISTS grace_renewal_log
+(
+    id SERIAL PRIMARY KEY,
+    email TEXT NOT NULL,
+    tg_id BIGINT NOT NULL,
+    occurred_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_grace_renewal_log_occurred_at
+    ON grace_renewal_log(occurred_at);
+
 -- Ensure total_gb default matches model default (migration 008)
 DO $$
 BEGIN

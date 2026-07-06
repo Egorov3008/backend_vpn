@@ -42,7 +42,11 @@ def _mgr():
     expiry = MagicMock()
     expiry.key_duration = MagicMock(return_value=5000)
     expiry.key_duration_new_key = MagicMock(return_value=5000)
-    pool = MagicMock()
+    pool = AsyncMock()
+    _cm = MagicMock()
+    _cm.__aenter__ = AsyncMock(return_value=AsyncMock())
+    _cm.__aexit__ = AsyncMock(return_value=False)
+    pool.acquire = MagicMock(return_value=_cm)
     return (GraceManager(xui, model_data, cache, expiry, pool),
             xui, model_data, cache, expiry)
 

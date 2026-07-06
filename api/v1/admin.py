@@ -41,6 +41,15 @@ async def get_stats(
     return {"total_users": len(users), **stats}
 
 
+@router.get("/grace-bonus-stats")
+async def get_grace_bonus_stats(
+    pool: asyncpg.Pool = Depends(get_pool),
+):
+    """Метрики grace-периода и канального бонуса (cumulative + today/yesterday)."""
+    from services.grace_bonus_stats import GraceBonusStatsService
+    return await GraceBonusStatsService(pool).get()
+
+
 @router.get("/scheduler/status")
 async def admin_scheduler_status(
     service_data: ServiceDataModel = Depends(get_service_data),
