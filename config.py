@@ -96,6 +96,9 @@ class Settings(BaseSettings):
 
     # Promo: +N days for subscribing to Telegram channel
     channel_bonus_days: int = Field(default=7, alias="CHANNEL_BONUS_DAYS")
+    # Public URL of the Telegram channel (same CANALL_URL the bot uses).
+    # Backend needs it to call getChatMember for subscription checks.
+    canall_url: str = Field(default="", alias="CANALL_URL")
 
 
 settings = Settings()
