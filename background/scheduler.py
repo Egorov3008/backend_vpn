@@ -116,12 +116,16 @@ class SyncScheduler:
             # Запускаем синхронизацию с панелью после загрузки кэша
             logger.info("Запуск синхронизации с панелью (отложенный)")
             panel_sync_result = await self._sync_panel()
+            # Reconcile: удаляем orphan keys — ключи, чей tg_id больше нет в
+            # users (остаются после admin_delete_user с неудачным XUI-удалением).
+            orphan_stats = await self._sweep_orphan_keys()
             total_time = time.time() - sync_start
             self._last_sync_time = total_time
 
             # Прокидываем детальную статистику панели в результат,
             # чтобы итоговое сообщение было наполнено данными.
             panel_stats = dict(panel_sync_result)
+            panel_stats["orphan_keys_removed"] = orphan_stats.get("orphan_keys_removed", 0)
             panel_stats.setdefault("cache_load_time", f"{cache_load_time:.2f}s")
             panel_stats.setdefault("total_time", f"{total_time:.2f}s")
             panel_stats.pop("sync_time", None)
@@ -264,6 +268,69 @@ class SyncScheduler:
         except Exception as e:
             logger.error("Ошибка синхронизации с панелью", error=str(e), exc_info=True)
             return {"status": "error", "error": str(e)}
+
+    async def _sweep_orphan_keys(self) -> dict:
+        """Удалить orphan keys — ключи, чей tg_id больше нет в users.
+
+        Возникают после admin_delete_user с частично неудачным XUI-удалением:
+        пользователь удалён, а key row остался (panel delete упал/вернул False).
+        Удаляет такие ключи из панели и БД+кэша. Безопасно: orphan = пользователь
+        уже удалён, повторная идемпотентная попытка на следующем цикле.
+
+        Returns:
+            ``{"orphan_keys_removed": N}`` — число успешно удалённых строк.
+        """
+        from client import XUISession
+        from services.cache.loader import LoadingService
+        from services.cache.key_manager import CacheKeyManager
+        from database.service import DataService
+
+        removed = 0
+        try:
+            async with self._pool.acquire() as conn:
+                rows = await conn.fetch(
+                    "SELECT k.email, k.inbound_id, k.client_id "
+                    "FROM keys k LEFT JOIN users u ON k.tg_id = u.tg_id "
+                    "WHERE u.tg_id IS NULL"
+                )
+            if not rows:
+                return {"orphan_keys_removed": 0}
+
+            data_service = DataService()
+            loader = LoadingService(
+                cache=self._service_data.cache_service,
+                data_service=data_service,
+                pool=self._pool,
+            )
+            xui = XUISession(model_service=self._service_data, loading=loader)
+
+            for r in rows:
+                email = r["email"]
+                try:
+                    ok = await xui.delete_client(email, r["inbound_id"], r["client_id"])
+                except Exception as e:
+                    logger.warning(
+                        "orphan_sweep: xui delete провален",
+                        extra={"email": email, "error": str(e)},
+                    )
+                    continue
+                if ok:
+                    await self._service_data.data_service.keys.delete(
+                        self._pool, email=email
+                    )
+                    await self._service_data.cache_service.keys.delete(
+                        CacheKeyManager.key(email)
+                    )
+                    removed += 1
+                else:
+                    logger.info(
+                        "orphan_sweep: panel delete вернул False — пропускаем",
+                        extra={"email": email},
+                    )
+            logger.info("orphan_sweep завершен", orphan_keys_removed=removed)
+        except Exception as e:
+            logger.error("orphan_sweep: ошибка", error=str(e), exc_info=True)
+        return {"orphan_keys_removed": removed}
 
     async def run_notifications(self) -> None:
         """Run notification funnels cycle."""
