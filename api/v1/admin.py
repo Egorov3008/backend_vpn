@@ -168,6 +168,8 @@ async def admin_update_user(
         user.trial = body.trial
     if body.is_blocked is not None:
         user.is_blocked = body.is_blocked
+    if body.is_admin is not None:
+        user.is_admin = body.is_admin
 
     await service_data.users.update(pool, user, search_data={"tg_id": tg_id})
     return UserResponse.from_user(user)

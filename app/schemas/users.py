@@ -49,3 +49,4 @@ class UserUpdateRequest(BaseModel):
     server_id: Optional[int] = None
     trial: Optional[int] = None
     is_blocked: Optional[bool] = None
+    is_admin: Optional[bool] = None
