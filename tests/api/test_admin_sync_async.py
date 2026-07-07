@@ -115,3 +115,74 @@ async def test_sync_status_error_propagates(api_client, fake_scheduler):
     body = r.json()
     assert body["status"] == "error"
     assert body["error"] == "boom"
+
+# --- P1: real SyncScheduler — race + scheduled registration ---------------
+import asyncio  # noqa: E402
+from unittest.mock import MagicMock  # noqa: E402
+from background.scheduler import SyncScheduler  # noqa: E402
+
+
+@pytest.mark.asyncio
+async def test_start_job_second_call_returns_existing_while_running():
+    """Race fix: два start_job подряд, пока sync_cache ещё не выставил
+    _sync_in_progress. Второй видит running JobState первого → (None, existing),
+    а не второй 202."""
+    sched = SyncScheduler(MagicMock(), MagicMock())
+    # run_sync_job замокан — не зовёт sync_cache/_set_job, JobState остаётся running
+    # (имитация окна до sync_cache).
+    sched.run_sync_job = AsyncMock()
+    try:
+        j1, existing1 = await sched.start_job()
+        assert j1 is not None and existing1 is None
+        # Флаг ещё не поднят — именно в этом окне раньше второй start_job проходил.
+        assert sched._sync_in_progress is False
+
+        j2, existing2 = await sched.start_job()
+        assert j2 is None
+        assert existing2 == j1
+    finally:
+        # Дать созданным task'ам (mocked no-op) доработать, чтобы не текли.
+        await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+async def test_scheduled_sync_visible_to_start_job_with_real_job_id():
+    """P1-3: пока бежит scheduled sync, start_job отдаёт настоящий job_id
+    зарегистрированной джобы (не 'unknown'). Раньше scheduled sync_cache бежал
+    без JobState → 409 с job_id='unknown' → GET /admin/sync/unknown → 404."""
+    sched = SyncScheduler(MagicMock(), MagicMock())
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def fake_sync_cache():
+        started.set()
+        await release.wait()
+        return {"status": "success"}
+
+    sched.sync_cache = fake_sync_cache
+    task = asyncio.create_task(sched.run_scheduled_sync())
+    try:
+        await started.wait()
+        # scheduled sync бежит, _sync_in_progress не выставлен (fake), но
+        # running JobState зарегистрирована — start_job должен её найти.
+        job_id, existing = await sched.start_job()
+        assert job_id is None
+        assert existing is not None
+        assert existing != "unknown"
+        js = await sched.get_job(existing)
+        assert js is not None and js.status == "running"
+    finally:
+        release.set()
+        await task
+
+
+@pytest.mark.asyncio
+async def test_scheduled_sync_registers_done_jobstate():
+    """run_scheduled_sync по завершении отмечает JobState как done с результатом."""
+    sched = SyncScheduler(MagicMock(), MagicMock())
+    sched.sync_cache = AsyncMock(return_value={"status": "success"})
+    await sched.run_scheduled_sync()
+    jobs = list(sched._jobs.values())
+    assert len(jobs) == 1
+    assert jobs[0].status == "done"
+    assert jobs[0].result == {"status": "success"}

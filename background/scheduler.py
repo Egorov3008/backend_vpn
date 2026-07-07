@@ -201,24 +201,51 @@ class SyncScheduler:
 
         Returns:
             (job_id, None) — джоба запущена.
-            (None, existing_job_id) — синхронизация уже идёт (или считаем, что идёт).
+            (None, existing_job_id) — синхронизация уже идёт.
 
-        Координация: проверка _sync_in_progress под _sync_lock атомарна. Сам флаг
-        выставляет sync_cache() (тоже под _sync_lock). Здесь мы только регистрируем
-        JobState и пинаем Task; если уже идёт — отдаём существующий running job_id.
+        Координация: атомарная проверка под _sync_lock. Маркер «идёт» — это
+        либо ``_sync_in_progress`` (выставляет sync_cache), либо зарегистрированная
+        running ``JobState`` (выставляется здесь и в ``run_scheduled_sync``
+        немедленно, до того как sync_cache успеет поставить ``_sync_in_progress``).
+        Проверка ОБОИХ закрывает race: два одновременных start_job сериализуются
+        lock'ом, второй видит running JobState первого → 409, а не второй 202.
+        А проверка JobState (а не только флага) делает scheduled-запуски видимыми
+        admin/sync с их настоящим job_id (см. run_scheduled_sync).
         """
         async with self._sync_lock:
-            if self._sync_in_progress:
-                running = next(
-                    (j for j in self._jobs.values() if j.status == "running"),
-                    None,
-                )
+            running = next(
+                (j for j in self._jobs.values() if j.status == "running"),
+                None,
+            )
+            if self._sync_in_progress or running is not None:
                 return None, (running.job_id if running else "unknown")
             job_id = uuid.uuid4().hex
             self._jobs[job_id] = JobState(job_id=job_id, status="running")
             # _sync_in_progress выставит сама sync_cache() внутри своего lock.
             asyncio.create_task(self.run_sync_job(job_id))
         return job_id, None
+
+    async def run_scheduled_sync(self) -> None:
+        """Точка входа APScheduler: регистрирует JobState для scheduled-запуска.
+
+        Без этого scheduled sync_cache бежит без JobState → в окне scheduled-запуска
+        ``start_job`` не находил running-джобу и отдавал ``"unknown"`` → admin не
+        мог опросить статус (GET /admin/sync/unknown → 404). Регистрируем running
+        JobState тем же паттерном, что ``start_job``, затем запускаем sync_cache
+        через ``run_sync_job``. Дублирующий scheduled запуск (если coalesce
+        пропустил) пропускается.
+        """
+        async with self._sync_lock:
+            running = next(
+                (j for j in self._jobs.values() if j.status == "running"),
+                None,
+            )
+            if self._sync_in_progress or running is not None:
+                logger.info("scheduled sync: уже идёт — пропуск дублирующегося запуска")
+                return
+            job_id = uuid.uuid4().hex
+            self._jobs[job_id] = JobState(job_id=job_id, status="running")
+        await self.run_sync_job(job_id)
 
     async def _sync_panel(self) -> Dict[str, Any]:
         """Sync panel clients with DB+cache and clean up orphaned keys."""
@@ -448,9 +475,12 @@ def create_scheduler(
     scheduler.sync_scheduler = sync_scheduler  # type: ignore
 
     # Кэш загружается при старте приложения (в lifespan)
-    # Планировщик только обновляет его каждые 3 часа
+    # Планировщик только обновляет его каждые 3 часа.
+    # Через run_scheduled_sync (а не sync_cache напрямую), чтобы scheduled-запуск
+    # регистрировал JobState — тогда admin/sync в окне scheduled-запуска отдаёт
+    # настоящий job_id для опроса статуса, а не "unknown".
     scheduler.add_job(
-        sync_scheduler.sync_cache,
+        sync_scheduler.run_scheduled_sync,
         "interval",
         hours=3,
         id="sync_cache",
