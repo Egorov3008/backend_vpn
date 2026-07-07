@@ -30,6 +30,19 @@ router = APIRouter(
     dependencies=[Depends(verify_admin_or_bot)],
 )
 
+# Деструктивные admin-операции: actor-auth структурно на router-уровне, а не
+# per-endpoint. Любой эндпоинт, добавленный в destructive_router, автоматически
+# получает verify_admin_actor (X-API-Key + X-Admin-Tg-Id) — нельзя случайно
+# забыть auth при добавлении нового деструктивного метода. Per-endpoint
+# `principal: AdminPrincipal = Depends(verify_admin_actor)` сохранён как
+# источник principal.admin_tg_id для audit (router-level dep кешируется
+# per-request, повторный Depends возвращает тот же объект без повторной проверки).
+destructive_router = APIRouter(
+    prefix="/admin",
+    tags=["admin"],
+    dependencies=[Depends(verify_admin_actor)],
+)
+
 
 @router.get("/stats")
 async def get_stats(
@@ -149,7 +162,7 @@ async def admin_register_user(
     return UserResponse.from_user(new_user)
 
 
-@router.patch("/users/{tg_id}", response_model=UserResponse)
+@destructive_router.patch("/users/{tg_id}", response_model=UserResponse)
 async def admin_update_user(
     tg_id: int,
     body: UserUpdateRequest,
@@ -177,7 +190,7 @@ async def admin_update_user(
     return UserResponse.from_user(user)
 
 
-@router.post("/keys/{email}/delete", status_code=204)
+@destructive_router.post("/keys/{email}/delete", status_code=204)
 async def admin_delete_key(
     email: str,
     principal: AdminPrincipal = Depends(verify_admin_actor),
@@ -240,7 +253,7 @@ async def list_inactive_users(
     return {"count": len(inactive), "users": [UserResponse.from_user(u) for u in inactive]}
 
 
-@router.post("/users/inactive/delete")
+@destructive_router.post("/users/inactive/delete")
 async def delete_inactive_users(
     principal: AdminPrincipal = Depends(verify_admin_actor),
     service_data: ServiceDataModel = Depends(get_service_data),
@@ -268,7 +281,7 @@ async def delete_inactive_users(
     return {"deleted": deleted}
 
 
-@router.post("/keys/generate")
+@destructive_router.post("/keys/generate")
 async def admin_generate_key(
     body: AdminGenerateKeyRequest,
     principal: AdminPrincipal = Depends(verify_admin_actor),
@@ -311,7 +324,7 @@ async def admin_generate_key(
     return result
 
 
-@router.post("/keys/mass-renew")
+@destructive_router.post("/keys/mass-renew")
 async def admin_mass_renew(
     body: AdminMassRenewRequest,
     principal: AdminPrincipal = Depends(verify_admin_actor),
@@ -358,7 +371,7 @@ async def admin_mass_renew(
     return {"total": len(body.emails), "success": success_count, "failed": len(body.emails) - success_count, "results": results}
 
 
-@router.post("/keys/{email}/change-date")
+@destructive_router.post("/keys/{email}/change-date")
 async def admin_change_key_date(
     email: str,
     body: AdminChangeDateRequest,
@@ -391,7 +404,7 @@ async def admin_change_key_date(
     return {"email": email, "expiry_time": body.expiry_time}
 
 
-@router.post("/keys/{email}/change-tariff")
+@destructive_router.post("/keys/{email}/change-tariff")
 async def admin_change_key_tariff(
     email: str,
     body: AdminChangeTariffRequest,
@@ -585,7 +598,7 @@ async def admin_list_tariffs(
     return {"tariffs": tariffs}
 
 
-@router.post("/users/{tg_id}/delete")
+@destructive_router.post("/users/{tg_id}/delete")
 async def admin_delete_user(
     tg_id: int,
     principal: AdminPrincipal = Depends(verify_admin_actor),
@@ -673,7 +686,7 @@ def _get_sync_scheduler():
     return getattr(app.state, "sync_scheduler", None)
 
 
-@router.post("/sync")
+@destructive_router.post("/sync")
 async def admin_sync(
     principal: AdminPrincipal = Depends(verify_admin_actor),
     pool: asyncpg.Pool = Depends(get_pool),
@@ -704,7 +717,7 @@ async def admin_sync(
     )
 
 
-@router.get("/sync/{job_id}")
+@destructive_router.get("/sync/{job_id}")
 async def admin_sync_status(
     job_id: str,
     principal: AdminPrincipal = Depends(verify_admin_actor),

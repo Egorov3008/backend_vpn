@@ -73,3 +73,51 @@ async def test_mass_renew_accepts_api_key(
         assert resp.status_code == 200
     finally:
         app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_delete_key_rejects_bot_secret_via_subrouter(
+    mock_service_data, mock_pool, mock_cache, monkeypatch
+):
+    """Sub-router: destructive endpoint без X-API-Key → 401 на router-уровне
+    (verify_admin_actor структурно), даже без per-endpoint Depends. Хендлер не
+    выполняется — содержимое моков не важно."""
+    monkeypatch.setattr(settings, "bot_secret_key", "bot-secret-only")
+    app.dependency_overrides[get_service_data] = lambda: mock_service_data
+    app.dependency_overrides[get_pool] = lambda: mock_pool
+    app.dependency_overrides[get_cache] = lambda: mock_cache
+    # НЕ оверрайдим verify_admin_actor → реальная проверка sub-router-уровня
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.post(
+                "/api/v1/admin/keys/a@b.com/delete",
+                headers={"X-Bot-Secret": "bot-secret-only"},
+            )
+        assert resp.status_code == 401
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_read_admin_users_accepts_bot_secret(
+    mock_service_data, mock_pool, mock_cache, monkeypatch
+):
+    """Регресс: read-роутер /admin/users НЕ ужесточён — X-Bot-Secret (без
+    X-API-Key) проходит verify_admin_or_bot → 200."""
+    monkeypatch.setattr(settings, "bot_secret_key", "bot-secret-only")
+    app.dependency_overrides[get_service_data] = lambda: mock_service_data
+    app.dependency_overrides[get_pool] = lambda: mock_pool
+    app.dependency_overrides[get_cache] = lambda: mock_cache
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.get(
+                "/api/v1/admin/users",
+                headers={"X-Bot-Secret": "bot-secret-only"},
+            )
+        assert resp.status_code == 200
+    finally:
+        app.dependency_overrides.clear()
