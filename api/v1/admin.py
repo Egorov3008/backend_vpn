@@ -210,9 +210,12 @@ async def admin_delete_key(
     if not deleted:
         raise HTTPException(status_code=409, detail="Failed to delete key from panel")
 
+    # Аудит фиксируем сразу после успешной XUI-мутации — если последующий
+    # DB/cache cleanup упадёт, деструктивная операция на панели уже совершена
+    # и должна остаться в журнале (AuditLogger глотает свои ошибки).
+    await AuditLogger(pool).record(principal.admin_tg_id, "delete_key", email)
     await service_data.data_service.keys.delete(pool, email=email)
     await service_data.cache_service.keys.delete(CacheKeyManager.key(email))
-    await AuditLogger(pool).record(principal.admin_tg_id, "delete_key", email)
     return Response(status_code=204)
 
 
@@ -624,9 +627,11 @@ async def admin_delete_user(
         else:
             keys_failed.append({"email": key.email, "error": "panel delete returned False"})
 
+    # Аудит сразу после XUI-мутаций по ключам, до удаления user-строки —
+    # если users.delete упадёт, деструктивные panel-операции уже в журнале.
+    await AuditLogger(pool).record(principal.admin_tg_id, "delete_user", str(tg_id))
     await service_data.data_service.users.delete(pool, tg_id=tg_id)
     await service_data.cache_service.users.delete(CacheKeyManager.user(tg_id))
-    await AuditLogger(pool).record(principal.admin_tg_id, "delete_user", str(tg_id))
     if keys_failed:
         logger.warning(
             "delete_user: часть ключей не удалена из панели",

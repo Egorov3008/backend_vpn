@@ -116,6 +116,62 @@ async def test_delete_user_partial_keeps_failed_key(api_client, mock_service_dat
 
 
 @pytest.mark.asyncio
+async def test_delete_key_audits_before_db_cleanup(api_client, mock_service_data):
+    """Аудит пишется сразу после XUI-успеха — если DB/cache cleanup падает,
+    деструктивная panel-операция всё равно остаётся в журнале."""
+    key = make_key(email="ok@b.com")
+    mock_service_data.keys.get_data = AsyncMock(return_value=key)
+    mock_service_data.data_service.keys.delete = AsyncMock(side_effect=RuntimeError("db down"))
+    mock_service_data.cache_service.keys.delete = AsyncMock()
+
+    xui = MagicMock()
+    xui.delete_client = AsyncMock(return_value=True)
+
+    mock_audit = MagicMock()
+    mock_audit.record = AsyncMock()
+
+    _override_principal(AdminPrincipal(admin_tg_id=42))
+    with patch("api.v1.admin.build_key_services", return_value=(None, None, xui)), \
+         patch("api.v1.admin.AuditLogger", return_value=mock_audit):
+        with pytest.raises(RuntimeError):
+            await api_client.post("/api/v1/admin/keys/ok@b.com/delete")
+
+    # DB cleanup raised, but audit was recorded BEFORE the raise — the
+    # destructive panel op is captured in the journal regardless.
+    mock_audit.record.assert_awaited_once_with(42, "delete_key", "ok@b.com")
+
+
+@pytest.mark.asyncio
+async def test_delete_user_audits_before_user_row_delete(api_client, mock_service_data):
+    """Аудит пишется до users.delete — если удаление user-строки падает,
+    деструктивные XUI-операции по ключам уже в журнале."""
+    user = MagicMock(tg_id=123)
+    key_ok = make_key(email="ok@b.com", inbound_id=1, client_id="c1")
+    mock_service_data.users.get_data = AsyncMock(return_value=user)
+    mock_service_data.keys.get_by = AsyncMock(return_value=[key_ok])
+    mock_service_data.data_service.keys.delete = AsyncMock()
+    mock_service_data.data_service.users.delete = AsyncMock(side_effect=RuntimeError("db down"))
+    mock_service_data.cache_service.keys.delete = AsyncMock()
+    mock_service_data.cache_service.users.delete = AsyncMock()
+
+    xui = MagicMock()
+    xui.delete_client = AsyncMock(return_value=True)
+
+    mock_audit = MagicMock()
+    mock_audit.record = AsyncMock()
+
+    _override_principal(AdminPrincipal(admin_tg_id=42))
+    with patch("api.v1.admin.build_key_services", return_value=(None, None, xui)), \
+         patch("api.v1.admin.AuditLogger", return_value=mock_audit):
+        with pytest.raises(RuntimeError):
+            await api_client.post("/api/v1/admin/users/123/delete")
+
+    # users.delete raised, but audit was recorded BEFORE the raise — the
+    # destructive per-key XUI ops are captured in the journal regardless.
+    mock_audit.record.assert_awaited_once_with(42, "delete_user", "123")
+
+
+@pytest.mark.asyncio
 async def test_delete_user_no_keys(api_client, mock_service_data):
     """delete_user with no keys: deleted_user=True, keys_deleted=0, keys_failed=[]."""
     user = MagicMock(tg_id=123)
