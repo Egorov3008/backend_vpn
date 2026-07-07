@@ -205,6 +205,16 @@ xui_api_errors_total = Counter(
     registry=REGISTRY,
 )
 
+# Сбои записи в admin_audit_log. AuditLogger fail-open глотает ошибку вставки
+# (операция не должна рваться), но молчаливый сбой невидим без метрики. Счётчик
+# инкрементируется в AuditLogger.record except-блоке — виден в /metrics.
+admin_audit_failures_total = Counter(
+    "vpn_admin_audit_failures_total",
+    "Сбои записи в admin_audit_log (fail-open)",
+    ["action", "error_type"],
+    registry=REGISTRY,
+)
+
 xui_api_duration = Histogram(
     "vpn_xui_api_duration_seconds",
     "Время вызовов XUI API",

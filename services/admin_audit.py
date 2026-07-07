@@ -8,6 +8,7 @@ from typing import Optional
 import asyncpg
 
 from logger import logger
+from services.metrics.registry import admin_audit_failures_total
 
 
 class AuditLogger:
@@ -30,6 +31,15 @@ class AuditLogger:
                     target,
                 )
         except Exception as e:
+            # Метрика观测ability: fail-open глотает сбой, но он должен быть виден
+            # в /metrics. Сам инкремент тоже оборачиваем — метрики не должны рвать
+            # fail-open аудит (иначе фикс ломает свойство "сбой аудита не рвёт op").
+            try:
+                admin_audit_failures_total.labels(
+                    action=action, error_type=type(e).__name__
+                ).inc()
+            except Exception:
+                pass
             logger.warning(
                 "admin_audit_log: insert провален",
                 extra={"admin_tg_id": admin_tg_id, "action": action, "error": str(e)},
