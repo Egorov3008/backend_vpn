@@ -383,8 +383,11 @@ async def admin_change_key_date(
     if not updated:
         raise HTTPException(status_code=500, detail="Failed to update key in panel")
     await service_data.keys.update(pool, key, {"email": key.email})
-    await resetter.reset_key_after_renewal(pool, key)
+    # Аудит сразу после XUI+DB-мутации — если resetter упадёт, деструктивная
+    # операция на панели уже совершена и должна остаться в журнале
+    # (AuditLogger глотает свои ошибки).
     await AuditLogger(pool).record(principal.admin_tg_id, "change_date", email)
+    await resetter.reset_key_after_renewal(pool, key)
     return {"email": email, "expiry_time": body.expiry_time}
 
 
@@ -420,8 +423,10 @@ async def admin_change_key_tariff(
     if not updated:
         raise HTTPException(status_code=500, detail="Failed to update key in panel")
     await service_data.keys.update(pool, key, {"email": key.email})
-    await resetter.reset_key_after_renewal(pool, key)
+    # Аудит сразу после XUI+DB-мутации — если resetter упадёт, деструктивная
+    # операция на панели уже совершена и должна остаться в журнале.
     await AuditLogger(pool).record(principal.admin_tg_id, "change_tariff", email)
+    await resetter.reset_key_after_renewal(pool, key)
     return {"email": email, "tariff_id": tariff.id}
 
 

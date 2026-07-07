@@ -193,3 +193,65 @@ async def test_delete_user_no_keys(api_client, mock_service_data):
     assert body["keys_deleted"] == 0
     assert body["keys_failed"] == []
     mock_service_data.data_service.users.delete.assert_called_once()
+
+@pytest.mark.asyncio
+async def test_change_key_date_audits_before_resetter(api_client, mock_service_data):
+    """Аудит change-date пишется сразу после XUI+DB-мутации — если resetter
+    падает, операция на панели уже совершена и остаётся в журнале."""
+    key = make_key(email="ok@b.com")
+    mock_service_data.keys.get_data = AsyncMock(return_value=key)
+    mock_service_data.keys.update = AsyncMock()
+
+    xui = MagicMock()
+    xui.extend_client_key = AsyncMock(return_value=True)
+
+    mock_audit = MagicMock()
+    mock_audit.record = AsyncMock()
+
+    _override_principal(AdminPrincipal(admin_tg_id=42))
+    with patch("api.v1.admin.build_key_services", return_value=(None, None, xui)), \
+         patch("api.v1.admin.AuditLogger", return_value=mock_audit), \
+         patch("api.v1.admin.KeyResetter") as ResetterCls:
+        ResetterCls.return_value.reset_key_after_renewal = AsyncMock(
+            side_effect=RuntimeError("resetter boom")
+        )
+        with pytest.raises(RuntimeError):
+            await api_client.post(
+                "/api/v1/admin/keys/ok@b.com/change-date",
+                json={"expiry_time": 1234},
+            )
+
+    mock_audit.record.assert_awaited_once_with(42, "change_date", "ok@b.com")
+
+
+@pytest.mark.asyncio
+async def test_change_key_tariff_audits_before_resetter(api_client, mock_service_data):
+    """Аудит change-tariff пишется сразу после XUI+DB-мутации — если resetter
+    падает, операция на панели уже совершена и остаётся в журнале."""
+    key = make_key(email="ok@b.com")
+    mock_service_data.keys.get_data = AsyncMock(return_value=key)
+    mock_service_data.keys.update = AsyncMock()
+    mock_service_data.tariffs.get_data = AsyncMock(
+        return_value=MagicMock(id=5, limit_ip=2, name_tariff="pro")
+    )
+
+    xui = MagicMock()
+    xui.extend_client_key = AsyncMock(return_value=True)
+
+    mock_audit = MagicMock()
+    mock_audit.record = AsyncMock()
+
+    _override_principal(AdminPrincipal(admin_tg_id=42))
+    with patch("api.v1.admin.build_key_services", return_value=(None, None, xui)), \
+         patch("api.v1.admin.AuditLogger", return_value=mock_audit), \
+         patch("api.v1.admin.KeyResetter") as ResetterCls:
+        ResetterCls.return_value.reset_key_after_renewal = AsyncMock(
+            side_effect=RuntimeError("resetter boom")
+        )
+        with pytest.raises(RuntimeError):
+            await api_client.post(
+                "/api/v1/admin/keys/ok@b.com/change-tariff",
+                json={"tariff_id": 5},
+            )
+
+    mock_audit.record.assert_awaited_once_with(42, "change_tariff", "ok@b.com")
