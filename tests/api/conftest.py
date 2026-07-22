@@ -25,6 +25,7 @@ def mock_service_data():
     sd.payments.save_data = AsyncMock(return_value=None)
     sd.payments.update = AsyncMock(return_value=None)
     sd.servers.get_data = AsyncMock(return_value=None)
+    sd.stocks.get_data = AsyncMock(return_value=None)
     sd.referral_links.get_by = AsyncMock(return_value=None)
     sd.data_service = MagicMock()
     sd.data_service.payments.filter = AsyncMock(return_value=[])

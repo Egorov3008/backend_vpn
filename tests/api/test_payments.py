@@ -1,7 +1,9 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
-from models import PaymentModel
+from models import PaymentModel, Tariff
+from models.stocks.stock import Stock
+from api.v1.payments import _calculate_payment_amount, _apply_stock_to_tariff
 
 
 @pytest.mark.asyncio
@@ -187,3 +189,208 @@ async def test_get_payment_status_unauthorized(api_client, mock_service_data):
     response = await api_client.get("/api/v1/payments/pay_123/status?tg_id=456")
     assert response.status_code == 403
     assert "does not belong to this user" in response.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# _calculate_payment_amount — pure unit tests
+# ---------------------------------------------------------------------------
+
+def test_calc_referred_first_purchase_applies_10_percent():
+    """Сценарий из баг-репорта: приглашённый, первая оплата → 10% скидки."""
+    result = _calculate_payment_amount(
+        tariff_amount=160.0,
+        number_of_months=1,
+        referral_discount_from_request=None,
+        user_referral_id=552810834,
+        user_check_referral=False,
+        user_tg_id=7563318767,
+        user_balance=0.0,
+    )
+    assert result["referral_discount_amount"] == 16.0
+    assert result["final_amount"] == 144.0
+    assert result["has_referral_discount"] is True
+    assert result["base_amount"] == 160.0
+
+
+def test_calc_non_first_purchase_no_referral_discount():
+    """check_referral=True → повторная оплата, 10% не начисляется."""
+    result = _calculate_payment_amount(
+        tariff_amount=160.0,
+        number_of_months=1,
+        referral_discount_from_request=None,
+        user_referral_id=552810834,
+        user_check_referral=True,
+        user_tg_id=7563318767,
+        user_balance=0.0,
+    )
+    assert result["referral_discount_amount"] == 0.0
+    assert result["final_amount"] == 160.0
+    assert result["has_referral_discount"] is False
+
+
+def test_calc_self_referral_guard():
+    """Защита от self-referral: referral_id == tg_id → нет скидки."""
+    result = _calculate_payment_amount(
+        tariff_amount=160.0,
+        number_of_months=1,
+        referral_discount_from_request=None,
+        user_referral_id=7563318767,
+        user_check_referral=False,
+        user_tg_id=7563318767,
+        user_balance=0.0,
+    )
+    assert result["referral_discount_amount"] == 0.0
+    assert result["final_amount"] == 160.0
+
+
+def test_calc_balance_capped_at_min_payment():
+    """Списание баланса не может опустить платёж ниже MIN_PAYMENT_AMOUNT (10₽)."""
+    result = _calculate_payment_amount(
+        tariff_amount=160.0,
+        number_of_months=1,
+        referral_discount_from_request=None,
+        user_referral_id=None,
+        user_check_referral=False,
+        user_tg_id=1,
+        user_balance=200.0,
+    )
+    assert result["balance_discount_amount"] == 150.0
+    assert result["final_amount"] == 10.0
+
+
+def test_calc_stock_discount_passthrough():
+    """stock_discount_amount передаётся сквозным полем; tariff_amount уже Stock-скидочный."""
+    result = _calculate_payment_amount(
+        tariff_amount=144.0,
+        number_of_months=1,
+        referral_discount_from_request=None,
+        user_referral_id=None,
+        user_check_referral=False,
+        user_tg_id=1,
+        user_balance=0.0,
+        stock_discount_amount=16.0,
+    )
+    assert result["base_amount"] == 144.0
+    assert result["stock_discount_amount"] == 16.0
+    assert result["has_stock_discount"] is True
+    assert result["final_amount"] == 144.0
+
+
+# ---------------------------------------------------------------------------
+# _apply_stock_to_tariff — Stock (fix/percent) application
+# ---------------------------------------------------------------------------
+
+def test_apply_stock_percent():
+    stock = Stock(tg_id=1, stock_type="percent", value=10.0)
+    price, per_month = _apply_stock_to_tariff(160.0, stock)
+    assert price == 144.0
+    assert per_month == 16.0
+
+
+def test_apply_stock_fix():
+    stock = Stock(tg_id=1, stock_type="fix", value=30.0)
+    price, per_month = _apply_stock_to_tariff(160.0, stock)
+    assert price == 130.0
+    assert per_month == 30.0
+
+
+def test_apply_stock_inactive_returns_full_price():
+    stock = Stock(tg_id=1, stock_type="percent", value=10.0, is_active=False)
+    price, per_month = _apply_stock_to_tariff(160.0, stock)
+    assert price == 160.0
+    assert per_month == 0.0
+
+
+def test_apply_stock_none_returns_full_price():
+    price, per_month = _apply_stock_to_tariff(160.0, None)
+    assert price == 160.0
+    assert per_month == 0.0
+
+
+# ---------------------------------------------------------------------------
+# /payments/calculate endpoint — enriched response
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_calculate_payment_referred_first_purchase(api_client, mock_service_data):
+    """Баг-репорт: /calculate для приглашённого первой покупки → 144/16."""
+    tariff = Tariff(id=7, name_tariff="Premium", amount=160.0)
+    mock_service_data.tariffs.get_data = AsyncMock(return_value=tariff)
+    user = MagicMock(
+        tg_id=7563318767, referral_id=552810834,
+        check_referral=False, balance=0.0,
+    )
+    mock_service_data.users.get_data = AsyncMock(return_value=user)
+    mock_service_data.stocks.get_data = AsyncMock(return_value=None)
+
+    response = await api_client.post("/api/v1/payments/calculate", json={
+        "tg_id": 7563318767, "tariff_id": 7,
+        "number_of_months": 1, "operation": "create_key",
+    })
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["final_amount"] == 144.0
+    assert data["referral_discount_amount"] == 16.0
+    assert data["has_referral_discount"] is True
+    assert data["base_amount"] == 160.0
+    assert data["stock_discount_amount"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_calculate_payment_with_stock_percent(api_client, mock_service_data):
+    """Stock 10% поверх 160 → base 144; без реферера → final 144."""
+    tariff = Tariff(id=7, name_tariff="Premium", amount=160.0)
+    mock_service_data.tariffs.get_data = AsyncMock(return_value=tariff)
+    user = MagicMock(tg_id=123, referral_id=None, check_referral=False, balance=0.0)
+    mock_service_data.users.get_data = AsyncMock(return_value=user)
+    mock_service_data.stocks.get_data = AsyncMock(
+        return_value=Stock(tg_id=123, stock_type="percent", value=10.0)
+    )
+
+    response = await api_client.post("/api/v1/payments/calculate", json={
+        "tg_id": 123, "tariff_id": 7, "number_of_months": 1, "operation": "create_key",
+    })
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["base_amount"] == 144.0
+    assert data["stock_discount_amount"] == 16.0
+    assert data["has_stock_discount"] is True
+    assert data["final_amount"] == 144.0
+
+
+# ---------------------------------------------------------------------------
+# /payments/create — now applies Stock (regression test for latent Stock bug)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_create_payment_applies_stock_discount(api_client, mock_service_data):
+    """create_payment должен зарядить Stock-скидочную сумму (раньше игнорировал Stock)."""
+    tariff = Tariff(id=7, name_tariff="Premium", amount=160.0)
+    mock_service_data.tariffs.get_data = AsyncMock(return_value=tariff)
+    user = MagicMock(tg_id=123, referral_id=None, check_referral=False, balance=0.0)
+    mock_service_data.users.get_data = AsyncMock(return_value=user)
+    mock_service_data.stocks.get_data = AsyncMock(
+        return_value=Stock(tg_id=123, stock_type="percent", value=10.0)
+    )
+
+    with patch("yookassa.Payment.create") as mock_create:
+        mock_payment = MagicMock()
+        mock_payment.id = "pay_test_stock"
+        mock_payment.confirmation.confirmation_url = "https://pay.example/xxx"
+        mock_payment.status = "pending"
+        mock_create.return_value = mock_payment
+
+        response = await api_client.post("/api/v1/payments/create", json={
+            "tg_id": 123, "tariff_id": 7,
+            "number_of_months": 1, "operation": "create_key",
+        })
+
+    assert response.status_code == 200, response.text
+    mock_create.assert_called_once()
+    payload = mock_create.call_args.args[0]
+    # Stock 10% (160→144), referral/balance 0 → заряд 144.00
+    assert payload["amount"]["value"] == "144.00"
+    # Платёж сохранён с той же суммой
+    mock_service_data.payments.save_data.assert_called_once()
+    saved_payment = mock_service_data.payments.save_data.call_args.args[1]
+    assert saved_payment.amount == 144.0

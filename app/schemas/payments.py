@@ -55,6 +55,18 @@ class PaymentCalculateRequest(BaseModel):
 
 
 class PaymentCalculateResponse(BaseModel):
-    amount: float
+    amount: float = 0.0
     discount: float = 0.0
     final_amount: float
+    # Полная разбивка скидок — бот рендерит окно оплаты по этим полям
+    # (источник истины — backend, см. _calculate_payment_amount).
+    base_amount: float = 0.0
+    stock_discount_amount: float = 0.0
+    volume_discount_percent: int = 0
+    volume_discount_amount: float = 0.0
+    referral_discount_amount: float = 0.0
+    balance_discount_amount: float = 0.0
+    has_stock_discount: bool = False
+    has_volume_discount: bool = False
+    has_referral_discount: bool = False
+    has_balance_discount: bool = False
