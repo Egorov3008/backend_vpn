@@ -77,14 +77,16 @@ CREATE TABLE IF NOT EXISTS users (
     -- См. models/servers/server.py:get_env_server.
 );
 
--- Add missing referral_id (migration 008)
+-- Add missing referral_id (migration 008; BIGINT per migration 016 —
+-- хранит referrer_tg_id, который BIGINT; INTEGER вызывал `integer out of range`
+-- для tg_id > 2^31-1).
 DO $$
 BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM information_schema.columns
         WHERE table_name = 'users' AND column_name = 'referral_id'
     ) THEN
-        ALTER TABLE users ADD COLUMN referral_id INTEGER;
+        ALTER TABLE users ADD COLUMN referral_id BIGINT;
     END IF;
 END $$;
 
