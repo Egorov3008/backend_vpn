@@ -120,7 +120,9 @@ def build_payment_router(
     renewal_svc = KeyRenewalService(
         processor=processor, key_manager=key_renewal, notifier=notifier
     )
-    bonus_svc = ReferralBonusService(model_data=service_data)
+    bonus_svc = ReferralBonusService(
+        model_data=service_data, xui_session=xui, cache=cache
+    )
 
     return PaymentRouter(
         processor=processor,

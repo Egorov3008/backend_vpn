@@ -41,6 +41,28 @@ def _override_cache(cache):
     app.dependency_overrides[get_cache] = lambda: cache
 
 
+def _pool_with_fetchrow(fetchrow_return):
+    """asyncpg.Pool mock: pool.acquire() → conn с заданным fetchrow.
+
+    Нужен для #8 — _attach_referral_if_any теперь делает atomic
+    ``UPDATE ... RETURNING`` через ``async with pool.acquire() as conn``,
+    а ``AsyncMock()`` не выставляет ``__aenter__``/``__aexit__``.
+    Возвращает (pool, conn).
+    """
+    conn = MagicMock()
+    conn.fetchrow = AsyncMock(return_value=fetchrow_return)
+    pool = MagicMock()
+    pool.acquire.return_value.__aenter__ = AsyncMock(return_value=conn)
+    pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+    return pool, conn
+
+
+def _override_pool(pool):
+    """Переопределить зависимость get_pool для end-to-end тестов claim/mark."""
+    from app.dependencies import get_pool
+    app.dependency_overrides[get_pool] = lambda: pool
+
+
 @pytest.mark.asyncio
 async def test_state_new_no_cookie(api_client):
     """Без куки → state: new."""
@@ -751,14 +773,16 @@ async def test_attach_referral_merges_users_referral_id(api_client, mock_service
     user = MagicMock(tg_id=referred_tg_id, server_id=2, trial=0, referral_id=None)
     mock_service_data.users.get_data = AsyncMock(return_value=user)
     cache = _mock_cache()
-    pool = AsyncMock()
+    pool, conn = _pool_with_fetchrow({"referral_id": referrer_tg_id})
 
     cookie = _sign_ref_cookie(ref_token)
     result = await _attach_referral_if_any(pool, mock_service_data, cache, cookie, referred_tg_id)
 
     assert result is True
     assert user.referral_id == referrer_tg_id
-    mock_service_data.users.update.assert_awaited_once()
+    # #8: atomic UPDATE через conn.fetchrow; users.update больше не зовётся.
+    conn.fetchrow.assert_awaited_once()
+    mock_service_data.users.update.assert_not_awaited()
     cache.users.set.assert_awaited_once()
     mock_service_data.data_service.referral_redemptions.create.assert_awaited_once()
 
@@ -777,12 +801,14 @@ async def test_attach_referral_self_referral_blocked(api_client, mock_service_da
     user = MagicMock(tg_id=same_id, referral_id=None)
     mock_service_data.users.get_data = AsyncMock(return_value=user)
     cache = _mock_cache()
-    pool = AsyncMock()
+    pool, conn = _pool_with_fetchrow({"referral_id": same_id})
 
     cookie = _sign_ref_cookie(ref_token)
     result = await _attach_referral_if_any(pool, mock_service_data, cache, cookie, same_id)
 
     assert result is False
+    # self-referral guard отсекает до UPDATE — fetchrow не зовётся.
+    conn.fetchrow.assert_not_awaited()
     mock_service_data.users.update.assert_not_awaited()
     cache.users.set.assert_not_awaited()
     mock_service_data.data_service.referral_redemptions.create.assert_not_awaited()
@@ -794,7 +820,7 @@ async def test_attach_referral_does_not_overwrite_existing(api_client, mock_serv
     from api.v1.landing import _attach_referral_if_any, _sign_ref_cookie
     from models.referrals.referral_link import ReferralLink
 
-    ref_token = "ref_newref1234"
+    ref_token = "ref_abcdef123456"
     new_referrer = 100
     existing_referrer = 200
     link = ReferralLink(id=5, referrer_tg_id=new_referrer, token=ref_token)
@@ -803,14 +829,18 @@ async def test_attach_referral_does_not_overwrite_existing(api_client, mock_serv
     user = MagicMock(tg_id=999, referral_id=existing_referrer)  # уже есть
     mock_service_data.users.get_data = AsyncMock(return_value=user)
     cache = _mock_cache()
-    pool = AsyncMock()
+    # #8: atomic UPDATE ... WHERE referral_id IS NULL не найдёт строку
+    # (у юзера уже есть referrer) → fetchrow вернёт None.
+    pool, conn = _pool_with_fetchrow(None)
 
     cookie = _sign_ref_cookie(ref_token)
     result = await _attach_referral_if_any(pool, mock_service_data, cache, cookie, 999)
 
     assert result is False
     assert user.referral_id == existing_referrer  # не изменился
+    conn.fetchrow.assert_awaited_once()  # UPDATE шёл, но 0 строк
     mock_service_data.users.update.assert_not_awaited()
+    cache.users.set.assert_not_awaited()
     mock_service_data.data_service.referral_redemptions.create.assert_not_awaited()
 
 
@@ -871,7 +901,7 @@ async def test_attach_referral_unique_violation_idempotent(api_client, mock_serv
         side_effect=asyncpg.UniqueViolationError("duplicate key")
     )
     cache = _mock_cache()
-    pool = AsyncMock()
+    pool, conn = _pool_with_fetchrow({"referral_id": 100})
 
     cookie = _sign_ref_cookie(ref_token)
     # Не должно бросить — UniqueViolationError ловится
@@ -880,7 +910,8 @@ async def test_attach_referral_unique_violation_idempotent(api_client, mock_serv
     # Merge всё равно засчитан (referral_id записан, redemption idempotent)
     assert result is True
     assert user.referral_id == 100
-    mock_service_data.users.update.assert_awaited_once()
+    # #8: referral_id пишется atomic UPDATE, не users.update.
+    mock_service_data.users.update.assert_not_awaited()
     cache.users.set.assert_awaited_once()
 
 
@@ -932,6 +963,9 @@ async def test_claim_triggers_attach_referral(
 
     cache = _mock_cache()
     _override_cache(cache)
+    # #8: _attach_referral_if_any делает atomic UPDATE через pool.acquire().
+    pool, _conn = _pool_with_fetchrow({"referral_id": 100})
+    _override_pool(pool)
 
     cookie = _sign_ref_cookie(ref_token)
     resp = await api_client.post(
@@ -969,6 +1003,8 @@ async def test_mark_converted_triggers_attach_referral(
 
     cache = _mock_cache()
     _override_cache(cache)
+    pool, _conn = _pool_with_fetchrow({"referral_id": 100})
+    _override_pool(pool)
 
     cookie = _sign_ref_cookie(ref_token)
     resp = await api_client.post(
@@ -1071,6 +1107,8 @@ async def test_claim_with_ref_token_in_body_triggers_merge(
 
     cache = _mock_cache()
     _override_cache(cache)
+    pool, _conn = _pool_with_fetchrow({"referral_id": 100})
+    _override_pool(pool)
 
     # ref_token передаётся как чистая 12-hex часть (из deeplink бота)
     resp = await api_client.post(
@@ -1107,6 +1145,8 @@ async def test_mark_converted_with_ref_token_in_body_triggers_merge(
 
     cache = _mock_cache()
     _override_cache(cache)
+    pool, _conn = _pool_with_fetchrow({"referral_id": 100})
+    _override_pool(pool)
 
     resp = await api_client.post(
         f"/api/v1/landing/mark-converted/{landing_uid}",

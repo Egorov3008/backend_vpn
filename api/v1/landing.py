@@ -266,22 +266,35 @@ async def _attach_referral_if_any(
         )
         return False
 
-    user = await service_data.users.get_data(referred_tg_id, conn=pool)
-    if not user:
-        return False
-    if user.referral_id is not None:
+    # Атомарно записываем referral_id только если он ещё NULL.
+    # Раньше был read-check-write (get_data → if referral_id is None → update) —
+    # это TOCTOU: два concurrent claim для одного referred_tg_id с разными
+    # реферерами оба видели referral_id=None, оба писали (clobber), и
+    # referral_id расходился с referral_redemptions (UNIQUE ловил только дубль
+    # redemption). Теперь выигрывает ровно один запрос — тот же, что вставит
+    # redemption, так что referral_id и redemption всегда согласованы.
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "UPDATE users "
+            "SET referral_id = $1 "
+            "WHERE tg_id = $2 AND referral_id IS NULL "
+            "RETURNING referral_id",
+            referrer_tg_id, referred_tg_id,
+        )
+    if not row:
+        # У юзера уже есть referrer (или юзер не найден) — не перезаписываем (антифрод).
         logger.info(
-            "User already has referrer, skipping merge",
+            "User already has referrer or not found, skipping merge",
             referred=referred_tg_id,
-            existing=user.referral_id,
             attempted=referrer_tg_id,
         )
         return False
 
-    # Записываем users.referral_id
-    user.referral_id = referrer_tg_id
-    await service_data.users.update(pool, user, search_data={"tg_id": referred_tg_id})
-    await cache.users.set(CacheKeyManager.user(referred_tg_id), user)
+    # Синхронизируем кэш: обновляем закешированного пользователя (DB уже записал).
+    user = await service_data.users.get_data(referred_tg_id, conn=pool)
+    if user:
+        user.referral_id = referrer_tg_id
+        await cache.users.set(CacheKeyManager.user(referred_tg_id), user)
 
     # ReferralRedemption (UNIQUE(referred_tg_id) защищает от дублей)
     try:

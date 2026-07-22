@@ -44,6 +44,10 @@ def make_conn(*, mark_row=None, user_lookup=None, referrer_exists=True, execute_
     conn = MagicMock()
     conn.fetchrow = AsyncMock(side_effect=[mark_row, user_lookup])
     conn.fetchval = AsyncMock(return_value=1 if referrer_exists else None)
+    # _grant_referred_bonus_days делает conn.fetch("SELECT email ... WHERE tg_id=$1").
+    # Пустой список — продление ключа не выполняется (тесты ниже покрывают
+    # INSERT/UPDATE баланса и idempotency, а не +3 дня; для +3 дней см. test_grant_*).
+    conn.fetch = AsyncMock(return_value=[])
     if execute_error:
         conn.execute = AsyncMock(side_effect=execute_error)
     else:
