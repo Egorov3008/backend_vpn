@@ -153,7 +153,10 @@ async def create_trial_key(
     user = await service_data.users.get_data(tg_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    if user.trial != 0:
+    # user.trial может быть NULL для legacy-пользователей (колонка исторически
+    # была nullable); нормализуем NULL -> 0, иначе None != 0 всегда True и
+    # пользователь никогда не сможет получить триал.
+    if user.trial:
         raise HTTPException(status_code=403, detail="Trial already used")
 
     tariff = await service_data.tariffs.get_data(int(DEFAULT_PRICING_PLAN), conn=pool)
