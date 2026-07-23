@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>User Profile</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      /* Ref: UI/UX Pro Max — SaaS General palette: trust blue + orange accent */
+      --background: #F8FAFC;
+      --foreground: #1E293B;
+      --card: #FFFFFF;
+      --primary: #2563EB;
+      --primary-foreground: #FFFFFF;
+      --secondary: #E9EFF8;
+      --secondary-foreground: #1E293B;
+      --muted: #F1F5F9;
+      --muted-foreground: #64748B;
+      --border: #E2E8F0;
+      --accent: #EA580C;
+      --accent-foreground: #FFFFFF;
+      --destructive: #DC2626;
+      --destructive-foreground: #FFFFFF;
+      --success: #DCFCE7;
+      --success-foreground: #166534;
+      --radius-m: 16px;
+      --radius-pill: 999px;
+      --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --background: #0F172A;
+        --foreground: #F8FAFC;
+        --card: #111827;
+        --primary: #3B82F6;
+        --primary-foreground: #FFFFFF;
+        --secondary: #1E293B;
+        --secondary-foreground: #F8FAFC;
+        --muted: #1E293B;
+        --muted-foreground: #94A3B8;
+        --border: #334155;
+        --destructive: #EF4444;
+        --success: #14532D;
+        --success-foreground: #86EFAC;
+      }
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--background);
+      color: var(--foreground);
+      font-family: var(--font-body);
+      min-height: 100vh;
+      line-height: 1.5;
+    }
+    /* Glassmorphism header — ref UI/UX Pro Max Glassmorphism */
+    .header {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      height: 72px;
+      background: rgba(255, 255, 255, 0.72);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 40px;
+      gap: 14px;
+    }
+    @media (prefers-color-scheme: dark) {
+      .header { background: rgba(15, 23, 42, 0.72); }
+    }
+    .avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--primary), #60A5FA);
+      flex-shrink: 0;
+      display: grid;
+      place-items: center;
+      color: #fff;
+      font-weight: 700;
+      font-size: 15px;
+    }
+    .header-text { display: flex; flex-direction: column; }
+    .header-username { font-size: 15px; font-weight: 600; }
+    .header-role-row { display: flex; align-items: center; gap: 10px; }
+    .header-role { font-size: 12px; color: var(--muted-foreground); font-weight: 500; }
+    .brand-label {
+      height: 18px;
+      padding: 0 8px;
+      border-radius: var(--radius-pill);
+      background: var(--accent);
+      color: var(--accent-foreground);
+      font-size: 10px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      display: inline-flex;
+      align-items: center;
+    }
+    .container { max-width: 1200px; margin: 0 auto; padding: 40px 40px 64px; }
+    .page-title { font-size: 34px; font-weight: 700; margin: 0 0 8px; letter-spacing: -0.02em; }
+    .page-subtitle { font-size: 16px; color: var(--muted-foreground); margin: 0 0 32px; }
+
+    .section-title { font-size: 22px; font-weight: 700; margin: 0 0 16px; letter-spacing: -0.01em; }
+    .keys-list {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-m);
+      padding: 8px;
+      margin-bottom: 40px;
+    }
+
+    /* Accordion */
+    .accordion {
+      background: var(--muted);
+      border-radius: calc(var(--radius-m) - 4px);
+      margin-bottom: 8px;
+      overflow: hidden;
+      transition: background 120ms ease;
+    }
+    .accordion:last-child { margin-bottom: 0; }
+    .accordion:hover { background: #E2E8F0; }
+    @media (prefers-color-scheme: dark) {
+      .accordion:hover { background: #27354f; }
+    }
+    .accordion-header {
+      width: 100%;
+      border: none;
+      background: transparent;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 18px 20px;
+      cursor: pointer;
+      font-family: inherit;
+      text-align: left;
+    }
+    .accordion-header:hover { background: rgba(37, 99, 235, 0.04); }
+    @media (prefers-color-scheme: dark) {
+      .accordion-header:hover { background: rgba(59, 130, 246, 0.08); }
+    }
+    .key-email {
+      font-family: var(--font-mono);
+      font-size: 15px;
+      font-weight: 500;
+      color: var(--foreground);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+      padding-right: 16px;
+    }
+    .accordion-icon {
+      width: 24px;
+      height: 24px;
+      display: grid;
+      place-items: center;
+      color: var(--muted-foreground);
+      transition: transform 250ms cubic-bezier(0.16, 1, 0.3, 1);
+      flex-shrink: 0;
+    }
+    .accordion.open .accordion-icon { transform: rotate(180deg); }
+
+    .accordion-body {
+      display: grid;
+      grid-template-rows: 0fr;
+      transition: grid-template-rows 300ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .accordion.open .accordion-body { grid-template-rows: 1fr; }
+    .accordion-inner {
+      overflow: hidden;
+      padding: 0 20px 20px;
+    }
+
+    .progress-section { margin-bottom: 18px; }
+    .progress-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--muted-foreground);
+      margin-bottom: 8px;
+    }
+    .progress-label span:last-child { color: var(--foreground); }
+    .progress-bar-bg {
+      height: 8px;
+      background: var(--border);
+      border-radius: var(--radius-pill);
+      overflow: hidden;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--primary), #60A5FA);
+      border-radius: var(--radius-pill);
+      transition: width 500ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .accordion-actions {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      height: 36px;
+      padding: 0 20px;
+      border: none;
+      border-radius: 8px;
+      background: var(--secondary);
+      color: var(--secondary-foreground);
+      font-family: var(--font-body);
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 120ms ease, transform 80ms ease;
+    }
+    .btn:hover { background: #DBEAFE; }
+    @media (prefers-color-scheme: dark) {
+      .btn:hover { background: #334155; }
+    }
+    .btn:active { transform: scale(0.98); }
+    .btn-primary {
+      background: var(--accent);
+      color: var(--accent-foreground);
+      box-shadow: 0 2px 8px rgba(234, 88, 12, 0.25);
+    }
+    .btn-primary:hover { background: #C2410C; }
+    .btn-destructive {
+      background: transparent;
+      color: var(--destructive);
+      border: 1px solid var(--border);
+    }
+    .btn-destructive:hover { background: rgba(220, 38, 38, 0.08); border-color: var(--destructive); }
+
+    .referral-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-m);
+      padding: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+    }
+    .referral-info { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+    .referral-label { font-size: 13px; font-weight: 600; color: var(--muted-foreground); text-transform: uppercase; letter-spacing: 0.04em; }
+    .referral-link {
+      font-family: var(--font-mono);
+      font-size: 15px;
+      font-weight: 500;
+      color: var(--foreground);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .referral-actions { display: flex; gap: 12px; flex-shrink: 0; }
+
+    @media (max-width: 900px) {
+      .container { padding: 32px 24px 48px; }
+      .header { padding: 0 24px; }
+    }
+    @media (max-width: 640px) {
+      .referral-card { flex-direction: column; align-items: flex-start; }
+      .referral-actions { width: 100%; }
+      .referral-actions .btn { flex: 1; }
+      .page-title { font-size: 28px; }
+      .accordion-actions { width: 100%; }
+      .accordion-actions .btn { flex: 1; }
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="avatar">U</div>
+    <div class="header-text">
+      <span class="header-username">@username</span>
+      <div class="header-role-row">
+        <span class="header-role">Client profile</span>
+        <span class="brand-label">dlya.svoih</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <h1 class="page-title">My Profile</h1>
+    <p class="page-subtitle">Manage your keys and referral program.</p>
+
+    <h2 class="section-title">Keys</h2>
+    <div class="keys-list">
+      <div class="accordion open" data-key="user_1@example.com">
+        <button class="accordion-header" aria-expanded="true">
+          <span class="key-email">user_1@example.com</span>
+          <span class="accordion-icon" aria-hidden="true">▼</span>
+        </button>
+        <div class="accordion-body">
+          <div class="accordion-inner">
+            <div class="progress-section">
+              <div class="progress-label">
+                <span>Time remaining</span>
+                <span>14 days left</span>
+              </div>
+              <div class="progress-bar-bg">
+                <div class="progress-bar-fill" style="width: 82%"></div>
+              </div>
+            </div>
+            <div class="accordion-actions">
+              <button class="btn btn-primary">Продлить</button>
+              <button class="btn btn-destructive">Удалить ключ</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="accordion" data-key="user_2@example.com">
+        <button class="accordion-header" aria-expanded="false">
+          <span class="key-email">user_2@example.com</span>
+          <span class="accordion-icon" aria-hidden="true">▼</span>
+        </button>
+        <div class="accordion-body">
+          <div class="accordion-inner">
+            <div class="progress-section">
+              <div class="progress-label">
+                <span>Time remaining</span>
+                <span>90 days left</span>
+              </div>
+              <div class="progress-bar-bg">
+                <div class="progress-bar-fill" style="width: 95%"></div>
+              </div>
+            </div>
+            <div class="accordion-actions">
+              <button class="btn btn-primary">Продлить</button>
+              <button class="btn btn-destructive">Удалить ключ</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <h2 class="section-title">Referral Program</h2>
+    <div class="referral-card">
+      <div class="referral-info">
+        <span class="referral-label">Your referral link</span>
+        <span class="referral-link">https://t.me/bot?start=ref_ABC123</span>
+      </div>
+      <div class="referral-actions">
+        <button class="btn btn-primary">Copy link</button>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    document.querySelectorAll('.accordion-header').forEach(header => {
+      header.addEventListener('click', () => {
+        const accordion = header.closest('.accordion');
+        const isOpen = accordion.classList.contains('open');
+        // Optional: close others
+        // document.querySelectorAll('.accordion.open').forEach(a => a.classList.remove('open'));
+        accordion.classList.toggle('open', !isOpen);
+        header.setAttribute('aria-expanded', String(!isOpen));
+      });
+    });
+  </script>
+</body>
+</html>

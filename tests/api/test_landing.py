@@ -41,6 +41,28 @@ def _override_cache(cache):
     app.dependency_overrides[get_cache] = lambda: cache
 
 
+def _pool_with_fetchrow(fetchrow_return):
+    """asyncpg.Pool mock: pool.acquire() → conn с заданным fetchrow.
+
+    Нужен для #8 — _attach_referral_if_any теперь делает atomic
+    ``UPDATE ... RETURNING`` через ``async with pool.acquire() as conn``,
+    а ``AsyncMock()`` не выставляет ``__aenter__``/``__aexit__``.
+    Возвращает (pool, conn).
+    """
+    conn = MagicMock()
+    conn.fetchrow = AsyncMock(return_value=fetchrow_return)
+    pool = MagicMock()
+    pool.acquire.return_value.__aenter__ = AsyncMock(return_value=conn)
+    pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+    return pool, conn
+
+
+def _override_pool(pool):
+    """Переопределить зависимость get_pool для end-to-end тестов claim/mark."""
+    from app.dependencies import get_pool
+    app.dependency_overrides[get_pool] = lambda: pool
+
+
 @pytest.mark.asyncio
 async def test_state_new_no_cookie(api_client):
     """Без куки → state: new."""
@@ -582,3 +604,587 @@ async def test_state_expired_converted_no_already_registered(api_client, mock_se
     data = resp.json()
     assert data["state"] == "expired"
     assert data["already_registered"] is False
+
+
+# =============================================================================
+# POST /landing/set-ref-cookie — HMAC tg_ref cookie для реферера с лендинга
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_set_ref_cookie_with_valid_token(api_client, mock_service_data):
+    """Валидный ref_token и запись в БД → 200, Set-Cookie: tg_ref=…."""
+    from api.v1.landing import TG_REF_COOKIE_NAME
+    from models.referrals.referral_link import ReferralLink
+
+    link = ReferralLink(id=1, referrer_tg_id=42, token="ref_abcdef123456")
+    mock_service_data.referral_links.get_by = AsyncMock(return_value=link)
+
+    resp = await api_client.post(
+        "/api/v1/landing/set-ref-cookie",
+        json={"ref_token": "ref_abcdef123456"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"ok": True}
+
+    # Set-Cookie должен содержать tg_ref с HMAC-подписью
+    set_cookie = resp.headers.get("set-cookie", "")
+    assert TG_REF_COOKIE_NAME in set_cookie
+    assert "httponly" in set_cookie.lower()
+    assert "samesite=lax" in set_cookie.lower()
+
+
+@pytest.mark.asyncio
+async def test_set_ref_cookie_with_invalid_token_returns_400(api_client):
+    """Невалидный формат ref_token → 400, без куки."""
+    resp = await api_client.post(
+        "/api/v1/landing/set-ref-cookie",
+        json={"ref_token": "ref_X"},  # короткий
+    )
+    assert resp.status_code == 400
+
+    resp2 = await api_client.post(
+        "/api/v1/landing/set-ref-cookie",
+        json={"ref_token": "foo_bar"},
+    )
+    assert resp2.status_code == 400
+
+    resp3 = await api_client.post(
+        "/api/v1/landing/set-ref-cookie",
+        json={"ref_token": ""},
+    )
+    assert resp3.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_set_ref_cookie_with_unknown_token_returns_404(api_client, mock_service_data):
+    """Формат валидный, но записи в БД нет → 404, без куки."""
+    mock_service_data.referral_links.get_by = AsyncMock(return_value=None)
+
+    resp = await api_client.post(
+        "/api/v1/landing/set-ref-cookie",
+        json={"ref_token": "ref_aabbcc112233"},  # валидный 12hex
+    )
+    assert resp.status_code == 404
+    # Нет Set-Cookie при ошибке
+    assert "tg_ref" not in resp.headers.get("set-cookie", "")
+
+
+# =============================================================================
+# HMAC-кука tg_ref: sign / verify round-trip
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_ref_cookie_sign_and_verify():
+    """sign → verify возвращает тот же ref_token."""
+    from api.v1.landing import _sign_ref_cookie, _verify_ref_cookie
+
+    token = "ref_abcdef123456"
+    cookie = _sign_ref_cookie(token)
+    assert "." in cookie
+    assert _verify_ref_cookie(cookie) == token
+
+
+@pytest.mark.asyncio
+async def test_ref_cookie_verify_rejects_tampering():
+    """Подделанная подпись → None."""
+    from api.v1.landing import _sign_ref_cookie, _verify_ref_cookie
+
+    token = "ref_abcdef123456"
+    cookie = _sign_ref_cookie(token)
+    # Подменим последний символ подписи
+    tampered = cookie[:-1] + ("0" if cookie[-1] != "0" else "1")
+    assert _verify_ref_cookie(tampered) is None
+
+
+@pytest.mark.asyncio
+async def test_ref_cookie_verify_rejects_garbage():
+    """Мусор в куке → None."""
+    from api.v1.landing import _verify_ref_cookie
+
+    assert _verify_ref_cookie("") is None
+    assert _verify_ref_cookie(None) is None  # type: ignore[arg-type]
+    assert _verify_ref_cookie("invalid") is None
+    assert _verify_ref_cookie("foo.bar") is None
+    # Объекты, приводимые к строке (например, Starlette Cookie), не падают.
+    class WeirdCookie:
+        def __str__(self):
+            return "weird.value"
+    assert _verify_ref_cookie(WeirdCookie()) is None
+
+
+@pytest.mark.asyncio
+async def test_ref_cookie_is_distinct_from_landing_cookie():
+    """Подписи tg_ref и tg_landing_id НЕ совпадают (разные payload)."""
+    from api.v1.landing import _sign_cookie, _sign_ref_cookie, _verify_cookie, _verify_ref_cookie
+
+    ref_token = "ref_abcdef123456"
+    landing_uid = "abc123def456"
+
+    ref_cookie = _sign_ref_cookie(ref_token)
+    landing_cookie = _sign_cookie(landing_uid)
+
+    # tg_ref декодируется только _verify_ref_cookie
+    assert _verify_ref_cookie(ref_cookie) == ref_token
+    assert _verify_cookie(ref_cookie) is None
+    # И наоборот
+    assert _verify_cookie(landing_cookie) == landing_uid
+    assert _verify_ref_cookie(landing_cookie) is None
+
+
+# =============================================================================
+# _is_valid_ref_format — regex-проверка
+# =============================================================================
+
+def test_is_valid_ref_format():
+    """Валидация формата ref_<12hex>."""
+    from api.v1.landing import _is_valid_ref_format
+
+    # Валидные
+    assert _is_valid_ref_format("ref_abcdef123456") is True
+    assert _is_valid_ref_format("ref_0123456789ab") is True
+
+    # Невалидные
+    assert _is_valid_ref_format("") is False
+    assert _is_valid_ref_format(None) is False  # type: ignore[arg-type]
+    assert _is_valid_ref_format("ref_xyz") is False  # короткий
+    assert _is_valid_ref_format("ref_toolong123456") is False  # длинный
+    assert _is_valid_ref_format("gift_abcdef123456") is False  # неверный префикс
+    assert _is_valid_ref_format("abcdef123456") is False  # без префикса
+    assert _is_valid_ref_format("ref_ABCDEFGHIJKL") is False  # не-hex (regex lowercase-only)
+    assert _is_valid_ref_format("ref_ABCDEF123456") is False  # uppercase не проходит regex
+
+
+# =============================================================================
+# _attach_referral_if_any — merge в claim и mark_converted
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_attach_referral_merges_users_referral_id(api_client, mock_service_data):
+    """claim с валидной tg_ref-кукой → users.referral_id записан, redemption создан."""
+    from api.v1.landing import _attach_referral_if_any, _sign_ref_cookie
+    from models.referrals.referral_link import ReferralLink
+
+    ref_token = "ref_abcdef123456"
+    referrer_tg_id = 100
+    referred_tg_id = 999
+    link = ReferralLink(id=5, referrer_tg_id=referrer_tg_id, token=ref_token)
+    mock_service_data.referral_links.get_by = AsyncMock(return_value=link)
+
+    user = MagicMock(tg_id=referred_tg_id, server_id=2, trial=0, referral_id=None)
+    mock_service_data.users.get_data = AsyncMock(return_value=user)
+    cache = _mock_cache()
+    pool, conn = _pool_with_fetchrow({"referral_id": referrer_tg_id})
+
+    cookie = _sign_ref_cookie(ref_token)
+    result = await _attach_referral_if_any(pool, mock_service_data, cache, cookie, referred_tg_id)
+
+    assert result is True
+    assert user.referral_id == referrer_tg_id
+    # #8: atomic UPDATE через conn.fetchrow; users.update больше не зовётся.
+    conn.fetchrow.assert_awaited_once()
+    mock_service_data.users.update.assert_not_awaited()
+    cache.users.set.assert_awaited_once()
+    mock_service_data.data_service.referral_redemptions.create.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_attach_referral_self_referral_blocked(api_client, mock_service_data):
+    """referrer == referred → молча skip, без записи в users и redemption."""
+    from api.v1.landing import _attach_referral_if_any, _sign_ref_cookie
+    from models.referrals.referral_link import ReferralLink
+
+    ref_token = "ref_abcdef123456"
+    same_id = 100
+    link = ReferralLink(id=5, referrer_tg_id=same_id, token=ref_token)
+    mock_service_data.referral_links.get_by = AsyncMock(return_value=link)
+
+    user = MagicMock(tg_id=same_id, referral_id=None)
+    mock_service_data.users.get_data = AsyncMock(return_value=user)
+    cache = _mock_cache()
+    pool, conn = _pool_with_fetchrow({"referral_id": same_id})
+
+    cookie = _sign_ref_cookie(ref_token)
+    result = await _attach_referral_if_any(pool, mock_service_data, cache, cookie, same_id)
+
+    assert result is False
+    # self-referral guard отсекает до UPDATE — fetchrow не зовётся.
+    conn.fetchrow.assert_not_awaited()
+    mock_service_data.users.update.assert_not_awaited()
+    cache.users.set.assert_not_awaited()
+    mock_service_data.data_service.referral_redemptions.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_attach_referral_does_not_overwrite_existing(api_client, mock_service_data):
+    """У юзера уже есть referral_id (старая t.me-ветка) → НЕ перезаписываем."""
+    from api.v1.landing import _attach_referral_if_any, _sign_ref_cookie
+    from models.referrals.referral_link import ReferralLink
+
+    ref_token = "ref_abcdef123456"
+    new_referrer = 100
+    existing_referrer = 200
+    link = ReferralLink(id=5, referrer_tg_id=new_referrer, token=ref_token)
+    mock_service_data.referral_links.get_by = AsyncMock(return_value=link)
+
+    user = MagicMock(tg_id=999, referral_id=existing_referrer)  # уже есть
+    mock_service_data.users.get_data = AsyncMock(return_value=user)
+    cache = _mock_cache()
+    # #8: atomic UPDATE ... WHERE referral_id IS NULL не найдёт строку
+    # (у юзера уже есть referrer) → fetchrow вернёт None.
+    pool, conn = _pool_with_fetchrow(None)
+
+    cookie = _sign_ref_cookie(ref_token)
+    result = await _attach_referral_if_any(pool, mock_service_data, cache, cookie, 999)
+
+    assert result is False
+    assert user.referral_id == existing_referrer  # не изменился
+    conn.fetchrow.assert_awaited_once()  # UPDATE шёл, но 0 строк
+    mock_service_data.users.update.assert_not_awaited()
+    cache.users.set.assert_not_awaited()
+    mock_service_data.data_service.referral_redemptions.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_attach_referral_invalid_cookie_no_op(api_client, mock_service_data):
+    """Невалидная/просроченная/чужая кука → молча skip."""
+    from api.v1.landing import _attach_referral_if_any
+
+    cache = _mock_cache()
+    pool = AsyncMock()
+
+    # Пустая кука
+    assert await _attach_referral_if_any(pool, mock_service_data, cache, None, 999) is False
+    assert await _attach_referral_if_any(pool, mock_service_data, cache, "", 999) is False
+    # Мусор
+    assert await _attach_referral_if_any(pool, mock_service_data, cache, "garbage", 999) is False
+    assert await _attach_referral_if_any(pool, mock_service_data, cache, "foo.bar", 999) is False
+    # Подделанная подпись
+    assert await _attach_referral_if_any(
+        pool, mock_service_data, cache, "eyJhY2I.signature_bad", 999
+    ) is False
+
+    mock_service_data.users.update.assert_not_awaited()
+    mock_service_data.referral_links.get_by.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_attach_referral_token_not_in_db(api_client, mock_service_data):
+    """Формат куки валидный, но токена в БД нет → skip."""
+    from api.v1.landing import _attach_referral_if_any, _sign_ref_cookie
+
+    mock_service_data.referral_links.get_by = AsyncMock(return_value=None)
+    cache = _mock_cache()
+    pool = AsyncMock()
+
+    cookie = _sign_ref_cookie("ref_unknown0000")
+    result = await _attach_referral_if_any(pool, mock_service_data, cache, cookie, 999)
+
+    assert result is False
+    mock_service_data.users.update.assert_not_awaited()
+    mock_service_data.data_service.referral_redemptions.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_attach_referral_unique_violation_idempotent(api_client, mock_service_data):
+    """Duplicate redemption (UNIQUE constraint) — идемпотентно, не падает."""
+    import asyncpg
+    from api.v1.landing import _attach_referral_if_any, _sign_ref_cookie
+    from models.referrals.referral_link import ReferralLink
+
+    ref_token = "ref_abcdef123456"
+    link = ReferralLink(id=5, referrer_tg_id=100, token=ref_token)
+    mock_service_data.referral_links.get_by = AsyncMock(return_value=link)
+
+    user = MagicMock(tg_id=999, referral_id=None)
+    mock_service_data.users.get_data = AsyncMock(return_value=user)
+    mock_service_data.data_service.referral_redemptions.create = AsyncMock(
+        side_effect=asyncpg.UniqueViolationError("duplicate key")
+    )
+    cache = _mock_cache()
+    pool, conn = _pool_with_fetchrow({"referral_id": 100})
+
+    cookie = _sign_ref_cookie(ref_token)
+    # Не должно бросить — UniqueViolationError ловится
+    result = await _attach_referral_if_any(pool, mock_service_data, cache, cookie, 999)
+
+    # Merge всё равно засчитан (referral_id записан, redemption idempotent)
+    assert result is True
+    assert user.referral_id == 100
+    # #8: referral_id пишется atomic UPDATE, не users.update.
+    mock_service_data.users.update.assert_not_awaited()
+    cache.users.set.assert_awaited_once()
+
+
+# =============================================================================
+# claim_key / mark_converted — end-to-end с tg_ref-кукой
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_claim_triggers_attach_referral(
+    api_client, mock_service_data, monkeypatch
+):
+    """POST /claim с tg_ref-кукой → claim успешен + merge вызван."""
+    from api.v1.landing import _sign_ref_cookie
+    from models.referrals.referral_link import ReferralLink
+
+    landing_uid = "claim_with_ref"
+    key = make_landing_key(email="claim_ref@anon", landing_uid=landing_uid)
+    mock_service_data.cache_service.keys.all = AsyncMock(return_value=[key])
+
+    user = MagicMock(tg_id=999, server_id=2, trial=0, referral_id=None)
+    mock_service_data.users.get_data = AsyncMock(return_value=user)
+    mock_service_data.keys.update = AsyncMock(return_value=None)
+    mock_service_data.users.update = AsyncMock(return_value=None)
+
+    trial_tariff = MagicMock(id=10, name_tariff="trial7", period=7, amount=0.0, limit_ip=1)
+    mock_service_data.tariffs.get_data = AsyncMock(return_value=trial_tariff)
+
+    # Patch GraceManager.upgrade_from_landing
+    from api.v1 import landing as landing_module
+    upgraded = MagicMock()
+    upgraded.email = "claim_ref@anon"
+    upgraded.key = "vless://test@example.com"
+    upgraded.expiry_time = int((time.time() + 7 * 24 * 3600) * 1000)
+    upgraded.grace_expiry = upgraded.expiry_time + 7 * 86_400_000
+    grace = MagicMock()
+    grace.upgrade_from_landing = AsyncMock(return_value=upgraded)
+    monkeypatch.setattr(
+        landing_module, "build_grace_manager", lambda *a, **k: grace
+    )
+    monkeypatch.setattr(
+        landing_module.TrialService, "installation_trial",
+        AsyncMock(return_value=user),
+    )
+
+    # Referral link для merge
+    ref_token = "ref_abcdef123456"
+    link = ReferralLink(id=5, referrer_tg_id=100, token=ref_token)
+    mock_service_data.referral_links.get_by = AsyncMock(return_value=link)
+
+    cache = _mock_cache()
+    _override_cache(cache)
+    # #8: _attach_referral_if_any делает atomic UPDATE через pool.acquire().
+    pool, _conn = _pool_with_fetchrow({"referral_id": 100})
+    _override_pool(pool)
+
+    cookie = _sign_ref_cookie(ref_token)
+    resp = await api_client.post(
+        f"/api/v1/landing/claim/{landing_uid}",
+        json={"tg_id": 999},
+        cookies={"tg_ref": cookie},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "claimed"
+
+    # Merge выполнен: referral_id записан, redemption создан
+    assert user.referral_id == 100
+    mock_service_data.data_service.referral_redemptions.create.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_mark_converted_triggers_attach_referral(
+    api_client, mock_service_data
+):
+    """POST /mark-converted с tg_ref-кукой → merge вызван."""
+    from api.v1.landing import _sign_ref_cookie
+    from models.referrals.referral_link import ReferralLink
+
+    landing_uid = "mc_with_ref"
+    key = make_landing_key(email="mc_ref@anon", landing_uid=landing_uid)
+    mock_service_data.cache_service.keys.all = AsyncMock(return_value=[key])
+    mock_service_data.keys.update = AsyncMock(return_value=None)
+
+    user = MagicMock(tg_id=999, server_id=2, trial=0, referral_id=None)
+    mock_service_data.users.get_data = AsyncMock(return_value=user)
+
+    ref_token = "ref_abcdef123456"
+    link = ReferralLink(id=5, referrer_tg_id=100, token=ref_token)
+    mock_service_data.referral_links.get_by = AsyncMock(return_value=link)
+
+    cache = _mock_cache()
+    _override_cache(cache)
+    pool, _conn = _pool_with_fetchrow({"referral_id": 100})
+    _override_pool(pool)
+
+    cookie = _sign_ref_cookie(ref_token)
+    resp = await api_client.post(
+        f"/api/v1/landing/mark-converted/{landing_uid}",
+        json={"tg_id": 999},
+        cookies={"tg_ref": cookie},
+    )
+    assert resp.status_code == 200, resp.text
+
+    # Merge выполнен
+    assert user.referral_id == 100
+    mock_service_data.data_service.referral_redemptions.create.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_claim_without_cookie_no_merge(api_client, mock_service_data, monkeypatch):
+    """POST /claim БЕЗ tg_ref-куки → merge НЕ вызывается, claim работает."""
+    from api.v1 import landing as landing_module
+
+    landing_uid = "claim_no_ref"
+    key = make_landing_key(email="claim_noref@anon", landing_uid=landing_uid)
+    mock_service_data.cache_service.keys.all = AsyncMock(return_value=[key])
+
+    user = MagicMock(tg_id=999, server_id=2, trial=0, referral_id=None)
+    mock_service_data.users.get_data = AsyncMock(return_value=user)
+    mock_service_data.keys.update = AsyncMock(return_value=None)
+    mock_service_data.users.update = AsyncMock(return_value=None)
+
+    trial_tariff = MagicMock(id=10, name_tariff="trial7", period=7, amount=0.0, limit_ip=1)
+    mock_service_data.tariffs.get_data = AsyncMock(return_value=trial_tariff)
+
+    upgraded = MagicMock()
+    upgraded.email = "claim_noref@anon"
+    upgraded.key = "vless://test@example.com"
+    upgraded.expiry_time = int((time.time() + 7 * 24 * 3600) * 1000)
+    upgraded.grace_expiry = upgraded.expiry_time + 7 * 86_400_000
+    grace = MagicMock()
+    grace.upgrade_from_landing = AsyncMock(return_value=upgraded)
+    monkeypatch.setattr(
+        landing_module, "build_grace_manager", lambda *a, **k: grace
+    )
+    monkeypatch.setattr(
+        landing_module.TrialService, "installation_trial",
+        AsyncMock(return_value=user),
+    )
+
+    cache = _mock_cache()
+    _override_cache(cache)
+
+    resp = await api_client.post(
+        f"/api/v1/landing/claim/{landing_uid}",
+        json={"tg_id": 999},
+        # БЕЗ cookies=tg_ref
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "claimed"
+
+    # Без tg_ref referral_links.get_by НЕ вызывается
+    mock_service_data.referral_links.get_by.assert_not_awaited()
+    mock_service_data.data_service.referral_redemptions.create.assert_not_awaited()
+    # users.update был вызван ТОЛЬКО для server_id (без referral_id)
+    assert user.referral_id is None
+
+
+@pytest.mark.asyncio
+async def test_claim_with_ref_token_in_body_triggers_merge(
+    api_client, mock_service_data, monkeypatch
+):
+    """POST /claim с ref_token в теле (deeplink) → merge вызван без куки."""
+    from models.referrals.referral_link import ReferralLink
+
+    landing_uid = "claim_ref_body"
+    key = make_landing_key(email="claim_ref_body@anon", landing_uid=landing_uid)
+    mock_service_data.cache_service.keys.all = AsyncMock(return_value=[key])
+
+    user = MagicMock(tg_id=999, server_id=2, trial=0, referral_id=None)
+    mock_service_data.users.get_data = AsyncMock(return_value=user)
+    mock_service_data.keys.update = AsyncMock(return_value=None)
+    mock_service_data.users.update = AsyncMock(return_value=None)
+
+    trial_tariff = MagicMock(id=10, name_tariff="trial7", period=7, amount=0.0, limit_ip=1)
+    mock_service_data.tariffs.get_data = AsyncMock(return_value=trial_tariff)
+
+    from api.v1 import landing as landing_module
+    upgraded = MagicMock()
+    upgraded.email = "claim_ref_body@anon"
+    upgraded.key = "vless://test@example.com"
+    upgraded.expiry_time = int((time.time() + 7 * 24 * 3600) * 1000)
+    upgraded.grace_expiry = upgraded.expiry_time + 7 * 86_400_000
+    grace = MagicMock()
+    grace.upgrade_from_landing = AsyncMock(return_value=upgraded)
+    monkeypatch.setattr(landing_module, "build_grace_manager", lambda *a, **k: grace)
+    monkeypatch.setattr(
+        landing_module.TrialService, "installation_trial", AsyncMock(return_value=user)
+    )
+
+    ref_token = "ref_abcdef123456"
+    link = ReferralLink(id=5, referrer_tg_id=100, token=ref_token)
+    mock_service_data.referral_links.get_by = AsyncMock(return_value=link)
+
+    cache = _mock_cache()
+    _override_cache(cache)
+    pool, _conn = _pool_with_fetchrow({"referral_id": 100})
+    _override_pool(pool)
+
+    # ref_token передаётся как чистая 12-hex часть (из deeplink бота)
+    resp = await api_client.post(
+        f"/api/v1/landing/claim/{landing_uid}",
+        json={"tg_id": 999, "ref_token": "abcdef123456"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "claimed"
+
+    # Merge выполнен по ref_token в теле
+    assert user.referral_id == 100
+    mock_service_data.referral_links.get_by.assert_awaited_once()
+    mock_service_data.data_service.referral_redemptions.create.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_mark_converted_with_ref_token_in_body_triggers_merge(
+    api_client, mock_service_data
+):
+    """POST /mark-converted с ref_token в теле (deeplink) → merge вызван без куки."""
+    from models.referrals.referral_link import ReferralLink
+
+    landing_uid = "mc_ref_body"
+    key = make_landing_key(email="mc_ref_body@anon", landing_uid=landing_uid)
+    mock_service_data.cache_service.keys.all = AsyncMock(return_value=[key])
+    mock_service_data.keys.update = AsyncMock(return_value=None)
+
+    user = MagicMock(tg_id=999, server_id=2, trial=0, referral_id=None)
+    mock_service_data.users.get_data = AsyncMock(return_value=user)
+
+    ref_token = "ref_abcdef123456"
+    link = ReferralLink(id=5, referrer_tg_id=100, token=ref_token)
+    mock_service_data.referral_links.get_by = AsyncMock(return_value=link)
+
+    cache = _mock_cache()
+    _override_cache(cache)
+    pool, _conn = _pool_with_fetchrow({"referral_id": 100})
+    _override_pool(pool)
+
+    resp = await api_client.post(
+        f"/api/v1/landing/mark-converted/{landing_uid}",
+        json={"tg_id": 999, "ref_token": ref_token},
+    )
+    assert resp.status_code == 200, resp.text
+
+    # Merge выполнен по ref_token в теле
+    assert user.referral_id == 100
+    mock_service_data.referral_links.get_by.assert_awaited_once()
+    mock_service_data.data_service.referral_redemptions.create.assert_awaited_once()
+
+
+# =============================================================================
+# landing_uid в LandingStateResponse / QuickKeyResponse
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_state_response_has_landing_uid(api_client, mock_service_data):
+    """GET /state для живого ключа → landing_uid присутствует в response."""
+    from api.v1.landing import _sign_cookie
+
+    landing_uid = "state_uid_12345"
+    key = make_landing_key(email="state_uid@anon", landing_uid=landing_uid)
+    mock_service_data.cache_service.keys.all = AsyncMock(return_value=[key])
+
+    cookie = _sign_cookie(landing_uid)
+    resp = await api_client.get(
+        "/api/v1/landing/state", cookies={"tg_landing_id": cookie}
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["landing_uid"] == landing_uid
+
+
+@pytest.mark.asyncio
+async def test_state_response_landing_uid_none_for_new(api_client):
+    """GET /state без куки → landing_uid = null (новый посетитель)."""
+    resp = await api_client.get("/api/v1/landing/state")
+    assert resp.status_code == 200
+    assert resp.json()["landing_uid"] is None

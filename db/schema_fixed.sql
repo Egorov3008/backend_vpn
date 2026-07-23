@@ -77,14 +77,16 @@ CREATE TABLE IF NOT EXISTS users (
     -- См. models/servers/server.py:get_env_server.
 );
 
--- Add missing referral_id (migration 008)
+-- Add missing referral_id (migration 008; BIGINT per migration 016 —
+-- хранит referrer_tg_id, который BIGINT; INTEGER вызывал `integer out of range`
+-- для tg_id > 2^31-1).
 DO $$
 BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM information_schema.columns
         WHERE table_name = 'users' AND column_name = 'referral_id'
     ) THEN
-        ALTER TABLE users ADD COLUMN referral_id INTEGER;
+        ALTER TABLE users ADD COLUMN referral_id BIGINT;
     END IF;
 END $$;
 
@@ -254,7 +256,7 @@ CREATE TABLE IF NOT EXISTS referral_redemptions
 (
     id SERIAL PRIMARY KEY,
     referral_link_id INTEGER NOT NULL,
-    referred_tg_id BIGINT NOT NULL,
+    referred_tg_id BIGINT NOT NULL UNIQUE,
     redeemed_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -263,7 +265,7 @@ CREATE TABLE IF NOT EXISTS referral_rewards
     id SERIAL PRIMARY KEY,
     referrer_tg_id BIGINT NOT NULL,
     reward_type TEXT NOT NULL,
-    reward_value TEXT NOT NULL,
+    reward_value DECIMAL(10,2) NOT NULL,
     awarded_at TIMESTAMPTZ DEFAULT NOW(),
     is_claimed BOOLEAN DEFAULT FALSE
 );

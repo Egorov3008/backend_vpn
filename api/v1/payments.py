@@ -48,6 +48,29 @@ def _normalize_get_by(result) -> list:
     return [result]
 
 
+def _apply_stock_to_tariff(tariff_amount: float, stock) -> tuple[float, float]:
+    """Применить активную Stock-скидку к помесячной цене тарифа.
+
+    Возвращает (stock_price_per_month, stock_discount_per_month).
+    Если stock отсутствует/недействителен — скидка 0, цена не меняется.
+
+    Повторяет логику ``Price.format_price`` (fix/percent) через тот же
+    ``Pricing``, что использует backend PriceService — чтобы расчёт цены
+    в платежах совпадал с отображением в боте (CLAUDE.md: backend — источник
+    истины для бизнес-логики).
+    """
+    from services.core.price.form_price import Pricing
+    from models.price_model.price import Price
+
+    if not stock or not getattr(stock, "is_valid", False):
+        return float(tariff_amount), 0.0
+
+    pricing = Pricing()
+    stock_price = float(pricing.formating(Price(amount=tariff_amount), stock))
+    stock_discount_per_month = round(float(tariff_amount) - stock_price, 2)
+    return stock_price, stock_discount_per_month
+
+
 def _calculate_payment_amount(
     tariff_amount: float,
     number_of_months: int,
@@ -56,25 +79,32 @@ def _calculate_payment_amount(
     user_check_referral: bool,
     user_tg_id: int,
     user_balance: float = 0.0,
+    stock_discount_amount: float = 0.0,
 ) -> dict:
     """
     Рассчитывает сумму платежа со всеми скидками.
 
+    ``tariff_amount`` должен быть уже Stock-скидочной помесячной ценой
+    (см. ``_apply_stock_to_tariff``); ``stock_discount_amount`` — суммарная
+    Stock-скидка за все месяцы, передаётся сквозным полем для отчётности.
+
     Returns:
         dict с полями:
-        - base_amount: базовая сумма
+        - base_amount: базовая сумма (с учётом Stock-скидки)
+        - stock_discount_amount: сумма Stock-скидки за все месяцы
         - volume_discount_percent: % скидки за объём
         - volume_discount_amount: сумма скидки за объём
         - referral_discount_amount: сумма реферальной скидки (10% для приглашённых)
         - balance_discount_amount: сумма скидки за счёт баланса реферера
         - final_amount: итоговая сумма
+        - has_stock_discount: bool
         - has_volume_discount: bool
         - has_referral_discount: bool
         - has_balance_discount: bool
     """
     from config import MIN_PAYMENT_AMOUNT
 
-    # 1. Базовая сумма
+    # 1. Базовая сумма (tariff_amount уже со Stock-скидкой)
     base_amount = tariff_amount * number_of_months
 
     # 2. Скидка за объём (от 2 месяцев)
@@ -106,11 +136,13 @@ def _calculate_payment_amount(
 
     return {
         "base_amount": base_amount,
+        "stock_discount_amount": stock_discount_amount,
         "volume_discount_percent": volume_discount_percent,
         "volume_discount_amount": volume_discount_amount,
         "referral_discount_amount": referral_discount_amount,
         "balance_discount_amount": balance_discount_amount,
         "final_amount": final_amount,
+        "has_stock_discount": stock_discount_amount > 0,
         "has_volume_discount": volume_discount_percent > 0,
         "has_referral_discount": referral_discount_amount > 0,
         "has_balance_discount": balance_discount_amount > 0,
@@ -239,26 +271,46 @@ async def calculate_payment(
     user_check_referral = getattr(user, "check_referral", False) if user else False
     user_balance = getattr(user, "balance", 0.0) if user else 0.0
 
+    # Stock-скидка на помесячную цену тарифа (источник истины — backend)
+    stock = await service_data.stocks.get_data(body.tg_id)
+    stock_price_per_month, _ = _apply_stock_to_tariff(tariff.amount, stock)
+    stock_discount_amount = round((float(tariff.amount) - stock_price_per_month) * body.number_of_months, 2)
+
     result = _calculate_payment_amount(
-        tariff_amount=tariff.amount,
+        tariff_amount=stock_price_per_month,
         number_of_months=body.number_of_months,
         referral_discount_from_request=None,  # Бот не передаёт — рассчитываем на бэкенде
         user_referral_id=user_referral_id,
         user_check_referral=user_check_referral,
         user_tg_id=body.tg_id,
         user_balance=user_balance,
+        stock_discount_amount=stock_discount_amount,
     )
 
     logger.info("Расчёт платежа завершён", extra={
         "tg_id": body.tg_id,
         "base_amount": result["base_amount"],
         "final_amount": result["final_amount"],
+        "stock_discount": result["stock_discount_amount"],
         "volume_discount": result["volume_discount_amount"],
         "referral_discount": result["referral_discount_amount"],
         "balance_discount": result["balance_discount_amount"],
     })
 
-    return PaymentCalculateResponse(**result)
+    total_discount = round(
+        result["stock_discount_amount"]
+        + result["volume_discount_amount"]
+        + result["referral_discount_amount"]
+        + result["balance_discount_amount"],
+        2,
+    )
+    # amount/discount — компактные агрегаты для обратной совместимости;
+    # бот использует final_amount и полную разбивку выше.
+    return PaymentCalculateResponse(
+        amount=result["final_amount"],
+        discount=total_discount,
+        **result,
+    )
 
 
 @router.post("/create", response_model=PaymentCreateResponse)
@@ -316,15 +368,22 @@ async def create_payment(
     user_check_referral = getattr(user, "check_referral", False) if user else False
     user_balance = getattr(user, "balance", 0.0) if user else 0.0
 
+    # Stock-скидка на помесячную цену тарифа — рассчитываем на бэкенде,
+    # чтобы сумма создания платежа совпадала с /calculate (источник истины).
+    stock = await service_data.stocks.get_data(body.tg_id)
+    stock_price_per_month, _ = _apply_stock_to_tariff(tariff.amount, stock)
+    stock_discount_amount = round((float(tariff.amount) - stock_price_per_month) * body.number_of_months, 2)
+
     # Рассчитываем сумму с использованием общей функции
     result = _calculate_payment_amount(
-        tariff_amount=tariff.amount,
+        tariff_amount=stock_price_per_month,
         number_of_months=body.number_of_months,
         referral_discount_from_request=body.referral_discount if body.referral_discount and body.referral_discount > 0 else None,
         user_referral_id=user_referral_id,
         user_check_referral=user_check_referral,
         user_tg_id=body.tg_id,
         user_balance=user_balance,
+        stock_discount_amount=stock_discount_amount,
     )
 
     final_amount = result["final_amount"]

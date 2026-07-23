@@ -19,6 +19,7 @@ from services.core.payment.processor import PaymentProcessor
 from services.core.payment.renewal_service import KeyRenewalService
 from services.core.payment.router import PaymentRouter
 from services.core.notifications.protocols import INotifier
+from services.core.referral.bonus_service import ReferralBonusService
 
 
 def build_key_services(
@@ -119,9 +120,13 @@ def build_payment_router(
     renewal_svc = KeyRenewalService(
         processor=processor, key_manager=key_renewal, notifier=notifier
     )
+    bonus_svc = ReferralBonusService(
+        model_data=service_data, xui_session=xui, cache=cache
+    )
 
     return PaymentRouter(
         processor=processor,
         creation_service=creation_svc,
         renewal_service=renewal_svc,
+        bonus_service=bonus_svc,
     )

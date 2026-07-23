@@ -1,0 +1,1191 @@
+{
+  "version": "2.13",
+  "children": [
+    {
+      "type": "frame",
+      "id": "profile-frame",
+      "x": 0,
+      "y": 0,
+      "name": "User Profile - Desktop",
+      "clip": true,
+      "width": 1280,
+      "height": 900,
+      "layout": "none",
+      "children": [
+        {
+          "type": "rectangle",
+          "id": "header-bg",
+          "x": 0,
+          "y": 0,
+          "width": 1280,
+          "height": 72,
+          "fill": "var(--card)",
+          "stroke": "var(--border)",
+          "strokeWidth": 1
+        },
+        {
+          "type": "ellipse",
+          "id": "avatar",
+          "x": 40,
+          "y": 16,
+          "width": 40,
+          "height": 40,
+          "fill": "var(--primary)"
+        },
+        {
+          "type": "text",
+          "id": "username",
+          "x": 96,
+          "y": 22,
+          "content": "@username",
+          "fontFamily": "var(--font-secondary)",
+          "fontSize": 18,
+          "fontWeight": "600",
+          "fill": "var(--foreground)",
+          "textGrowth": "fixed-width-height",
+          "width": 300,
+          "height": 24
+        },
+        {
+          "type": "text",
+          "id": "role-label",
+          "x": 96,
+          "y": 46,
+          "content": "Client profile",
+          "fontFamily": "var(--font-secondary)",
+          "fontSize": 13,
+          "fill": "var(--muted-foreground)",
+          "textGrowth": "fixed-width-height",
+          "width": 300,
+          "height": 18
+        },
+        {
+          "type": "text",
+          "id": "page-title",
+          "x": 40,
+          "y": 104,
+          "content": "My Profile",
+          "fontFamily": "var(--font-secondary)",
+          "fontSize": 32,
+          "fontWeight": "700",
+          "fill": "var(--foreground)",
+          "textGrowth": "fixed-width-height",
+          "width": 400,
+          "height": 40
+        },
+        {
+          "type": "rectangle",
+          "id": "balance-card",
+          "x": 40,
+          "y": 160,
+          "width": 380,
+          "height": 140,
+          "fill": "var(--card)",
+          "stroke": "var(--border)",
+          "strokeWidth": 1,
+          "radius": "var(--radius-m)"
+        },
+        {
+          "type": "text",
+          "id": "balance-label",
+          "x": 72,
+          "y": 192,
+          "content": "Balance",
+          "fontFamily": "var(--font-secondary)",
+          "fontSize": 13,
+          "fill": "var(--muted-foreground)",
+          "textGrowth": "fixed-width-height",
+          "width": 200,
+          "height": 18
+        },
+        {
+          "type": "text",
+          "id": "balance-value",
+          "x": 72,
+          "y": 220,
+          "content": "$12.50",
+          "fontFamily": "var(--font-secondary)",
+          "fontSize": 36,
+          "fontWeight": "700",
+          "fill": "var(--foreground)",
+          "textGrowth": "fixed-width-height",
+          "width": 300,
+          "height": 44
+        },
+        {
+          "type": "rectangle",
+          "id": "trial-card",
+          "x": 460,
+          "y": 160,
+          "width": 380,
+          "height": 140,
+          "fill": "var(--card)",
+          "stroke": "var(--border)",
+          "strokeWidth": 1,
+          "radius": "var(--radius-m)"
+        },
+        {
+          "type": "text",
+          "id": "trial-label",
+          "x": 492,
+          "y": 192,
+          "content": "Trial",
+          "fontFamily": "var(--font-secondary)",
+          "fontSize": 13,
+          "fill": "var(--muted-foreground)",
+          "textGrowth": "fixed-width-height",
+          "width": 200,
+          "height": 18
+        },
+        {
+          "type": "text",
+          "id": "trial-value",
+          "x": 492,
+          "y": 220,
+          "content": "Available",
+          "fontFamily": "var(--font-secondary)",
+          "fontSize": 36,
+          "fontWeight": "700",
+          "fill": "var(--color-success-foreground)",
+          "textGrowth": "fixed-width-height",
+          "width": 300,
+          "height": 44
+        },
+        {
+          "type": "rectangle",
+          "id": "keys-card",
+          "x": 880,
+          "y": 160,
+          "width": 380,
+          "height": 140,
+          "fill": "var(--card)",
+          "stroke": "var(--border)",
+          "strokeWidth": 1,
+          "radius": "var(--radius-m)"
+        },
+        {
+          "type": "text",
+          "id": "keys-label",
+          "x": 912,
+          "y": 192,
+          "content": "Keys",
+          "fontFamily": "var(--font-secondary)",
+          "fontSize": 13,
+          "fill": "var(--muted-foreground)",
+          "textGrowth": "fixed-width-height",
+          "width": 200,
+          "height": 18
+        },
+        {
+          "type": "text",
+          "id": "keys-value",
+          "x": 912,
+          "y": 220,
+          "content": "2 active",
+          "fontFamily": "var(--font-secondary)",
+          "fontSize": 36,
+          "fontWeight": "700",
+          "fill": "var(--foreground)",
+          "textGrowth": "fixed-width-height",
+          "width": 300,
+          "height": 44
+        },
+        {
+          "type": "text",
+          "id": "keys-section-title",
+          "x": 40,
+          "y": 340,
+          "content": "VPN Keys",
+          "fontFamily": "var(--font-secondary)",
+          "fontSize": 24,
+          "fontWeight": "600",
+          "fill": "var(--foreground)",
+          "textGrowth": "fixed-width-height",
+          "width": 300,
+          "height": 32
+        },
+        {
+          "type": "rectangle",
+          "id": "keys-list-bg",
+          "x": 40,
+          "y": 380,
+          "width": 1200,
+          "height": 220,
+          "fill": "var(--card)",
+          "stroke": "var(--border)",
+          "strokeWidth": 1,
+          "radius": "var(--radius-m)"
+        },
+        {
+          "type": "group",
+          "id": "key-row-1",
+          "children": [
+            {
+              "type": "rectangle",
+              "id": "key-row-1-bg",
+              "x": 56,
+              "y": 396,
+              "width": 1168,
+              "height": 88,
+              "fill": "var(--muted)",
+              "radius": "var(--radius-m)"
+            },
+            {
+              "type": "text",
+              "id": "key-1-email",
+              "x": 80,
+              "y": 416,
+              "content": "user_1@example.com",
+              "fontFamily": "var(--font-secondary)",
+              "fontSize": 16,
+              "fontWeight": "500",
+              "fill": "var(--foreground)",
+              "textGrowth": "fixed-width-height",
+              "width": 400,
+              "height": 22
+            },
+            {
+              "type": "text",
+              "id": "key-1-tariff",
+              "x": 80,
+              "y": 444,
+              "content": "Tariff: Basic · Expires in 14 days",
+              "fontFamily": "var(--font-secondary)",
+              "fontSize": 13,
+              "fill": "var(--muted-foreground)",
+              "textGrowth": "fixed-width-height",
+              "width": 400,
+              "height": 18
+            },
+            {
+              "type": "rectangle",
+              "id": "key-1-status",
+              "x": 960,
+              "y": 412,
+              "width": 100,
+              "height": 28,
+              "fill": "var(--color-success)",
+              "radius": "var(--radius-pill)"
+            },
+            {
+              "type": "text",
+              "id": "key-1-status-text",
+              "x": 972,
+              "y": 418,
+              "content": "Active",
+              "fontFamily": "var(--font-secondary)",
+              "fontSize": 13,
+              "fontWeight": "500",
+              "fill": "var(--color-success-foreground)",
+              "textGrowth": "fixed-width-height",
+              "width": 76,
+              "height": 18,
+              "textAlign": "center"
+            },
+            {
+              "type": "rectangle",
+              "id": "key-1-copy-btn",
+              "x": 1080,
+              "y": 410,
+              "width": 120,
+              "height": 32,
+              "fill": "var(--secondary)",
+              "radius": 8
+            },
+            {
+              "type": "text",
+              "id": "key-1-copy-text",
+              "x": 1080,
+              "y": 418,
+              "content": "Copy",
+              "fontFamily": "var(--font-secondary)",
+              "fontSize": 14,
+              "fontWeight": "500",
+              "fill": "var(--secondary-foreground)",
+              "textGrowth": "fixed-width-height",
+              "width": 120,
+              "height": 18,
+              "textAlign": "center"
+            }
+          ]
+        },
+        {
+          "type": "group",
+          "id": "key-row-2",
+          "children": [
+            {
+              "type": "rectangle",
+              "id": "key-row-2-bg",
+              "x": 56,
+              "y": 496,
+              "width": 1168,
+              "height": 88,
+              "fill": "var(--muted)",
+              "radius": "var(--radius-m)"
+            },
+            {
+              "type": "text",
+              "id": "key-2-email",
+              "x": 80,
+              "y": 516,
+              "content": "user_2@example.com",
+              "fontFamily": "var(--font-secondary)",
+              "fontSize": 16,
+              "fontWeight": "500",
+              "fill": "var(--foreground)",
+              "textGrowth": "fixed-width-height",
+              "width": 400,
+              "height": 22
+            },
+            {
+              "type": "text",
+              "id": "key-2-tariff",
+              "x": 80,
+              "y": 544,
+              "content": "Tariff: Premium · Expires in 90 days",
+              "fontFamily": "var(--font-secondary)",
+              "fontSize": 13,
+              "fill": "var(--muted-foreground)",
+              "textGrowth": "fixed-width-height",
+              "width": 400,
+              "height": 18
+            },
+            {
+              "type": "rectangle",
+              "id": "key-2-status",
+              "x": 960,
+              "y": 512,
+              "width": 100,
+              "height": 28,
+              "fill": "var(--color-success)",
+              "radius": "var(--radius-pill)"
+            },
+            {
+              "type": "text",
+              "id": "key-2-status-text",
+              "x": 972,
+              "y": 518,
+              "content": "Active",
+              "fontFamily": "var(--font-secondary)",
+              "fontSize": 13,
+              "fontWeight": "500",
+              "fill": "var(--color-success-foreground)",
+              "textGrowth": "fixed-width-height",
+              "width": 76,
+              "height": 18,
+              "textAlign": "center"
+            },
+            {
+              "type": "rectangle",
+              "id": "key-2-copy-btn",
+              "x": 1080,
+              "y": 510,
+              "width": 120,
+              "height": 32,
+              "fill": "var(--secondary)",
+              "radius": 8
+            },
+            {
+              "type": "text",
+              "id": "key-2-copy-text",
+              "x": 1080,
+              "y": 518,
+              "content": "Copy",
+              "fontFamily": "var(--font-secondary)",
+              "fontSize": 14,
+              "fontWeight": "500",
+              "fill": "var(--secondary-foreground)",
+              "textGrowth": "fixed-width-height",
+              "width": 120,
+              "height": 18,
+              "textAlign": "center"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "referral-section-title",
+          "x": 40,
+          "y": 630,
+          "content": "Referral Program",
+          "fontFamily": "var(--font-secondary)",
+          "fontSize": 24,
+          "fontWeight": "600",
+          "fill": "var(--foreground)",
+          "textGrowth": "fixed-width-height",
+          "width": 300,
+          "height": 32
+        },
+        {
+          "type": "rectangle",
+          "id": "referral-card",
+          "x": 40,
+          "y": 670,
+          "width": 1200,
+          "height": 120,
+          "fill": "var(--card)",
+          "stroke": "var(--border)",
+          "strokeWidth": 1,
+          "radius": "var(--radius-m)"
+        },
+        {
+          "type": "text",
+          "id": "referral-label",
+          "x": 72,
+          "y": 700,
+          "content": "Your referral link",
+          "fontFamily": "var(--font-secondary)",
+          "fontSize": 13,
+          "fill": "var(--muted-foreground)",
+          "textGrowth": "fixed-width-height",
+          "width": 300,
+          "height": 18
+        },
+        {
+          "type": "text",
+          "id": "referral-link",
+          "x": 72,
+          "y": 728,
+          "content": "https://t.me/bot?start=ref_ABC123",
+          "fontFamily": "var(--font-primary)",
+          "fontSize": 16,
+          "fontWeight": "500",
+          "fill": "var(--foreground)",
+          "textGrowth": "fixed-width-height",
+          "width": 700,
+          "height": 22
+        },
+        {
+          "type": "rectangle",
+          "id": "referral-copy-btn",
+          "x": 1060,
+          "y": 690,
+          "width": 160,
+          "height": 40,
+          "fill": "var(--primary)",
+          "radius": 8
+        },
+        {
+          "type": "text",
+          "id": "referral-copy-text",
+          "x": 1060,
+          "y": 700,
+          "content": "Copy link",
+          "fontFamily": "var(--font-secondary)",
+          "fontSize": 14,
+          "fontWeight": "500",
+          "fill": "var(--primary-foreground)",
+          "textGrowth": "fixed-width-height",
+          "width": 160,
+          "height": 20,
+          "textAlign": "center"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "profile-mobile-frame",
+      "x": 1400,
+      "y": 0,
+      "name": "User Profile - Mobile",
+      "clip": true,
+      "width": 375,
+      "height": 900,
+      "layout": "none",
+      "children": [
+        {
+          "type": "rectangle",
+          "id": "mobile-header-bg",
+          "x": 0,
+          "y": 0,
+          "width": 375,
+          "height": 64,
+          "fill": "var(--card)",
+          "stroke": "var(--border)",
+          "strokeWidth": 1
+        },
+        {
+          "type": "ellipse",
+          "id": "mobile-avatar",
+          "x": 16,
+          "y": 12,
+          "width": 40,
+          "height": 40,
+          "fill": "var(--primary)"
+        },
+        {
+          "type": "text",
+          "id": "mobile-username",
+          "x": 68,
+          "y": 16,
+          "content": "@username",
+          "fontFamily": "var(--font-secondary)",
+          "fontSize": 16,
+          "fontWeight": "600",
+          "fill": "var(--foreground)",
+          "textGrowth": "fixed-width-height",
+          "width": 280,
+          "height": 22
+        },
+        {
+          "type": "text",
+          "id": "mobile-role-label",
+          "x": 68,
+          "y": 38,
+          "content": "Client profile",
+          "fontFamily": "var(--font-secondary)",
+          "fontSize": 12,
+          "fill": "var(--muted-foreground)",
+          "textGrowth": "fixed-width-height",
+          "width": 280,
+          "height": 16
+        },
+        {
+          "type": "text",
+          "id": "mobile-page-title",
+          "x": 20,
+          "y": 84,
+          "content": "My Profile",
+          "fontFamily": "var(--font-secondary)",
+          "fontSize": 28,
+          "fontWeight": "700",
+          "fill": "var(--foreground)",
+          "textGrowth": "fixed-width-height",
+          "width": 335,
+          "height": 36
+        },
+        {
+          "type": "rectangle",
+          "id": "mobile-balance-card",
+          "x": 20,
+          "y": 136,
+          "width": 335,
+          "height": 96,
+          "fill": "var(--card)",
+          "stroke": "var(--border)",
+          "strokeWidth": 1,
+          "radius": "var(--radius-m)"
+        },
+        {
+          "type": "text",
+          "id": "mobile-balance-label",
+          "x": 44,
+          "y": 156,
+          "content": "Balance",
+          "fontFamily": "var(--font-secondary)",
+          "fontSize": 13,
+          "fill": "var(--muted-foreground)",
+          "textGrowth": "fixed-width-height",
+          "width": 280,
+          "height": 18
+        },
+        {
+          "type": "text",
+          "id": "mobile-balance-value",
+          "x": 44,
+          "y": 180,
+          "content": "$12.50",
+          "fontFamily": "var(--font-secondary)",
+          "fontSize": 32,
+          "fontWeight": "700",
+          "fill": "var(--foreground)",
+          "textGrowth": "fixed-width-height",
+          "width": 280,
+          "height": 40
+        },
+        {
+          "type": "rectangle",
+          "id": "mobile-trial-card",
+          "x": 20,
+          "y": 248,
+          "width": 335,
+          "height": 96,
+          "fill": "var(--card)",
+          "stroke": "var(--border)",
+          "strokeWidth": 1,
+          "radius": "var(--radius-m)"
+        },
+        {
+          "type": "text",
+          "id": "mobile-trial-label",
+          "x": 44,
+          "y": 268,
+          "content": "Trial",
+          "fontFamily": "var(--font-secondary)",
+          "fontSize": 13,
+          "fill": "var(--muted-foreground)",
+          "textGrowth": "fixed-width-height",
+          "width": 280,
+          "height": 18
+        },
+        {
+          "type": "text",
+          "id": "mobile-trial-value",
+          "x": 44,
+          "y": 292,
+          "content": "Available",
+          "fontFamily": "var(--font-secondary)",
+          "fontSize": 32,
+          "fontWeight": "700",
+          "fill": "var(--color-success-foreground)",
+          "textGrowth": "fixed-width-height",
+          "width": 280,
+          "height": 40
+        },
+        {
+          "type": "rectangle",
+          "id": "mobile-keys-summary-card",
+          "x": 20,
+          "y": 360,
+          "width": 335,
+          "height": 96,
+          "fill": "var(--card)",
+          "stroke": "var(--border)",
+          "strokeWidth": 1,
+          "radius": "var(--radius-m)"
+        },
+        {
+          "type": "text",
+          "id": "mobile-keys-summary-label",
+          "x": 44,
+          "y": 380,
+          "content": "Keys",
+          "fontFamily": "var(--font-secondary)",
+          "fontSize": 13,
+          "fill": "var(--muted-foreground)",
+          "textGrowth": "fixed-width-height",
+          "width": 280,
+          "height": 18
+        },
+        {
+          "type": "text",
+          "id": "mobile-keys-summary-value",
+          "x": 44,
+          "y": 404,
+          "content": "2 active",
+          "fontFamily": "var(--font-secondary)",
+          "fontSize": 32,
+          "fontWeight": "700",
+          "fill": "var(--foreground)",
+          "textGrowth": "fixed-width-height",
+          "width": 280,
+          "height": 40
+        },
+        {
+          "type": "text",
+          "id": "mobile-keys-section-title",
+          "x": 20,
+          "y": 476,
+          "content": "VPN Keys",
+          "fontFamily": "var(--font-secondary)",
+          "fontSize": 20,
+          "fontWeight": "600",
+          "fill": "var(--foreground)",
+          "textGrowth": "fixed-width-height",
+          "width": 335,
+          "height": 28
+        },
+        {
+          "type": "rectangle",
+          "id": "mobile-keys-list-bg",
+          "x": 20,
+          "y": 512,
+          "width": 335,
+          "height": 220,
+          "fill": "var(--card)",
+          "stroke": "var(--border)",
+          "strokeWidth": 1,
+          "radius": "var(--radius-m)"
+        },
+        {
+          "type": "group",
+          "id": "mobile-key-row-1",
+          "children": [
+            {
+              "type": "rectangle",
+              "id": "mobile-key-row-1-bg",
+              "x": 28,
+              "y": 524,
+              "width": 319,
+              "height": 92,
+              "fill": "var(--muted)",
+              "radius": "var(--radius-m)"
+            },
+            {
+              "type": "text",
+              "id": "mobile-key-1-email",
+              "x": 44,
+              "y": 538,
+              "content": "user_1@example.com",
+              "fontFamily": "var(--font-secondary)",
+              "fontSize": 14,
+              "fontWeight": "500",
+              "fill": "var(--foreground)",
+              "textGrowth": "fixed-width-height",
+              "width": 280,
+              "height": 20
+            },
+            {
+              "type": "text",
+              "id": "mobile-key-1-tariff",
+              "x": 44,
+              "y": 562,
+              "content": "Basic · 14 days left",
+              "fontFamily": "var(--font-secondary)",
+              "fontSize": 12,
+              "fill": "var(--muted-foreground)",
+              "textGrowth": "fixed-width-height",
+              "width": 280,
+              "height": 16
+            },
+            {
+              "type": "rectangle",
+              "id": "mobile-key-1-status",
+              "x": 44,
+              "y": 586,
+              "width": 72,
+              "height": 22,
+              "fill": "var(--color-success)",
+              "radius": "var(--radius-pill)"
+            },
+            {
+              "type": "text",
+              "id": "mobile-key-1-status-text",
+              "x": 44,
+              "y": 589,
+              "content": "Active",
+              "fontFamily": "var(--font-secondary)",
+              "fontSize": 12,
+              "fontWeight": "500",
+              "fill": "var(--color-success-foreground)",
+              "textGrowth": "fixed-width-height",
+              "width": 72,
+              "height": 16,
+              "textAlign": "center"
+            }
+          ]
+        },
+        {
+          "type": "group",
+          "id": "mobile-key-row-2",
+          "children": [
+            {
+              "type": "rectangle",
+              "id": "mobile-key-row-2-bg",
+              "x": 28,
+              "y": 624,
+              "width": 319,
+              "height": 92,
+              "fill": "var(--muted)",
+              "radius": "var(--radius-m)"
+            },
+            {
+              "type": "text",
+              "id": "mobile-key-2-email",
+              "x": 44,
+              "y": 638,
+              "content": "user_2@example.com",
+              "fontFamily": "var(--font-secondary)",
+              "fontSize": 14,
+              "fontWeight": "500",
+              "fill": "var(--foreground)",
+              "textGrowth": "fixed-width-height",
+              "width": 280,
+              "height": 20
+            },
+            {
+              "type": "text",
+              "id": "mobile-key-2-tariff",
+              "x": 44,
+              "y": 662,
+              "content": "Premium · 90 days left",
+              "fontFamily": "var(--font-secondary)",
+              "fontSize": 12,
+              "fill": "var(--muted-foreground)",
+              "textGrowth": "fixed-width-height",
+              "width": 280,
+              "height": 16
+            },
+            {
+              "type": "rectangle",
+              "id": "mobile-key-2-status",
+              "x": 44,
+              "y": 686,
+              "width": 72,
+              "height": 22,
+              "fill": "var(--color-success)",
+              "radius": "var(--radius-pill)"
+            },
+            {
+              "type": "text",
+              "id": "mobile-key-2-status-text",
+              "x": 44,
+              "y": 689,
+              "content": "Active",
+              "fontFamily": "var(--font-secondary)",
+              "fontSize": 12,
+              "fontWeight": "500",
+              "fill": "var(--color-success-foreground)",
+              "textGrowth": "fixed-width-height",
+              "width": 72,
+              "height": 16,
+              "textAlign": "center"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "mobile-referral-section-title",
+          "x": 20,
+          "y": 752,
+          "content": "Referral Program",
+          "fontFamily": "var(--font-secondary)",
+          "fontSize": 20,
+          "fontWeight": "600",
+          "fill": "var(--foreground)",
+          "textGrowth": "fixed-width-height",
+          "width": 335,
+          "height": 28
+        },
+        {
+          "type": "rectangle",
+          "id": "mobile-referral-card",
+          "x": 20,
+          "y": 788,
+          "width": 335,
+          "height": 96,
+          "fill": "var(--card)",
+          "stroke": "var(--border)",
+          "strokeWidth": 1,
+          "radius": "var(--radius-m)"
+        },
+        {
+          "type": "text",
+          "id": "mobile-referral-label",
+          "x": 40,
+          "y": 804,
+          "content": "Your referral link",
+          "fontFamily": "var(--font-secondary)",
+          "fontSize": 12,
+          "fill": "var(--muted-foreground)",
+          "textGrowth": "fixed-width-height",
+          "width": 300,
+          "height": 16
+        },
+        {
+          "type": "text",
+          "id": "mobile-referral-link",
+          "x": 40,
+          "y": 826,
+          "content": "t.me/bot?start=ref_ABC123",
+          "fontFamily": "var(--font-primary)",
+          "fontSize": 14,
+          "fontWeight": "500",
+          "fill": "var(--foreground)",
+          "textGrowth": "fixed-width-height",
+          "width": 300,
+          "height": 20
+        },
+        {
+          "type": "rectangle",
+          "id": "mobile-referral-copy-btn",
+          "x": 40,
+          "y": 848,
+          "width": 295,
+          "height": 32,
+          "fill": "var(--primary)",
+          "radius": 8
+        },
+        {
+          "type": "text",
+          "id": "mobile-referral-copy-text",
+          "x": 40,
+          "y": 854,
+          "content": "Copy link",
+          "fontFamily": "var(--font-secondary)",
+          "fontSize": 14,
+          "fontWeight": "500",
+          "fill": "var(--primary-foreground)",
+          "textGrowth": "fixed-width-height",
+          "width": 295,
+          "height": 20,
+          "textAlign": "center"
+        }
+      ]
+    }
+  ],
+  "themes": {
+    "Mode": [
+      "Light",
+      "Dark"
+    ]
+  },
+  "variables": {
+    "--sidebar": {
+      "type": "color",
+      "value": [
+        { "value": "#E7E8E5" },
+        { "value": "#18181b", "theme": { "Mode": "Dark" } }
+      ]
+    },
+    "--sidebar-foreground": {
+      "type": "color",
+      "value": [
+        { "value": "#666666" },
+        { "value": "#fafafa", "theme": { "Mode": "Dark" } }
+      ]
+    },
+    "--sidebar-primary": {
+      "type": "color",
+      "value": [
+        { "value": "#18181b" },
+        { "value": "#18181b", "theme": { "Mode": "Dark" } }
+      ]
+    },
+    "--sidebar-primary-foreground": {
+      "type": "color",
+      "value": [
+        { "value": "#fafafa" },
+        { "value": "#fafafa", "theme": { "Mode": "Dark" } }
+      ]
+    },
+    "--sidebar-border": {
+      "type": "color",
+      "value": [
+        { "value": "#CBCCC9" },
+        { "value": "#ffffff1a", "theme": { "Mode": "Dark" } }
+      ]
+    },
+    "--sidebar-accent": {
+      "type": "color",
+      "value": [
+        { "value": "#CBCCC9" },
+        { "value": "#2a2a30", "theme": { "Mode": "Dark" } }
+      ]
+    },
+    "--sidebar-accent-foreground": {
+      "type": "color",
+      "value": [
+        { "value": "#18181b" },
+        { "value": "#fafafa", "theme": { "Mode": "Dark" } }
+      ]
+    },
+    "--sidebar-ring": {
+      "type": "color",
+      "value": [
+        { "value": "#71717a" },
+        { "value": "#71717a", "theme": { "Mode": "Dark" } }
+      ]
+    },
+    "--background": {
+      "type": "color",
+      "value": [
+        { "value": "#F2F3F0" },
+        { "value": "#111111", "theme": { "Mode": "Dark" } }
+      ]
+    },
+    "--foreground": {
+      "type": "color",
+      "value": [
+        { "value": "#111111" },
+        { "value": "#FFFFFF", "theme": { "Mode": "Dark" } }
+      ]
+    },
+    "--card": {
+      "type": "color",
+      "value": [
+        { "value": "#FFFFFF" },
+        { "value": "#1A1A1A", "theme": { "Mode": "Dark" } }
+      ]
+    },
+    "--card-foreground": {
+      "type": "color",
+      "value": [
+        { "value": "#111111" },
+        { "value": "#FFFFFF", "theme": { "Mode": "Dark" } }
+      ]
+    },
+    "--popover": {
+      "type": "color",
+      "value": [
+        { "value": "#FFFFFF" },
+        { "value": "#1A1A1A", "theme": { "Mode": "Dark" } }
+      ]
+    },
+    "--popover-foreground": {
+      "type": "color",
+      "value": [
+        { "value": "#111111" },
+        { "value": "#FFFFFF", "theme": { "Mode": "Dark" } }
+      ]
+    },
+    "--primary": {
+      "type": "color",
+      "value": [
+        { "value": "#FF8400" },
+        { "value": "#FF8400", "theme": { "Mode": "Dark" } }
+      ]
+    },
+    "--primary-foreground": {
+      "type": "color",
+      "value": [
+        { "value": "#111111" },
+        { "value": "#111111", "theme": { "Mode": "Dark" } }
+      ]
+    },
+    "--secondary": {
+      "type": "color",
+      "value": [
+        { "value": "#E7E8E5" },
+        { "value": "#2E2E2E", "theme": { "Mode": "Dark" } }
+      ]
+    },
+    "--secondary-foreground": {
+      "type": "color",
+      "value": [
+        { "value": "#111111" },
+        { "value": "#FFFFFF", "theme": { "Mode": "Dark" } }
+      ]
+    },
+    "--muted": {
+      "type": "color",
+      "value": [
+        { "value": "#F2F3F0" },
+        { "value": "#2E2E2E", "theme": { "Mode": "Dark" } }
+      ]
+    },
+    "--muted-foreground": {
+      "type": "color",
+      "value": [
+        { "value": "#666666" },
+        { "value": "#B8B9B6", "theme": { "Mode": "Dark" } }
+      ]
+    },
+    "--accent": {
+      "type": "color",
+      "value": [
+        { "value": "#F2F3F0" },
+        { "value": "#111111", "theme": { "Mode": "Dark" } }
+      ]
+    },
+    "--accent-foreground": {
+      "type": "color",
+      "value": [
+        { "value": "#111111" },
+        { "value": "#F2F3F0", "theme": { "Mode": "Dark" } }
+      ]
+    },
+    "--destructive": {
+      "type": "color",
+      "value": [
+        { "value": "#D93C15" },
+        { "value": "#FF5C33", "theme": { "Mode": "Dark" } }
+      ]
+    },
+    "--border": {
+      "type": "color",
+      "value": [
+        { "value": "#CBCCC9" },
+        { "value": "#2E2E2E", "theme": { "Mode": "Dark" } }
+      ]
+    },
+    "--input": {
+      "type": "color",
+      "value": [
+        { "value": "#CBCCC9" },
+        { "value": "#2E2E2E", "theme": { "Mode": "Dark" } }
+      ]
+    },
+    "--ring": {
+      "type": "color",
+      "value": [
+        { "value": "#666666" },
+        { "value": "#666666", "theme": { "Mode": "Dark" } }
+      ]
+    },
+    "--white": {
+      "type": "color",
+      "value": "#FFFFFF"
+    },
+    "--black": {
+      "type": "color",
+      "value": "#000000"
+    },
+    "--font-primary": {
+      "type": "string",
+      "value": "JetBrains Mono"
+    },
+    "--font-secondary": {
+      "type": "string",
+      "value": "Geist"
+    },
+    "--radius-none": {
+      "type": "number",
+      "value": 0
+    },
+    "--radius-pill": {
+      "type": "number",
+      "value": 999
+    },
+    "--radius-m": {
+      "type": "number",
+      "value": 16
+    },
+    "--color-success": {
+      "type": "color",
+      "value": [
+        { "value": "#DFE6E1" },
+        { "value": "#222924", "theme": { "Mode": "Dark" } }
+      ]
+    },
+    "--color-success-foreground": {
+      "type": "color",
+      "value": [
+        { "value": "#004D1A" },
+        { "value": "#B6FFCE", "theme": { "Mode": "Dark" } }
+      ]
+    },
+    "--color-warning": {
+      "type": "color",
+      "value": [
+        { "value": "#E9E3D8" },
+        { "value": "#291C0F", "theme": { "Mode": "Dark" } }
+      ]
+    },
+    "--color-warning-foreground": {
+      "type": "color",
+      "value": [
+        { "value": "#804200" },
+        { "value": "#FF8400", "theme": { "Mode": "Dark" } }
+      ]
+    },
+    "--color-error": {
+      "type": "color",
+      "value": [
+        { "value": "#E5DCDA" },
+        { "value": "#24100B", "theme": { "Mode": "Dark" } }
+      ]
+    },
+    "--color-error-foreground": {
+      "type": "color",
+      "value": [
+        { "value": "#8C1C00" },
+        { "value": "#FF5C33", "theme": { "Mode": "Dark" } }
+      ]
+    },
+    "--color-info": {
+      "type": "color",
+      "value": [
+        { "value": "#DFDFE6" },
+        { "value": "#222229", "theme": { "Mode": "Dark" } }
+      ]
+    },
+    "--color-info-foreground": {
+      "type": "color",
+      "value": [
+        { "value": "#000066" },
+        { "value": "#B2B2FF", "theme": { "Mode": "Dark" } }
+      ]
+    }
+  }
+}

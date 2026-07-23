@@ -20,6 +20,7 @@ import base64
 import hashlib
 import hmac
 import json
+import re
 import time
 import uuid
 from datetime import datetime, timedelta
@@ -36,6 +37,7 @@ from config import DEFAULT_PRICING_PLAN, settings
 from database.service import DataService
 from logger import logger
 from models import Tariff
+from models.referrals.referral_redemption import ReferralRedemption
 from services.cache.key_manager import CacheKeyManager
 from services.cache.service import CacheService
 from services.core.data.service import ServiceDataModel
@@ -56,6 +58,12 @@ LANDING_COOKIE_MAX_AGE = 90 * 24 * 3600  # 90 дней
 EXPIRING_THRESHOLD_HOURS = 6
 LANDING_BOT_LINK_PREFIX = "https://t.me/"  # дополняется settings.bot_name
 
+# Referral cookie (tg_ref) — фиксирует «от кого пришёл» пользователь при заходе
+# на лендинг с ?ref=… Зеркалит tg_landing_id (тот же секрет, тот же формат).
+TG_REF_COOKIE_NAME = "tg_ref"
+TG_REF_COOKIE_MAX_AGE = 90 * 24 * 3600  # 90 дней
+_REF_TOKEN_REGEX = re.compile(r"^ref_[0-9a-f]{12}$")
+
 # In-memory TTL-кеш vless-конфигов по subscription URL.
 # Ключи landing-24h живут недолго, поэтому кеш не растёт бесконтрольно.
 _VLESS_CACHE: dict[str, tuple[str, float]] = {}
@@ -71,6 +79,7 @@ class QuickKeyResponse(BaseModel):
     deep_link_happ: str
     deep_link_bot: str
     state: str  # "active"
+    landing_uid: Optional[str] = None  # для JS-склейки deeplink (landing_<uid>_ref_<token>)
 
 
 class LandingStateResponse(BaseModel):
@@ -83,6 +92,12 @@ class LandingStateResponse(BaseModel):
     deep_link_bot: Optional[str] = None
     bot_url: Optional[str] = None
     already_registered: bool = False
+    landing_uid: Optional[str] = None  # для JS-склейки deeplink
+
+
+class SetRefCookieRequest(BaseModel):
+    """Тело POST /landing/set-ref-cookie."""
+    ref_token: str
 
 
 # =============================================================================
@@ -127,6 +142,188 @@ def _verify_cookie(cookie_value: str) -> Optional[str]:
     if payload.get("exp", 0) < time.time():
         return None  # кука истекла
     return payload.get("uid")
+
+
+# =============================================================================
+# Referral cookie (tg_ref) — фиксирует «от кого пришёл» при ?ref=… на лендинге
+# =============================================================================
+def _sign_ref_cookie(ref_token: str) -> str:
+    """Подписать ref_token → cookie_value (base64.signature). Зеркалит _sign_cookie.
+
+    Payload: ``{"ref": <token>, "exp": <unix_ts>}``. Использует тот же секрет
+    (LANDING_COOKIE_SECRET / fallback bot_secret_key), что и tg_landing_id.
+    """
+    payload = {
+        "ref": ref_token,
+        "exp": int(time.time()) + TG_REF_COOKIE_MAX_AGE,
+    }
+    payload_b64 = base64.urlsafe_b64encode(
+        json.dumps(payload, separators=(",", ":")).encode()
+    ).rstrip(b"=").decode()
+    sig = hmac.new(
+        _cookie_secret().encode(), payload_b64.encode(), hashlib.sha256
+    ).hexdigest()[:16]
+    return f"{payload_b64}.{sig}"
+
+
+def _verify_ref_cookie(cookie_value) -> Optional[str]:
+    """Верифицировать tg_ref cookie → ref_token или None.
+
+    Принимает строку или объект, приводимый к строке (например, Starlette Cookie).
+    Некорректные/пустые/просроченные куки молча возвращают None.
+    """
+    if not isinstance(cookie_value, str):
+        if cookie_value is None:
+            return None
+        try:
+            cookie_value = str(cookie_value)
+        except Exception:
+            return None
+    if not cookie_value or "." not in cookie_value:
+        return None
+    payload_b64, sig = cookie_value.rsplit(".", 1)
+    expected_sig = hmac.new(
+        _cookie_secret().encode(), payload_b64.encode(), hashlib.sha256
+    ).hexdigest()[:16]
+    if not hmac.compare_digest(expected_sig, sig):
+        return None
+    try:
+        padding = "=" * (-len(payload_b64) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(payload_b64 + padding))
+    except (ValueError, json.JSONDecodeError):
+        return None
+    if payload.get("exp", 0) < time.time():
+        return None
+    return payload.get("ref")
+
+
+def _is_valid_ref_format(token: str) -> bool:
+    """Валидация формата ``ref_<12hex>`` перед походом в БД."""
+    return bool(token) and bool(_REF_TOKEN_REGEX.match(token))
+
+
+def _normalize_ref_token(raw: Optional[str]) -> Optional[str]:
+    """Привести ref-token к каноническому ``ref_<12hex>``.
+
+    Принимает как полный токен ``ref_abc123def456`` (из куки/backend), так и
+    чистую 12-hex часть ``abc123def456`` (из deeplink, который бот распарсил).
+    Возвращает None, если формат не валиден.
+    """
+    if not raw:
+        return None
+    token = raw.strip().lower()
+    if _is_valid_ref_format(token):
+        return token
+    # Чистая 12-hex часть без префикса ref_
+    if re.match(r"^[0-9a-f]{12}$", token):
+        return f"ref_{token}"
+    return None
+
+
+async def _attach_referral_if_any(
+    pool: asyncpg.Pool,
+    service_data: ServiceDataModel,
+    cache: CacheService,
+    tg_ref: Optional[str],
+    referred_tg_id: int,
+    raw_ref_token: Optional[str] = None,
+) -> bool:
+    """Слить реферера в ``users.referral_id`` и создать ``ReferralRedemption``.
+
+    Вызывается из ``claim_landing_key`` (новый юзер) и ``mark_converted``
+    (существующий юзер) после успешной upgrade/mark. Источник ref-token:
+
+      - HMAC-кука ``tg_ref`` (ставится лендингом при заходе с ``?ref=…``);
+      - поле ``ref_token`` в теле запроса (пробрасывается ботом из deeplink).
+
+    Кука имеет приоритет; если её нет — используем ``raw_ref_token``.
+    Защиты:
+
+      - self-referral (``referrer_tg_id == referred_tg_id``) — отсекается;
+      - уже выставленный ``users.referral_id`` — НЕ перезаписывается (антифрод);
+      - дубликат ``referral_redemptions`` (UNIQUE по referred_tg_id) — игнорируется;
+      - невалидная/просроченная/чужая кука или токен — молча возвращаемся.
+
+    Возвращает True, если merge выполнен (для логов).
+    """
+    ref_token: Optional[str] = None
+    if tg_ref:
+        ref_token = _verify_ref_cookie(tg_ref)
+    if not ref_token and raw_ref_token:
+        ref_token = _normalize_ref_token(raw_ref_token)
+    if not ref_token or not _is_valid_ref_format(ref_token):
+        return False
+
+    link = await service_data.referral_links.get_by(token=ref_token)
+    if not link:
+        return False
+
+    referrer_tg_id = link.referrer_tg_id
+    if referrer_tg_id == referred_tg_id:
+        logger.warning(
+            "Self-referral attempt via landing cookie, skipping",
+            referred=referred_tg_id,
+        )
+        return False
+
+    # Атомарно записываем referral_id только если он ещё NULL.
+    # Раньше был read-check-write (get_data → if referral_id is None → update) —
+    # это TOCTOU: два concurrent claim для одного referred_tg_id с разными
+    # реферерами оба видели referral_id=None, оба писали (clobber), и
+    # referral_id расходился с referral_redemptions (UNIQUE ловил только дубль
+    # redemption). Теперь выигрывает ровно один запрос — тот же, что вставит
+    # redemption, так что referral_id и redemption всегда согласованы.
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "UPDATE users "
+            "SET referral_id = $1 "
+            "WHERE tg_id = $2 AND referral_id IS NULL "
+            "RETURNING referral_id",
+            referrer_tg_id, referred_tg_id,
+        )
+    if not row:
+        # У юзера уже есть referrer (или юзер не найден) — не перезаписываем (антифрод).
+        logger.info(
+            "User already has referrer or not found, skipping merge",
+            referred=referred_tg_id,
+            attempted=referrer_tg_id,
+        )
+        return False
+
+    # Синхронизируем кэш: обновляем закешированного пользователя (DB уже записал).
+    user = await service_data.users.get_data(referred_tg_id, conn=pool)
+    if user:
+        user.referral_id = referrer_tg_id
+        await cache.users.set(CacheKeyManager.user(referred_tg_id), user)
+
+    # ReferralRedemption (UNIQUE(referred_tg_id) защищает от дублей)
+    try:
+        redemption = ReferralRedemption(
+            referral_link_id=link.id,
+            referred_tg_id=referred_tg_id,
+        )
+        await service_data.data_service.referral_redemptions.create(
+            pool, **redemption.to_dict()
+        )
+        logger.info(
+            "Referral merged via landing cookie",
+            referrer=referrer_tg_id,
+            referred=referred_tg_id,
+        )
+    except asyncpg.UniqueViolationError:
+        # Повторный claim/mark для того же tg_id — идемпотентно.
+        logger.info(
+            "Referral redemption already exists, skipping",
+            referred=referred_tg_id,
+        )
+    except Exception as e:
+        logger.error(
+            "Failed to insert referral_redemption",
+            referred=referred_tg_id,
+            error=str(e),
+        )
+
+    return True
 
 
 # =============================================================================
@@ -292,6 +489,50 @@ async def _get_key_by_landing_uid(
 
 
 # =============================================================================
+# POST /landing/set-ref-cookie
+# =============================================================================
+@router.post("/set-ref-cookie")
+async def set_ref_cookie(
+    response: Response,
+    payload: SetRefCookieRequest,
+    service_data: ServiceDataModel = Depends(get_service_data),
+):
+    """Поставить HMAC-куку ``tg_ref`` для реферера, зашедшего на лендинг с ?ref=….
+
+    Вызывается JS-стороной лендинга при первом заходе. Валидирует формат токена
+    и его существование в ``referral_links`` (cache → DB), затем ставит куку.
+
+    Безопасно вызывать без аутентификации (verify_bot_secret уже стоит на роутере):
+    кука бесполезна без реальной записи в БД, а в ``claim_landing_key`` /
+    ``mark_converted`` self-referral и overwrite защиты.
+    """
+    token = payload.ref_token
+    if not _is_valid_ref_format(token):
+        raise HTTPException(status_code=400, detail="invalid ref_token format")
+
+    # Проверяем существование токена — не ставим куку на мусор.
+    link = await service_data.referral_links.get_by(token=token)
+    if not link:
+        raise HTTPException(status_code=404, detail="ref_token not found")
+
+    response.set_cookie(
+        key=TG_REF_COOKIE_NAME,
+        value=_sign_ref_cookie(token),
+        max_age=TG_REF_COOKIE_MAX_AGE,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        path="/",
+    )
+    logger.info(
+        "tg_ref cookie set via landing",
+        token=token,
+        referrer=link.referrer_tg_id,
+    )
+    return {"ok": True}
+
+
+# =============================================================================
 # POST /landing/quick-key
 # =============================================================================
 @router.post("/quick-key", response_model=QuickKeyResponse)
@@ -416,6 +657,7 @@ async def create_quick_key(
         deep_link_happ=deep_link_happ,
         deep_link_bot=deep_link_bot,
         state="active",
+        landing_uid=landing_uid,
     )
 
 
@@ -483,6 +725,7 @@ async def get_state(
         deep_link_bot=deep_link_bot,
         bot_url=bot_url,
         already_registered=already_registered,
+        landing_uid=landing_uid,
     )
 
 
@@ -491,12 +734,14 @@ async def get_state(
 # =============================================================================
 class MarkConvertedRequest(BaseModel):
     tg_id: int
+    ref_token: Optional[str] = None
 
 
 @router.post("/mark-converted/{landing_uid}")
 async def mark_converted(
     landing_uid: str,
     body: MarkConvertedRequest,
+    tg_ref: Optional[str] = Cookie(None),
     pool: asyncpg.Pool = Depends(get_pool),
     service_data: ServiceDataModel = Depends(get_service_data),
     cache: CacheService = Depends(get_cache),
@@ -513,6 +758,9 @@ async def mark_converted(
 
     # Идемпотентность: тот же юзер повторно кликнул по ссылке
     if key_obj.converted_tg_id == body.tg_id:
+        # Попробуем merge referral (если ещё не было) — может быть повторный
+        # клик с уже-выставленным converted_tg_id, но referral_id не успел записаться.
+        await _attach_referral_if_any(pool, service_data, cache, tg_ref, body.tg_id, raw_ref_token=body.ref_token)
         return {"ok": True, "already": True, "email": key_obj.email}
 
     # Ключ уже привязан к другому аккаунту — НЕ перезаписываем (защита от гонок и
@@ -531,6 +779,9 @@ async def mark_converted(
     await service_data.keys.update(pool, key_obj, search_data={"email": key_obj.email})
     await cache.keys.set(CacheKeyManager.key(key_obj.email), key_obj)
 
+    # Merge referral из tg_ref куки или ref_token в теле (бот пробрасывает из deeplink).
+    await _attach_referral_if_any(pool, service_data, cache, tg_ref, body.tg_id, raw_ref_token=body.ref_token)
+
     logger.info(
         "Landing key помечен как converted",
         landing_uid=landing_uid,
@@ -546,12 +797,14 @@ async def mark_converted(
 # =============================================================================
 class ClaimRequest(BaseModel):
     tg_id: int
+    ref_token: Optional[str] = None
 
 
 @router.post("/claim/{landing_uid}")
 async def claim_key(
     landing_uid: str,
     body: ClaimRequest,
+    tg_ref: Optional[str] = Cookie(None),
     pool: asyncpg.Pool = Depends(get_pool),
     service_data: ServiceDataModel = Depends(get_service_data),
     cache: CacheService = Depends(get_cache),
@@ -567,6 +820,7 @@ async def claim_key(
     - Ставит tariff_id = trial, trial=1, converted_tg_id = реальный tg_id.
     - Выравнивает user.server_id с сервером ключа (иначе продление из бота
       сломается — /keys/{email}/renew берёт сервер из user.server_id).
+    - При наличии куки tg_ref — мержит referral_id (см. _attach_referral_if_any).
     """
     key_obj = await _get_key_by_landing_uid(service_data, pool, landing_uid)
     if not key_obj:
@@ -574,6 +828,9 @@ async def claim_key(
 
     # Идемпотентность: тот же юзер повторно кликнул — отдаём его ключ
     if key_obj.converted_tg_id == body.tg_id:
+        # Повторный клик с уже-выставленным converted_tg_id: попробуем merge
+        # referral, если ещё не было (tg_ref мог быть поставлен после первого claim).
+        await _attach_referral_if_any(pool, service_data, cache, tg_ref, body.tg_id, raw_ref_token=body.ref_token)
         return {
             "status": "already_claimed",
             "email": key_obj.email,
@@ -624,6 +881,11 @@ async def claim_key(
         user.server_id = settings.xui_server_id
         await service_data.users.update(pool, user, {"tg_id": body.tg_id})
         await cache.users.set(CacheKeyManager.user(body.tg_id), user)
+
+    # Merge referral из tg_ref куки или ref_token в теле (бот пробрасывает из deeplink).
+    # Делаем ПОСЛЕ installation_trial, чтобы в логах redemption шёл после trial=1.
+    # Ошибка merge НЕ откатывает claim (бонус-движок защищён check_referral=FALSE).
+    await _attach_referral_if_any(pool, service_data, cache, tg_ref, body.tg_id, raw_ref_token=body.ref_token)
 
     logger.info(
         "Landing key привязан к юзеру и апгрейдирован (trial + grace)",

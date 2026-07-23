@@ -5,8 +5,11 @@ from typing import TYPE_CHECKING
 
 from config import REFERRAL_BONUS_PERCENT, REFERRAL_BONUS_DAYS
 from logger import logger
+from services.cache.key_manager import CacheKeyManager
 
 if TYPE_CHECKING:
+    from client import XUISession
+    from services.cache.service import CacheService
     from services.core.data.service import ServiceDataModel
 
 
@@ -33,46 +36,89 @@ class ReferralBonusService:
     # Бонусные дни в миллисекундах
     BONUS_DAYS_MS: int = REFERRAL_BONUS_DAYS * 24 * 60 * 60 * 1000
 
-    def __init__(self, model_data: "ServiceDataModel"):
+    def __init__(
+        self,
+        model_data: "ServiceDataModel",
+        xui_session: "XUISession | None" = None,
+        cache: "CacheService | None" = None,
+    ):
         self._users = model_data.users
         self._data_service = model_data.data_service
         self._keys = model_data.keys
+        # Нужны, чтобы продлевать ключ реферала согласованно: 3x-UI panel + DB + cache.
+        # Без них _grant_referred_bonus_days откажется работать (см. guard).
+        self._xui = xui_session
+        self._cache = cache
 
     async def _grant_referred_bonus_days(
         self, conn: asyncpg.Connection, referred_tg_id: int
     ) -> None:
-        """Начислить +3 дня к подписке реферала."""
-        try:
-            # Находим все ключи реферала и продлеваем expiry_time
-            keys = await conn.fetch(
-                "SELECT email, expiry_time FROM keys WHERE tg_id = $1",
-                referred_tg_id,
-            )
-            for key_row in keys:
-                email = key_row["email"]
-                current_expiry = key_row["expiry_time"]
-                new_expiry = current_expiry + self.BONUS_DAYS_MS
+        """Начислить +3 дня к подписке реферала: 3x-UI panel + DB + cache.
 
-                await conn.execute(
-                    """
-                    UPDATE keys
-                    SET expiry_time = $1
-                    WHERE email = $2
-                    """,
-                    new_expiry, email,
+        Ранее метод делал только raw ``UPDATE keys SET expiry_time`` — panel и
+        cache не обновлялись, поэтому VPN отключался в оригинальное время, а
+        бот показывал старый expiry до 3-часового sync. Теперь продление идёт
+        через тот же набор действий, что и обычное продление ключа:
+          - ``xui.extend_client_key(key)`` — panel expiryTime;
+          - ``keys.update`` — DB;
+          - ``cache.keys.set`` — cache coherence (CLAUDE.md: cache invalidated
+            on every mutation).
+
+        Ошибки DB/cache пробрасываются наружу (см. #7 — раньше глотались
+        bare ``except Exception``, скрывая partial-failure: баланс рефереру
+        уже закоммичен, а +3 дня молча терялись). Panel-вызов best-effort:
+        при сбое панели DB+cache всё равно обновляются, а reconcile/sync
+        подлечит panel — это лучше, чем совсем не продлить.
+        """
+        rows = await conn.fetch(
+            "SELECT email FROM keys WHERE tg_id = $1",
+            referred_tg_id,
+        )
+        if not rows:
+            return
+        if self._xui is None or self._cache is None:
+            raise RuntimeError(
+                "ReferralBonusService: xui_session и cache должны быть "
+                "переданы в __init__ для продления ключа реферала"
+            )
+
+        for row in rows:
+            email = row["email"]
+            key = await self._keys.get_data(email, conn)
+            if not key:
+                logger.warning(
+                    "Реферал: ключ не найден, пропуск начисления бонусных дней",
+                    tg_id=referred_tg_id, email=email,
                 )
-                logger.info(
-                    "Рефералу начислено +3 дня к подписке",
-                    tg_id=referred_tg_id,
-                    email=email,
-                    old_expiry=current_expiry,
-                    new_expiry=new_expiry,
+                continue
+
+            old_expiry = key.expiry_time
+            key.expiry_time = old_expiry + self.BONUS_DAYS_MS
+
+            panel_ok = False
+            try:
+                panel_ok = await self._xui.extend_client_key(key)
+            except Exception as exc:
+                logger.error(
+                    "Реферал: не удалось продлить ключ в 3x-UI панели "
+                    "(DB+cache обновятся, panel подлечит reconcile/sync)",
+                    tg_id=referred_tg_id, email=email,
+                    error=str(exc), exc_info=True,
                 )
-        except Exception as e:
-            logger.warning(
-                "Не удалось начислить бонусные дни рефералу",
-                tg_id=referred_tg_id,
-                error=str(e),
+            if not panel_ok:
+                logger.warning(
+                    "Реферал: panel extend вернул False (клиент отсутствует?) — "
+                    "DB+cache обновляем, panel подлечит sync",
+                    tg_id=referred_tg_id, email=email,
+                )
+
+            await self._keys.update(conn, key, search_data={"email": email})
+            await self._cache.keys.set(CacheKeyManager.key(email), key)
+            logger.info(
+                "Рефералу начислено +3 дня к подписке",
+                tg_id=referred_tg_id, email=email,
+                old_expiry=old_expiry, new_expiry=key.expiry_time,
+                panel_ok=bool(panel_ok),
             )
 
     async def _notify_referrer(self, referrer_tg_id: int, reward_value: float) -> None:
@@ -233,7 +279,7 @@ class ReferralBonusService:
                 await conn.execute(
                     """
                     UPDATE users
-                    SET balance = ROUND(balance + $1, 2)
+                    SET balance = ROUND((balance + $1)::numeric, 2)
                     WHERE tg_id = $2
                     """,
                     reward_value, referrer_tg_id,
