@@ -25,7 +25,7 @@ class ReferralBonusFunnel:
     async def should_send(self, ctx: NotificationContext) -> bool:
         if ctx.user.referral_id is None:
             return False
-        if ctx.user.trial != 0:
+        if ctx.user.trial:
             return False
         return not await self._dedupe.is_sent(self.funnel_id, ctx.user.tg_id)
 

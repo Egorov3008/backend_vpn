@@ -23,7 +23,7 @@ class ColdLeadFunnel:
         self._dedupe = NotificationDedupeCache(pool)
 
     async def should_send(self, ctx: NotificationContext) -> bool:
-        if ctx.user.trial != 0:
+        if ctx.user.trial:
             return False
         if ctx.keys:
             return False

@@ -119,6 +119,33 @@ async def test_create_trial_key_already_used(api_client, mock_service_data):
 
 
 @pytest.mark.asyncio
+async def test_create_trial_key_null_trial_allowed(api_client, mock_service_data):
+    # Legacy-пользователи могут иметь trial=NULL (колонка исторически nullable).
+    # NULL должен трактоваться как «триал ещё не использован» (== 0), а не как
+    # «уже использован» (None != 0 == True).
+    user = make_user()
+    user.trial = None
+    tariff = make_tariff()
+    key = make_key(email="trial@null.vpn")
+
+    mock_service_data.users.get_data = AsyncMock(return_value=user)
+    mock_service_data.tariffs.get_data = AsyncMock(return_value=tariff)
+    mock_service_data.keys.get_data = AsyncMock(return_value=key)
+
+    with patch("api.v1.keys.build_key_services") as mock_build, \
+         patch("api.v1.keys.TrialService") as mock_trial_cls:
+        mock_create = AsyncMock(return_value={"email": "trial@null.vpn"})
+        mock_build.return_value = (MagicMock(proces=mock_create), None, None)
+        mock_trial = AsyncMock()
+        mock_trial_cls.return_value.installation_trial = mock_trial
+
+        resp = await api_client.post("/api/v1/keys/trial?tg_id=123")
+
+    assert resp.status_code == 200
+    mock_trial.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_create_trial_key_user_not_found(api_client, mock_service_data):
     mock_service_data.users.get_data = AsyncMock(return_value=None)
 
