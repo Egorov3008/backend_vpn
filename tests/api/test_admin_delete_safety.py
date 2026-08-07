@@ -204,6 +204,7 @@ async def test_change_key_date_audits_before_resetter(api_client, mock_service_d
 
     xui = MagicMock()
     xui.extend_client_key = AsyncMock(return_value=True)
+    xui.set_inbounds = AsyncMock(return_value=True)
 
     mock_audit = MagicMock()
     mock_audit.record = AsyncMock()
@@ -237,6 +238,7 @@ async def test_change_key_tariff_audits_before_resetter(api_client, mock_service
 
     xui = MagicMock()
     xui.extend_client_key = AsyncMock(return_value=True)
+    xui.set_inbounds = AsyncMock(return_value=True)
 
     mock_audit = MagicMock()
     mock_audit.record = AsyncMock()
