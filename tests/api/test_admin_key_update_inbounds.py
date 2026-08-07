@@ -223,6 +223,7 @@ def test_change_tariff_continues_when_set_inbounds_fails(client_ctx):
         headers=_headers(),
     )
     assert resp.status_code == 200
+    xui.set_inbounds.assert_awaited_once()
     xui.extend_client_key.assert_awaited_once()
 
 
