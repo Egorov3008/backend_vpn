@@ -136,7 +136,7 @@ def test_mass_renew_uses_paid_inbound_ids_from_inbounds_module(client_ctx):
         headers=_headers(),
     )
     sent = xui.set_inbounds.call_args.args[1]
-    assert sent is paid_inbound_ids()
+    assert sent == paid_inbound_ids()
 
 
 # ---------- change-date ----------
@@ -177,7 +177,7 @@ def test_change_date_uses_paid_inbound_ids_from_inbounds_module(client_ctx):
         headers=_headers(),
     )
     sent = xui.set_inbounds.call_args.args[1]
-    assert sent is paid_inbound_ids()
+    assert sent == paid_inbound_ids()
 
 
 # ---------- change-tariff ----------
@@ -230,4 +230,4 @@ def test_change_tariff_uses_paid_inbound_ids_from_inbounds_module(client_ctx):
         headers=_headers(),
     )
     sent = xui.set_inbounds.call_args.args[1]
-    assert sent is paid_inbound_ids()
+    assert sent == paid_inbound_ids()
