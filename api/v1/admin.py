@@ -408,6 +408,16 @@ async def admin_change_key_date(
         raise HTTPException(status_code=404, detail="Key not found")
 
     key.expiry_time = body.expiry_time
+    # Синхронизируем inbound-набор с .env перед сменой даты.
+    # Best-effort: ошибка set_inbounds логируется и не блокирует операцию.
+    inbound_ok = await xui.set_inbounds(key.email, paid_inbound_ids())
+    if not inbound_ok:
+        logger.warning(
+            "Не удалось синхронизировать inbound-набор перед change-date; продолжаем best-effort",
+            email=key.email,
+            operation="change_date",
+            admin_tg_id=principal.admin_tg_id,
+        )
     updated = await xui.extend_client_key(key)
     if not updated:
         raise HTTPException(status_code=500, detail="Failed to update key in panel")
