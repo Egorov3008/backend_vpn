@@ -23,6 +23,7 @@ from services.cache.service import CacheService
 from services.core.data.service import ServiceDataModel
 from services.core.keys.admin_report import KeyAdminReport
 from services.core.keys.utils.reset import KeyResetter
+from services.core.keys.utils.inbounds import paid_inbound_ids
 
 router = APIRouter(
     prefix="/admin",
@@ -354,6 +355,21 @@ async def admin_mass_renew(
             base_expiry = max(old_expiry, now_ms)
             new_expiry = base_expiry + (body.days * 24 * 3600 * 1000)
             key.expiry_time = new_expiry
+
+            # Синхронизируем inbound-набор с .env перед продлением.
+            # Повторяет логику KeyRenewal.extension_key (grace→active ветка):
+            # конвергируем к paid_inbound_ids() = BASELINE_INBOUNDS + LIST_AVAILABLE_CONNECTIONS.
+            # set_inbounds идемпотентен и best-effort: ошибки логируются, но не
+            # блокируют операцию — reconcile-цикл (3ч) вытянет расхождения,
+            # а extend_client_key важнее для пользователя.
+            inbound_ok = await xui.set_inbounds(key.email, paid_inbound_ids())
+            if not inbound_ok:
+                logger.warning(
+                    "Не удалось синхронизировать inbound-набор перед mass-renew; продолжаем best-effort",
+                    email=key.email,
+                    operation="mass_renew",
+                    admin_tg_id=principal.admin_tg_id,
+                )
 
             await xui.extend_client_key(key)
             await service_data.keys.update(pool, key, {"email": key.email})
