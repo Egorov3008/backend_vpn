@@ -121,6 +121,9 @@ def test_mass_renew_continues_when_set_inbounds_fails(client_ctx):
         headers=_headers(),
     )
     assert resp.status_code == 200
+    # set_inbounds must have been attempted хотя бы раз — иначе тест не ловит
+    # пробел в продакшене (см. Finding 1 в task-1-report).
+    xui.set_inbounds.assert_awaited_once()
     # extend must still have run
     xui.extend_client_key.assert_awaited_once()
 
