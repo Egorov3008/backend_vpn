@@ -89,16 +89,6 @@ def client_ctx():
     app.dependency_overrides.clear()
 
 
-def _call_order(xui_mock):
-    """Return the order in which async methods were awaited."""
-    calls = []
-    for name in ("set_inbounds", "extend_client_key"):
-        m = getattr(xui_mock, name)
-        # Each AsyncMock records .call_args in invocation order.
-        calls.append((name, m.call_args))
-    return calls
-
-
 # ---------- mass-renew ----------
 
 
