@@ -458,6 +458,17 @@ async def admin_change_key_tariff(
     key.limit_ip = tariff.limit_ip
     key.name_tariff = tariff.name_tariff
 
+    # Синхронизируем inbound-набор с .env перед сменой тарифа.
+    # Best-effort: ошибка set_inbounds логируется и не блокирует операцию.
+    inbound_ok = await xui.set_inbounds(key.email, paid_inbound_ids())
+    if not inbound_ok:
+        logger.warning(
+            "Не удалось синхронизировать inbound-набор перед change-tariff; продолжаем best-effort",
+            email=key.email,
+            operation="change_tariff",
+            admin_tg_id=principal.admin_tg_id,
+        )
+
     updated = await xui.extend_client_key(key)
     if not updated:
         raise HTTPException(status_code=500, detail="Failed to update key in panel")
