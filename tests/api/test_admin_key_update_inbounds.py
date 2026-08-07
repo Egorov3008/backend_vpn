@@ -59,6 +59,14 @@ def _build_xui_mock(set_inbounds_return: bool = True):
 @pytest.fixture
 def client_ctx():
     pool = MagicMock()
+    # async-friendly pool: resetter.reset_key_after_renewal(pool, key) и ряд
+    # других admin-обработчиков вызывают `await conn.execute(...)` / `fetchrow`
+    # / `fetch` прямо на pool (без `async with pool.acquire() as conn:`).
+    # Без AsyncMock-ов на этих методах TypeError "object MagicMock can't be
+    # used in 'await' expression" роняет эндпоинт в 5xx.
+    pool.execute = AsyncMock()
+    pool.fetchrow = AsyncMock()
+    pool.fetch = AsyncMock()
     cache = MagicMock(spec=CacheService)
     # Без spec: ServiceDataModel задаёт keys/users/... в __init__, и при
     # spec= их не видно. Существующие admin-тесты используют обычный MagicMock.
