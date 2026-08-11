@@ -541,7 +541,14 @@ async def get_payment_status(
             yookassa.Configuration.secret_key = settings.yookassa_secret_key
 
             logger.debug("Проверка статуса платежа в YooKassa", extra={"payment_id": payment_id})
-            yk_payment = yookassa.Payment.find_one(payment_id)
+            try:
+                yk_payment = await asyncio.wait_for(
+                    asyncio.to_thread(yookassa.Payment.find_one, payment_id),
+                    timeout=15.0,
+                )
+            except asyncio.TimeoutError:
+                logger.warning("YooKassa find_one timed out", extra={"payment_id": payment_id})
+                yk_payment = None
 
             if yk_payment and hasattr(yk_payment, 'status'):
                 yk_status = yk_payment.status

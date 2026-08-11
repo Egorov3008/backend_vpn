@@ -13,6 +13,7 @@ Safety net for missed YooKassa webhooks + one-off backlog recovery tool.
 ключ ещё раз. Поэтому такие payment_id передают через ``exclude_ids``.
 """
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -76,8 +77,14 @@ async def _check_yookassa_status(payment_id: str) -> Optional[str]:
     yookassa.Configuration.account_id = settings.yookassa_shop_id
     yookassa.Configuration.secret_key = settings.yookassa_secret_key
     try:
-        yk = yookassa.Payment.find_one(payment_id)
+        yk = await asyncio.wait_for(
+            asyncio.to_thread(yookassa.Payment.find_one, payment_id),
+            timeout=15.0,
+        )
         return getattr(yk, "status", None)
+    except asyncio.TimeoutError:
+        logger.warning("Sweep: YooKassa find_one timed out", payment_id=payment_id)
+        return None
     except Exception as e:
         logger.warning(
             "Sweep: YooKassa find_one failed",
