@@ -100,6 +100,10 @@ class Settings(BaseSettings):
     # Backend needs it to call getChatMember for subscription checks.
     canall_url: str = Field(default="", alias="CANALL_URL")
 
+    # MVP shared-config endpoint
+    mvp_app_secret: str = Field(default="changeme", alias="MVP_APP_SECRET")
+    mvp_shared_key_email: str = Field(default="", alias="MVP_SHARED_KEY_EMAIL")
+
 
 settings = Settings()
 
