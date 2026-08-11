@@ -13,6 +13,7 @@ download/extract-логика продублирована здесь незав
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import time
 import urllib.request
@@ -29,6 +30,15 @@ from services.core.data.service import ServiceDataModel
 
 router = APIRouter(prefix="/mobile", tags=["mobile-mvp"])
 
+# Единственный shared-ключ => идентичный ответ для всех вызывающих. Кеш в
+# памяти по subscription URL (зеркалит паттерн landing.py::_VLESS_CACHE, но
+# не импортируется оттуда — см. docstring модуля) схлопывает нагрузку от
+# множества инсталляций 3x-UI-приложения примерно до одного скачивания раз в
+# 5 минут. Кешируются только успешные результаты — неудачное скачивание не
+# кешируется, чтобы следующий запрос сразу повторил попытку.
+_VLESS_CACHE: dict[str, tuple[str, float]] = {}
+_VLESS_CACHE_TTL_SECONDS = 300
+
 
 def _download_and_extract_vless(subscription_url: str) -> Optional[str]:
     """Скачивает subscription URL и извлекает первую vless:// строку.
@@ -37,10 +47,18 @@ def _download_and_extract_vless(subscription_url: str) -> Optional[str]:
     Повторяет попытки при кратковременных сетевых/3x-UI сбоях.
     Возвращает None, если скачать не удалось или vless-конфиг не найден.
 
-    Независимая копия логики ``landing.py::_extract_vless_url`` — без
-    кеширования (не нужно для MVP) и без импорта из landing.py (см. docstring
-    модуля).
+    Независимая копия логики ``landing.py::_extract_vless_url`` — с тем же
+    паттерном in-memory TTL-кеша (см. ``_VLESS_CACHE`` выше), но без импорта
+    из landing.py (см. docstring модуля).
     """
+    now = time.time()
+    cached = _VLESS_CACHE.get(subscription_url)
+    if cached is not None:
+        vless_url, expires_at = cached
+        if expires_at > now:
+            return vless_url
+        _VLESS_CACHE.pop(subscription_url, None)
+
     last_error = None
     body: Optional[bytes] = None
     for attempt in range(1, 4):
@@ -82,10 +100,15 @@ def _download_and_extract_vless(subscription_url: str) -> Optional[str]:
         if result:
             break
 
-    # Пробуем base64 (Happ/Sing-box часто отдают подписку в base64)
+    # Пробуем base64 (Happ/Sing-box часто отдают подписку в base64).
+    # .strip() до decode: реальные subscription-серверы часто дописывают
+    # trailing "\n", а base64.b64decode(..., validate=True) падает на ЛЮБОМ
+    # символе вне base64-алфавита, включая whitespace по краям.
     if result is None:
         try:
-            decoded = base64.b64decode(body, validate=True).decode("utf-8", errors="ignore")
+            decoded = base64.b64decode(
+                body.strip(), validate=True
+            ).decode("utf-8", errors="ignore")
             for line in decoded.splitlines():
                 line = line.strip()
                 if line.startswith("vless://"):
@@ -93,6 +116,9 @@ def _download_and_extract_vless(subscription_url: str) -> Optional[str]:
                     break
         except Exception:
             pass
+
+    if result is not None:
+        _VLESS_CACHE[subscription_url] = (result, now + _VLESS_CACHE_TTL_SECONDS)
 
     return result
 
@@ -133,7 +159,18 @@ async def get_shared_config(
     if not key:
         raise HTTPException(status_code=500, detail="Shared key not configured")
 
-    vless_uri = _download_and_extract_vless(key.key)
+    logger.warning(
+        "Serving MVP shared VPN config",
+        email=key.email,
+        tg_id=key.tg_id,
+        limit_ip=key.limit_ip,
+    )
+
+    # Скачивание/парсинг subscription — блокирующий сетевой I/O (urlopen +
+    # time.sleep между ретраями, до ~25с в худшем случае). Выносим в поток,
+    # иначе это замораживает весь event loop процесса (платёжные вебхуки,
+    # bot API, scheduler) на время скачивания.
+    vless_uri = await asyncio.to_thread(_download_and_extract_vless, key.key)
     if vless_uri is None:
         raise HTTPException(status_code=502, detail="Failed to retrieve VPN config")
 

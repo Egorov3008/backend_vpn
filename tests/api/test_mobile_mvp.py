@@ -10,12 +10,28 @@ test_landing.py (подмена urllib.request.urlopen на fake с FakeResponse
 Мокирование service_data/pool — тем же приёмом, что и в смоук-тесте ниже
 (api_client override из tests/api/conftest.py + monkeypatch mock_service_data).
 """
+import base64
 import time
 
 import pytest
 from unittest.mock import AsyncMock
 
 from models import Key
+
+
+@pytest.fixture(autouse=True)
+def _clear_vless_cache():
+    """Изолирует тесты друг от друга: get_shared_config теперь кеширует
+    успешный результат _download_and_extract_vless в module-level
+    _VLESS_CACHE, keyed by subscription URL (Fix 1). Несколько тестов ниже
+    переиспользуют один и тот же URL (make_shared_key's default), поэтому
+    без очистки кеша между тестами успешный результат одного теста мог бы
+    "просочиться" в другой (например, замаскировать ожидаемый 502)."""
+    from api.v1 import mobile_mvp
+
+    mobile_mvp._VLESS_CACHE.clear()
+    yield
+    mobile_mvp._VLESS_CACHE.clear()
 
 
 @pytest.mark.asyncio
@@ -162,6 +178,49 @@ async def test_shared_config_success_returns_vless_and_expiry(
     assert data["expiry_time"] == key.expiry_time
     # Ключ найден в кеше — фоллбэк в БД не должен вызываться.
     mock_service_data.data_service.keys.get.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_shared_config_success_base64_with_trailing_newline(
+    api_client, mock_service_data, monkeypatch
+):
+    """Fix 4: base64-encoded subscription-тело с trailing '\\n' должно
+    успешно распарситься, а не падать со 502.
+
+    base64.b64decode(..., validate=True) отвергает ЛЮБОЙ символ вне
+    base64-алфавита, включая whitespace по краям — реальные subscription-
+    серверы часто дописывают завершающий перевод строки к base64-телу.
+    Регрессионный тест на ветку, которая раньше не покрывалась вовсе.
+    """
+    from config import settings
+
+    monkeypatch.setattr(settings, "mvp_app_secret", "correct-secret")
+    monkeypatch.setattr(settings, "mvp_shared_key_email", "shared@vpn")
+
+    key = make_shared_key(email="shared@vpn", key_url="https://example.com/sub-b64")
+    mock_service_data.keys.get_data = AsyncMock(return_value=key)
+
+    vless_url = "vless://uuid@example.com:443?encryption=none&security=tls"
+    # base64-энкодим само subscription-тело (с внутренним '\n' перед энкодингом,
+    # как это часто делают Happ/Sing-box), а ЗАТЕМ дописываем trailing '\n'
+    # СНАРУЖИ base64-блока — это и есть баг: b64decode(..., validate=True)
+    # падает именно на этом внешнем '\n', если его не strip()-нуть сначала.
+    encoded = base64.b64encode(f"{vless_url}\n".encode())
+    body = encoded + b"\n"
+
+    import urllib.request
+
+    monkeypatch.setattr(
+        urllib.request, "urlopen", lambda url, timeout=None: _FakeResponse(body)
+    )
+
+    response = await api_client.get(
+        "/api/v1/mobile/shared-config",
+        headers={"X-App-Secret": "correct-secret"},
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["vless_uri"] == vless_url
 
 
 @pytest.mark.asyncio

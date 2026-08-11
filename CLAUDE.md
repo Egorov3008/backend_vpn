@@ -110,6 +110,14 @@ PostgreSQL + 3x-UI Panel
 - **GET `/{tg_id}`** — Get user info (server_id, ref_count, etc.)
 - **POST `/`** — Register new user (auto-called by bot or web on first key creation)
 
+#### Mobile MVP (`/api/v1/mobile`)
+
+- **GET `/shared-config`** — One shared VPN config for the MVP Android app; no per-user auth, no accounts, no per-user state.
+  - Auth: `X-App-Secret: <MVP_APP_SECRET>` header (checked by `verify_app_secret()`, **not** `verify_bot_secret()` — see Authentication exception below).
+  - Resolves the single key at `MVP_SHARED_KEY_EMAIL`, downloads/parses its subscription URL (with an in-memory 5-minute TTL cache, since every caller gets the identical response), and returns `{vless_uri, expiry_time}`.
+  - Fails: 500 if the shared key isn't configured/found (deploy/provisioning error); 502 if the upstream subscription download/parse fails.
+  - Provisioning (one-time, manual): create a free tariff with `amount=0` and `limit_ip=0` (ideally a long `period`), call `POST /keys/create` once against it to mint the shared key, then paste that key's `email` into `MVP_SHARED_KEY_EMAIL`.
+
 #### Admin (`/api/v1/admin`)
 
 - **GET `/health`** — System health check
@@ -127,7 +135,7 @@ PostgreSQL + 3x-UI Panel
 
 ### Authentication
 
-**Service-to-Service:** `X-Bot-Secret: <BOT_SECRET_KEY>` header required on all endpoints (checked by `verify_bot_secret()` dependency).
+**Service-to-Service:** `X-Bot-Secret: <BOT_SECRET_KEY>` header required on all endpoints (checked by `verify_bot_secret()` dependency), **except** `/api/v1/mobile/shared-config`, which uses its own static secret (`X-App-Secret: <MVP_APP_SECRET>`, checked by `verify_app_secret()`) — see Mobile MVP above.
 
 **No user authentication** — backend trusts the `tg_id` parameter from the calling service (bot or web). The calling service is responsible for JWT validation.
 
@@ -292,3 +300,5 @@ Required in `.env`:
 - `WEBHOOK_ALLOWED_IPS` — comma-separated IPs (YooKassa: 185.71.76.0/27,185.109.44.0/27)
 - `ADMIN_TG_IDS` — JSON array of admin Telegram IDs
 - `LOG_LEVEL` — logging level (default: INFO)
+- `MVP_APP_SECRET` — static shared secret for the MVP Android app's `X-App-Secret` header (see Mobile MVP endpoint above)
+- `MVP_SHARED_KEY_EMAIL` — email of the pre-provisioned shared key served by `/api/v1/mobile/shared-config` (empty by default; endpoint returns 500 until set)
