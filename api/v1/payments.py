@@ -414,11 +414,12 @@ async def create_payment(
 
         # YooKassa API изредка "зависает" на TLS-хендшейке (наблюдалось: TCP connect
         # мгновенный, а handshake виснет на полный timeout, при этом повторный запрос
-        # сразу после — успешен за <0.5s). Один быстрый повтор покрывает этот случай,
-        # не превышая timeout=20s HTTP-клиента бота.
+        # сразу после — успешен за <0.5s). Иногда подвисание длится дольше одного
+        # повтора (~16с), поэтому бюджет расширен до 3 попыток по 10с (макс. ~30с),
+        # согласовано с timeout=35s HTTP-клиента бота.
         yk_payment = None
         last_timeout = False
-        for attempt in range(2):
+        for attempt in range(3):
             try:
                 yk_payment = await asyncio.wait_for(
                     asyncio.to_thread(
@@ -439,7 +440,7 @@ async def create_payment(
                         },
                         idempotency_key,
                     ),
-                    timeout=8.0,
+                    timeout=10.0,
                 )
                 last_timeout = False
                 break
