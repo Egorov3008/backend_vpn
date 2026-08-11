@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     xui_server_id: int = Field(default=1, alias="XUI_SERVER_ID")
     xui_skip_ssl_verify: bool = Field(default=False, alias="XUI_SKIP_SSL_VERIFY")
 
+    # MVP shared-config endpoint
+    mvp_app_secret: str = Field(default="changeme", alias="MVP_APP_SECRET")
+    mvp_shared_key_email: str = Field(default="", alias="MVP_SHARED_KEY_EMAIL")
+
     # Landing page
     # Separate 3x-UI inbound for anonymous 24h keys. Must also be in
     # AVAILABLE_CONNECTIONS so form_data can pick it up.
@@ -99,10 +103,6 @@ class Settings(BaseSettings):
     # Public URL of the Telegram channel (same CANALL_URL the bot uses).
     # Backend needs it to call getChatMember for subscription checks.
     canall_url: str = Field(default="", alias="CANALL_URL")
-
-    # MVP shared-config endpoint
-    mvp_app_secret: str = Field(default="changeme", alias="MVP_APP_SECRET")
-    mvp_shared_key_email: str = Field(default="", alias="MVP_SHARED_KEY_EMAIL")
 
 
 settings = Settings()
