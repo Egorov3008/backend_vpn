@@ -412,31 +412,49 @@ async def create_payment(
         webhook_url = f"{settings.webhook_base_url.rstrip('/')}{settings.webhook_path}"
         logger.debug("Webhook URL для YooKassa", extra={"webhook_url": webhook_url})
 
-        yk_payment = await asyncio.wait_for(
-            asyncio.to_thread(
-                yookassa.Payment.create,
-                {
-                    "amount": {"value": f"{final_amount:.2f}", "currency": "RUB"},
-                    "confirmation": {
-                        "type": "redirect",
-                        "return_url": f"https://t.me/{settings.url_bot}",
-                    },
-                    "capture": True,
-                    "description": f"Помощь в ИТ {body.tg_id} {tariff.name_tariff} x{body.number_of_months}",
-                    "metadata": {
-                        "tg_id": str(body.tg_id),
-                        "payment_type": payment_type,
-                    },
-                    "notification_url": webhook_url,
-                },
-                idempotency_key,
-            ),
-            timeout=15.0,
-        )
+        # YooKassa API изредка "зависает" на TLS-хендшейке (наблюдалось: TCP connect
+        # мгновенный, а handshake виснет на полный timeout, при этом повторный запрос
+        # сразу после — успешен за <0.5s). Один быстрый повтор покрывает этот случай,
+        # не превышая timeout=20s HTTP-клиента бота.
+        yk_payment = None
+        last_timeout = False
+        for attempt in range(2):
+            try:
+                yk_payment = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        yookassa.Payment.create,
+                        {
+                            "amount": {"value": f"{final_amount:.2f}", "currency": "RUB"},
+                            "confirmation": {
+                                "type": "redirect",
+                                "return_url": f"https://t.me/{settings.url_bot}",
+                            },
+                            "capture": True,
+                            "description": f"Помощь в ИТ {body.tg_id} {tariff.name_tariff} x{body.number_of_months}",
+                            "metadata": {
+                                "tg_id": str(body.tg_id),
+                                "payment_type": payment_type,
+                            },
+                            "notification_url": webhook_url,
+                        },
+                        idempotency_key,
+                    ),
+                    timeout=8.0,
+                )
+                last_timeout = False
+                break
+            except asyncio.TimeoutError:
+                last_timeout = True
+                logger.warning(
+                    "YooKassa payment creation attempt timed out",
+                    extra={"idempotency_key": idempotency_key, "attempt": attempt + 1},
+                )
+        if last_timeout:
+            logger.error("YooKassa payment creation timed out", extra={"idempotency_key": idempotency_key})
+            raise HTTPException(status_code=504, detail="Payment provider timeout")
         logger.debug("YooKassa вернул платёж", extra={"payment_id": yk_payment.id, "status": yk_payment.status})
-    except asyncio.TimeoutError:
-        logger.error("YooKassa payment creation timed out", extra={"idempotency_key": idempotency_key})
-        raise HTTPException(status_code=504, detail="Payment provider timeout")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(
             "YooKassa payment creation failed",
