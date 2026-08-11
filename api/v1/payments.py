@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from typing import List, Optional
 from ipaddress import ip_address, ip_network
@@ -411,24 +412,31 @@ async def create_payment(
         webhook_url = f"{settings.webhook_base_url.rstrip('/')}{settings.webhook_path}"
         logger.debug("Webhook URL для YooKassa", extra={"webhook_url": webhook_url})
 
-        yk_payment = yookassa.Payment.create(
-            {
-                "amount": {"value": f"{final_amount:.2f}", "currency": "RUB"},
-                "confirmation": {
-                    "type": "redirect",
-                    "return_url": f"https://t.me/{settings.url_bot}",
+        yk_payment = await asyncio.wait_for(
+            asyncio.to_thread(
+                yookassa.Payment.create,
+                {
+                    "amount": {"value": f"{final_amount:.2f}", "currency": "RUB"},
+                    "confirmation": {
+                        "type": "redirect",
+                        "return_url": f"https://t.me/{settings.url_bot}",
+                    },
+                    "capture": True,
+                    "description": f"Помощь в ИТ {body.tg_id} {tariff.name_tariff} x{body.number_of_months}",
+                    "metadata": {
+                        "tg_id": str(body.tg_id),
+                        "payment_type": payment_type,
+                    },
+                    "notification_url": webhook_url,
                 },
-                "capture": True,
-                "description": f"Помощь в ИТ {body.tg_id} {tariff.name_tariff} x{body.number_of_months}",
-                "metadata": {
-                    "tg_id": str(body.tg_id),
-                    "payment_type": payment_type,
-                },
-                "notification_url": webhook_url,
-            },
-            idempotency_key,
+                idempotency_key,
+            ),
+            timeout=15.0,
         )
         logger.debug("YooKassa вернул платёж", extra={"payment_id": yk_payment.id, "status": yk_payment.status})
+    except asyncio.TimeoutError:
+        logger.error("YooKassa payment creation timed out", extra={"idempotency_key": idempotency_key})
+        raise HTTPException(status_code=504, detail="Payment provider timeout")
     except Exception as e:
         logger.error(
             "YooKassa payment creation failed",
