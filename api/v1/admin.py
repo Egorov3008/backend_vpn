@@ -13,6 +13,7 @@ from app.schemas.admin import (
     AdminMassRenewRequest,
     AdminChangeDateRequest,
     AdminChangeTariffRequest,
+    AdminMaintenanceModeRequest,
 )
 from models.stocks.stock import Stock
 from database.service import DataService
@@ -24,6 +25,7 @@ from services.core.data.service import ServiceDataModel
 from services.core.keys.admin_report import KeyAdminReport
 from services.core.keys.utils.reset import KeyResetter
 from services.core.keys.utils.inbounds import paid_inbound_ids
+from services.system.maintenance import maintenance_mode
 
 router = APIRouter(
     prefix="/admin",
@@ -86,6 +88,36 @@ async def admin_scheduler_status(
         "keys": len(keys),
         "segment_counts": seg_counts,
     }
+
+
+@router.get("/maintenance-mode")
+async def get_maintenance_mode(
+    pool: asyncpg.Pool = Depends(get_pool),
+):
+    """Статус режима профилактики панели 3x-ui (доступен боту по X-Bot-Secret)."""
+    return await maintenance_mode.get_status(pool)
+
+
+@destructive_router.post("/maintenance-mode")
+async def set_maintenance_mode(
+    body: AdminMaintenanceModeRequest,
+    principal: AdminPrincipal = Depends(verify_admin_actor),
+    pool: asyncpg.Pool = Depends(get_pool),
+):
+    """Включить/выключить режим профилактики панели 3x-ui.
+
+    Пока включён — продление ключей и оплата новых блокируются (503) на
+    уровне CreateKey.proces/KeyRenewal.extension_key.
+    """
+    status = await maintenance_mode.set(
+        pool, enabled=body.enabled, reason=body.reason, admin_tg_id=principal.admin_tg_id
+    )
+    await AuditLogger(pool).record(
+        principal.admin_tg_id,
+        "maintenance_mode",
+        "enabled" if body.enabled else "disabled",
+    )
+    return status
 
 
 @router.get("/users", response_model=List[UserResponse])

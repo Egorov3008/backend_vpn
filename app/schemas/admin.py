@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 
 
 class AdminGenerateKeyRequest(BaseModel):
@@ -20,3 +20,8 @@ class AdminChangeDateRequest(BaseModel):
 
 class AdminChangeTariffRequest(BaseModel):
     tariff_id: int
+
+
+class AdminMaintenanceModeRequest(BaseModel):
+    enabled: bool
+    reason: Optional[str] = None

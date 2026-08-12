@@ -1,6 +1,13 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from services.core.keys.utils.create_key import CreateKey
+from services.system.maintenance import maintenance_mode
+
+
+@pytest.fixture(autouse=True)
+def _maintenance_mode_off(monkeypatch):
+    """conn в этих тестах — MagicMock, не asyncpg.Pool; отключаем реальную БД-проверку."""
+    monkeypatch.setattr(maintenance_mode, "is_enabled", AsyncMock(return_value=False))
 
 
 def _make_key(grace_expiry):

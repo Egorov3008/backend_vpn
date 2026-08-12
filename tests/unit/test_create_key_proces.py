@@ -8,6 +8,13 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock
 
 from services.core.keys.utils.create_key import CreateKey
+from services.system.maintenance import PanelMaintenanceError, maintenance_mode
+
+
+@pytest.fixture(autouse=True)
+def _maintenance_mode_off(monkeypatch):
+    """conn в этих тестах — MagicMock, не asyncpg.Pool; отключаем реальную БД-проверку."""
+    monkeypatch.setattr(maintenance_mode, "is_enabled", AsyncMock(return_value=False))
 
 
 def _make_key():
@@ -69,3 +76,17 @@ async def test_proces_saves_and_returns_link_when_add_client_succeeds():
     assert result is not None
     assert result["email"] == "phantom@x.com"
     model_data.keys.save_data.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_proces_blocked_when_maintenance_mode_enabled(monkeypatch):
+    """Режим профилактики включён → PanelMaintenanceError до обращения к панели."""
+    monkeypatch.setattr(maintenance_mode, "is_enabled", AsyncMock(return_value=True))
+    create_key, model_data, xui_session = _make_create_key(add_client_return=True)
+    tariff = MagicMock(id=1, amount=100, limit_ip=1, period=1)
+
+    with pytest.raises(PanelMaintenanceError):
+        await create_key.proces(tg_id=1, tariff=tariff, server_id=2, conn=MagicMock())
+
+    xui_session.add_client.assert_not_awaited()
+    model_data.keys.save_data.assert_not_called()

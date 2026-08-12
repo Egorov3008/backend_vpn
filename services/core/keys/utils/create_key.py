@@ -11,6 +11,7 @@ from services.core.data.service import ServiceDataModel
 from services.core.keys.utils.calculator import ExpiryCalculator
 from services.core.keys.utils.formtion import FormationKey
 from services.metrics.registry import key_created_total, key_creation_errors_total
+from services.system.maintenance import PanelMaintenanceError, maintenance_mode
 
 
 class CreateKey:
@@ -55,6 +56,11 @@ class CreateKey:
                 и других специальных потоков). None = стандартное поведение
                 (берётся первый из server.inbound_ids).
         """
+
+        if await maintenance_mode.is_enabled(conn):
+            raise PanelMaintenanceError(
+                "Панель 3x-ui на профилактике — создание ключей временно недоступно"
+            )
 
         try:
             key: Optional[Key] = await self.form.form_new_key(

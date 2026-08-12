@@ -10,6 +10,7 @@ from services.core.keys.utils.inbounds import paid_inbound_ids, GRACE_PERIOD_MS
 from services.core.keys.utils.reset import KeyResetter
 from services.core.keys.utils.status import KeyStatus
 from services.core.keys.utils.updating import KeyUpdater
+from services.system.maintenance import PanelMaintenanceError, maintenance_mode
 
 
 class KeyRenewal:
@@ -45,6 +46,11 @@ class KeyRenewal:
           - ACTIVE  → обычное продление + reconciliation inbounds к платному
                       набору + panel expiryTime=grace_expiry.
         """
+        if await maintenance_mode.is_enabled(conn):
+            raise PanelMaintenanceError(
+                "Панель 3x-ui на профилактике — продление ключей временно недоступно"
+            )
+
         status = KeyStatus.of(key)
         if status == KeyStatus.GRACE:
             if self.grace_manager is None:

@@ -22,6 +22,7 @@ from services.core.gift import GiftLinkProvider
 from services.core.promotions.channel_bonus_service import ChannelBonusService
 from database.service import DataService
 from services.cache.service import CacheService
+from services.system.maintenance import PanelMaintenanceError
 
 router = APIRouter(
     prefix="/keys",
@@ -123,13 +124,16 @@ async def create_key(
     data_service = DataService()
     create_key_svc, _, _ = build_key_services(pool, service_data, cache, data_service)
 
-    result = await create_key_svc.proces(
-        tg_id=body.tg_id,
-        tariff=tariff,
-        server_id=settings.xui_server_id,
-        conn=pool,
-        number_of_months=1,
-    )
+    try:
+        result = await create_key_svc.proces(
+            tg_id=body.tg_id,
+            tariff=tariff,
+            server_id=settings.xui_server_id,
+            conn=pool,
+            number_of_months=1,
+        )
+    except PanelMaintenanceError as e:
+        raise HTTPException(status_code=503, detail=str(e))
 
     if not result:
         raise HTTPException(status_code=500, detail="Failed to create key")
@@ -166,13 +170,16 @@ async def create_trial_key(
     data_service = DataService()
     create_key_svc, _, _ = build_key_services(pool, service_data, cache, data_service)
 
-    result = await create_key_svc.proces(
-        tg_id=tg_id,
-        tariff=tariff,
-        server_id=settings.xui_server_id,
-        conn=pool,
-        number_of_months=1,
-    )
+    try:
+        result = await create_key_svc.proces(
+            tg_id=tg_id,
+            tariff=tariff,
+            server_id=settings.xui_server_id,
+            conn=pool,
+            number_of_months=1,
+        )
+    except PanelMaintenanceError as e:
+        raise HTTPException(status_code=503, detail=str(e))
 
     if not result:
         raise HTTPException(status_code=500, detail="Failed to create trial key")
@@ -271,13 +278,16 @@ async def renew_key(
     data_service = DataService()
     _, key_renewal_svc, _ = build_key_services(pool, service_data, cache, data_service)
 
-    await key_renewal_svc.extension_key(
-        key=key,
-        conn=pool,
-        server=server,
-        tariff=tariff,
-        number_of_months=body.number_of_months,
-    )
+    try:
+        await key_renewal_svc.extension_key(
+            key=key,
+            conn=pool,
+            server=server,
+            tariff=tariff,
+            number_of_months=body.number_of_months,
+        )
+    except PanelMaintenanceError as e:
+        raise HTTPException(status_code=503, detail=str(e))
 
     renewed_key = await service_data.keys.get_data(email, pool)
     if not renewed_key:
