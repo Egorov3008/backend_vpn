@@ -62,32 +62,27 @@ async def test_enter_grace_detaches_to_baseline():
 
 
 @pytest.mark.asyncio
-async def test_expire_after_grace_detaches_all_and_deletes():
+async def test_expire_after_grace_detaches_without_deleting():
+    """EXPIRED keys must be detached from all inbounds — access cut — but the
+    panel client itself must NOT be deleted automatically. Physical panel
+    deletion is admin-only (admin_delete_key / bulk 'delete expired keys')."""
     mgr, xui, md, cache, _ = _mgr()
     ok = await mgr.expire_after_grace(_key())
     assert ok is True
     # last set_inbounds call must be empty set
     assert xui.set_inbounds.call_args.args[1] == []
-    xui.delete_client.assert_awaited_once()
+    xui.delete_client.assert_not_awaited()
     cache.keys.delete.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_expire_after_grace_tolerates_missing_client():
+async def test_expire_after_grace_returns_set_inbounds_result():
     mgr, xui, md, cache, _ = _mgr()
-    xui.delete_client = AsyncMock(side_effect=Exception("not found"))
+    xui.set_inbounds = AsyncMock(return_value=False)
     ok = await mgr.expire_after_grace(_key())
-    assert ok is True  # 404 treated as already-deleted
+    assert ok is False
+    xui.delete_client.assert_not_awaited()
     cache.keys.delete.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_expire_after_grace_real_failure_returns_false_and_keeps_cache():
-    mgr, xui, md, cache, _ = _mgr()
-    xui.delete_client = AsyncMock(side_effect=Exception("panel returned 503"))
-    ok = await mgr.expire_after_grace(_key())
-    assert ok is False  # real panel failure is NOT swallowed as success
-    cache.keys.delete.assert_not_called()  # leave entry for retry
 
 
 @pytest.mark.asyncio
@@ -183,14 +178,15 @@ async def test_reconcile_converges_to_active():
 
 
 @pytest.mark.asyncio
-async def test_reconcile_expired_deletes_client():
-    """EXPIRED keys must be physically removed from the panel, not just
-    detached — reconcile delegates to expire_after_grace (delete + cache drop)."""
+async def test_reconcile_expired_detaches_without_deleting():
+    """EXPIRED keys are detached from all inbounds (access cut) and dropped
+    from cache — but reconcile delegates to expire_after_grace, which no
+    longer deletes the panel client automatically (admin-only action)."""
     mgr, xui, md, cache, _ = _mgr()
     k = _key(expiry=1000, grace_expiry=2000)  # both in the past => EXPIRED
     ok = await mgr.reconcile(k)
     assert ok is True
-    xui.delete_client.assert_awaited_once()
+    xui.delete_client.assert_not_awaited()
     cache.keys.delete.assert_awaited_once()
-    # expire_after_grace detaches [] before deleting
+    # expire_after_grace detaches to []
     assert xui.set_inbounds.call_args.args[1] == []

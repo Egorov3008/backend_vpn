@@ -125,7 +125,7 @@ class SyncScheduler:
             # Прокидываем детальную статистику панели в результат,
             # чтобы итоговое сообщение было наполнено данными.
             panel_stats = dict(panel_sync_result)
-            panel_stats["orphan_keys_removed"] = orphan_stats.get("orphan_keys_removed", 0)
+            panel_stats["orphan_keys_found"] = orphan_stats.get("orphan_keys_found", 0)
             panel_stats.setdefault("cache_load_time", f"{cache_load_time:.2f}s")
             panel_stats.setdefault("total_time", f"{total_time:.2f}s")
             panel_stats.pop("sync_time", None)
@@ -297,67 +297,35 @@ class SyncScheduler:
             return {"status": "error", "error": str(e)}
 
     async def _sweep_orphan_keys(self) -> dict:
-        """Удалить orphan keys — ключи, чей tg_id больше нет в users.
+        """Обнаруживает orphan keys — ключи, чей tg_id больше нет в users.
 
         Возникают после admin_delete_user с частично неудачным XUI-удалением:
         пользователь удалён, а key row остался (panel delete упал/вернул False).
-        Удаляет такие ключи из панели и БД+кэша. Безопасно: orphan = пользователь
-        уже удалён, повторная идемпотентная попытка на следующем цикле.
+        Панель/БД/кэш НЕ трогает — только диагностика и логирование; чистит
+        такие ключи админ вручную через admin_delete_key/admin_delete_user.
 
         Returns:
-            ``{"orphan_keys_removed": N}`` — число успешно удалённых строк.
+            ``{"orphan_keys_found": N}`` — число найденных orphan-строк.
         """
-        from client import XUISession
-        from services.cache.loader import LoadingService
-        from services.cache.key_manager import CacheKeyManager
-        from database.service import DataService
-
-        removed = 0
         try:
             async with self._pool.acquire() as conn:
                 rows = await conn.fetch(
-                    "SELECT k.email, k.inbound_id, k.client_id "
+                    "SELECT k.email "
                     "FROM keys k LEFT JOIN users u ON k.tg_id = u.tg_id "
                     "WHERE u.tg_id IS NULL"
                 )
             if not rows:
-                return {"orphan_keys_removed": 0}
+                return {"orphan_keys_found": 0}
 
-            data_service = DataService()
-            loader = LoadingService(
-                cache=self._service_data.cache_service,
-                data_service=data_service,
-                pool=self._pool,
+            emails = [r["email"] for r in rows]
+            logger.warning(
+                "orphan_sweep: найдены orphan-ключи, требуют ручного удаления админом",
+                extra={"count": len(emails), "emails": emails},
             )
-            xui = XUISession(model_service=self._service_data, loading=loader)
-
-            for r in rows:
-                email = r["email"]
-                try:
-                    ok = await xui.delete_client(email, r["inbound_id"], r["client_id"])
-                except Exception as e:
-                    logger.warning(
-                        "orphan_sweep: xui delete провален",
-                        extra={"email": email, "error": str(e)},
-                    )
-                    continue
-                if ok:
-                    await self._service_data.data_service.keys.delete(
-                        self._pool, email=email
-                    )
-                    await self._service_data.cache_service.keys.delete(
-                        CacheKeyManager.key(email)
-                    )
-                    removed += 1
-                else:
-                    logger.info(
-                        "orphan_sweep: panel delete вернул False — пропускаем",
-                        extra={"email": email},
-                    )
-            logger.info("orphan_sweep завершен", orphan_keys_removed=removed)
+            return {"orphan_keys_found": len(emails)}
         except Exception as e:
             logger.error("orphan_sweep: ошибка", error=str(e), exc_info=True)
-        return {"orphan_keys_removed": removed}
+            return {"orphan_keys_found": 0}
 
     async def run_notifications(self) -> None:
         """Run notification funnels cycle."""

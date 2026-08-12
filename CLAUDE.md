@@ -284,7 +284,7 @@ Required in `.env`:
 - `TELEGRAM_BOT_TOKEN` — for sending user notifications
 - `XUI_API_URL` / `XUI_LOGIN` / `XUI_PASSWORD` — 3x-UI panel credentials
 - `AVAILABLE_CONNECTIONS` — JSON/list of panel inbound IDs allowed for new keys (used by `FormConnectionData`; panel inbounds are filtered by this)
-- `XUI_INBOUND_ID_LANDING` — fixed panel inbound ID for landing keys (Telegram-only baseline). Paid keys are created on `[XUI_INBOUND_ID_LANDING] + AVAILABLE_CONNECTIONS`; on subscription expiry the overlay detaches, leaving `XUI_INBOUND_ID_LANDING` for `GRACE_PERIOD_DAYS` (grace window), after which the client is deleted.
+- `XUI_INBOUND_ID_LANDING` — fixed panel inbound ID for landing keys (Telegram-only baseline). Paid keys are created on `[XUI_INBOUND_ID_LANDING] + AVAILABLE_CONNECTIONS`; on subscription expiry the overlay detaches, leaving `XUI_INBOUND_ID_LANDING` for `GRACE_PERIOD_DAYS` (grace window), after which the client is fully detached from all inbounds (VPN access cut). The panel client is **not** deleted automatically — physical deletion from the panel is admin-only (`admin_delete_key` / bulk "delete expired keys" in the bot admin panel).
 - `DEFAULT_PRICING_PLAN` — default tariff ID for trial keys
 - `GRACE_PERIOD_DAYS` — telegram-only grace window (days) after paid subscription expiry (default 7; 0 disables grace). Drives `GRACE_PERIOD_MS` and the `Key.grace_expiry` field.
 - `YOOKASSA_SHOP_ID` / `YOOKASSA_SECRET_KEY` — payment processing
