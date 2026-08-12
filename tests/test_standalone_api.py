@@ -206,29 +206,6 @@ class TestXUISessionStandaloneMethods:
         assert inbound_ids == [1]
 
     @pytest.mark.asyncio
-    async def test_delete_standalone_client(self, xui_session):
-        xui_session._initialized = True
-        xui_session.xui = MagicMock()
-        xui_session.xui.client = MagicMock()
-        xui_session.xui.client.cookies = MagicMock()
-        xui_session.xui.client.cookies.jar = [
-            MagicMock(name="session", value="sess99")
-        ]
-        xui_session._is_authenticated = True
-        xui_session.server = MagicMock(api_url="http://panel", login="u", password="p")
-
-        with patch.object(
-            _StandaloneClientAPI, "delete", new_callable=AsyncMock
-        ) as mock_delete:
-            mock_delete.return_value = {"success": True}
-            result = await xui_session.delete_standalone_client(
-                "user@x.com", keep_traffic=True
-            )
-
-        assert result == {"success": True}
-        mock_delete.assert_awaited_once_with("user@x.com", keep_traffic=True)
-
-    @pytest.mark.asyncio
     async def test_add_client_returns_false_on_success_false(self, reset_circuit_breaker):
         """Панель ответила success:false (несуществующий inbound) → add_client
         обязан вернуть False, иначе CreateKey.proces сохранит фантомный ключ."""

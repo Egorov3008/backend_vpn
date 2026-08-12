@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import re
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from multiprocessing import AuthenticationError
 from typing import Optional, Any
 
@@ -768,39 +768,6 @@ class XUISession:
                 time.monotonic() - t0
             )
 
-    async def delete_old_clients(self) -> dict:
-        """Удаляет standalone-клиентов с истекшим сроком (v3.2.0 API)."""
-        await self.ensure_auth()
-        await self._ensure_standalone()
-        old_time = get_timestamp_30_days_ago()
-        try:
-            raw_list = await self._standalone.list()
-            clients = raw_list.get("obj", []) if isinstance(raw_list, dict) else raw_list
-        except Exception as e:
-            logger.error("Ошибка получения списка клиентов для удаления", error=str(e))
-            return {"deleted": 0, "failed": 0}
-
-        old_clients = [
-            c for c in clients
-            if isinstance(c, dict)
-            and c.get("expiryTime", 0) <= old_time
-            and c.get("expiryTime", 0) > 0
-        ]
-        logger.debug(
-            "Истекшие standalone клиенты получены",
-            extra={"count_client": len(old_clients)}
-        )
-        task_list = []
-        for client in old_clients:
-            task = self.delete_client(
-                email=client.get("email", ""), inbound_id=0, client_id=client.get("id", "")
-            )
-            task_list.append(task)
-        deletion_results = await asyncio.gather(*task_list)
-        successful_deletions = sum(1 for result in deletion_results if result)
-        logger.debug("Ключи удалены", extra={"count": successful_deletions})
-        return {"deleted": successful_deletions, "failed": len(old_clients) - successful_deletions}
-
     # ── Standalone Clients API helpers (v3.2.0) ──
 
     async def _ensure_standalone(self) -> None:
@@ -951,39 +918,6 @@ class XUISession:
         retry=retry_if_exception(XUIRetryPolicy.is_retryable_exception),
         reraise=True,
     )
-    async def delete_standalone_client(self, email: str, keep_traffic: bool = False) -> dict:
-        """Удаляет standalone-клиента по email (v3.2.0 API)."""
-        await self.ensure_auth()
-        await self._ensure_standalone()
-        t0 = time.monotonic()
-        xui_api_calls_total.labels(method="delete_standalone_client").inc()
-        try:
-            result = await self._standalone.delete(email, keep_traffic=keep_traffic)
-            logger.info(
-                "Standalone клиент удалён",
-                extra={"email": email, "keep_traffic": keep_traffic}
-            )
-            return result
-        except Exception as e:
-            xui_api_errors_total.labels(
-                method="delete_standalone_client", error_type=type(e).__name__
-            ).inc()
-            logger.error(
-                "Ошибка при удалении standalone клиента",
-                extra={"email": email, "error_type": type(e).__name__, "error_message": str(e), "exc_info": True}
-            )
-            raise
-        finally:
-            xui_api_duration.labels(method="delete_standalone_client").observe(
-                time.monotonic() - t0
-            )
-
-    @retry(
-        stop=stop.stop_after_attempt(3),
-        wait=wait.wait_fixed(2),
-        retry=retry_if_exception(XUIRetryPolicy.is_retryable_exception),
-        reraise=True,
-    )
     async def get_standalone_client(self, email: str) -> dict:
         """Получает standalone-клиента по email (v3.2.0 API)."""
         await self.ensure_auth()
@@ -1122,12 +1056,3 @@ class XUISession:
         # XUI API обычно не требует явного закрытия
 
 
-def get_timestamp_30_days_ago():
-    """Возвращает timestamp в миллисекундах для даты 30 дней назад"""
-    # Текущее время
-    now = datetime.now()
-    # Время 30 дней назад
-    days_ago = now - timedelta(days=30)
-    # Конвертируем в timestamp в миллисекундах
-    timestamp_ms = int(days_ago.timestamp() * 1000)
-    return timestamp_ms
