@@ -171,6 +171,7 @@ PostgreSQL + 3x-UI Panel
 - `delete_client()` — remove key
 - `get_inbound()` — fetch inbound config
 - `get_client_traffic()` — fetch client traffic stats
+- `list_clients_paged()` — raw paginated/filtered client list from panel (for reconciliation tooling, not a source of truth for status)
 
 **Error Handling:** Retry logic via `tenacity` for network/temporal errors (ConnectionError, TimeoutError). Authentication errors are non-retryable. If 3x-UI is down after retries, key operations fail with 502.
 

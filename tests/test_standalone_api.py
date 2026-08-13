@@ -119,6 +119,131 @@ class TestStandaloneClientAPI:
             }
 
     @pytest.mark.asyncio
+    async def test_list_paged_default_params(self):
+        """Без опциональных фильтров передаются только page/pageSize."""
+        api = _StandaloneClientAPI(
+            base_url="http://localhost:2053",
+            username="admin",
+            password="admin",
+            session_cookie="abc123",
+        )
+        with patch("httpx.AsyncClient.request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = MagicMock(
+                status_code=200,
+                json=MagicMock(return_value={"success": True, "obj": {"items": []}}),
+                raise_for_status=MagicMock(),
+            )
+            await api.list_paged()
+            _, kwargs = mock_req.call_args
+            assert kwargs["params"] == {"page": 1, "pageSize": 25}
+
+    @pytest.mark.asyncio
+    async def test_list_paged_all_filters_build_correct_params(self):
+        """Все опциональные фильтры собираются в params с корректными именами."""
+        api = _StandaloneClientAPI(
+            base_url="http://localhost:2053",
+            username="admin",
+            password="admin",
+            session_cookie="abc123",
+        )
+        with patch("httpx.AsyncClient.request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = MagicMock(
+                status_code=200,
+                json=MagicMock(return_value={"success": True, "obj": {"items": []}}),
+                raise_for_status=MagicMock(),
+            )
+            await api.list_paged(
+                page=3,
+                page_size=50,
+                search="user@x.com",
+                filter="expiring",
+                protocol="vless",
+                sort="expiryTime",
+                order="descend",
+            )
+            _, kwargs = mock_req.call_args
+            assert kwargs["params"] == {
+                "page": 3,
+                "pageSize": 50,
+                "search": "user@x.com",
+                "filter": "expiring",
+                "protocol": "vless",
+                "sort": "expiryTime",
+                "order": "descend",
+            }
+
+    @pytest.mark.asyncio
+    async def test_list_paged_none_values_are_stripped(self):
+        """None-значения отдельных фильтров не должны попадать в query
+        (httpx иначе сериализует их как строку 'None')."""
+        api = _StandaloneClientAPI(
+            base_url="http://localhost:2053",
+            username="admin",
+            password="admin",
+            session_cookie="abc123",
+        )
+        with patch("httpx.AsyncClient.request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = MagicMock(
+                status_code=200,
+                json=MagicMock(return_value={"success": True, "obj": {"items": []}}),
+                raise_for_status=MagicMock(),
+            )
+            await api.list_paged(search="foo", filter=None, protocol=None)
+            _, kwargs = mock_req.call_args
+            assert "filter" not in kwargs["params"]
+            assert "protocol" not in kwargs["params"]
+            assert kwargs["params"]["search"] == "foo"
+
+    @pytest.mark.asyncio
+    async def test_list_paged_uses_correct_path(self):
+        api = _StandaloneClientAPI(
+            base_url="http://localhost:2053",
+            username="admin",
+            password="admin",
+            session_cookie="abc123",
+        )
+        with patch("httpx.AsyncClient.request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = MagicMock(
+                status_code=200,
+                json=MagicMock(return_value={"success": True, "obj": {}}),
+                raise_for_status=MagicMock(),
+            )
+            await api.list_paged()
+            args, _ = mock_req.call_args
+            method, url = args
+            assert method == "GET"
+            assert url.endswith("/api/clients/list/paged")
+
+    @pytest.mark.asyncio
+    async def test_list_paged_returns_raw_response_json(self):
+        api = _StandaloneClientAPI(
+            base_url="http://localhost:2053",
+            username="admin",
+            password="admin",
+            session_cookie="abc123",
+        )
+        expected = {
+            "success": True,
+            "msg": "",
+            "obj": {
+                "items": [{"email": "user@x.com"}],
+                "total": 1,
+                "filtered": 1,
+                "page": 1,
+                "pageSize": 25,
+                "summary": {"total": 1, "active": 1, "onlineCount": 0},
+            },
+        }
+        with patch("httpx.AsyncClient.request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = MagicMock(
+                status_code=200,
+                json=MagicMock(return_value=expected),
+                raise_for_status=MagicMock(),
+            )
+            result = await api.list_paged()
+            assert result == expected
+
+    @pytest.mark.asyncio
     async def test_add_raises_on_success_false(self):
         """3x-ui возвращает HTTP 200 с success:false (напр. несуществующий inbound).
         Backend НЕ должен считать это успехом — иначе появится фантомный ключ в БД."""
@@ -204,6 +329,40 @@ class TestXUISessionStandaloneMethods:
         assert "totalGB" not in client_data
         assert client_data["subId"] == "user@x.com"
         assert inbound_ids == [1]
+
+    @pytest.mark.asyncio
+    async def test_list_clients_paged_delegates_and_unwraps_obj(self, xui_session):
+        xui_session._initialized = True
+        xui_session.xui = MagicMock()
+        xui_session.xui.client = MagicMock()
+        xui_session.xui.client.cookies = MagicMock()
+        xui_session.xui.client.cookies.jar = []
+        xui_session._is_authenticated = True
+        xui_session.server = MagicMock(api_url="http://panel", login="u", password="p")
+
+        with patch.object(
+            _StandaloneClientAPI, "_ensure_auth", new_callable=AsyncMock
+        ), patch.object(
+            _StandaloneClientAPI, "list_paged", new_callable=AsyncMock
+        ) as mock_list_paged:
+            mock_list_paged.return_value = {
+                "success": True,
+                "obj": {"items": [{"email": "a@x.com"}], "total": 1},
+            }
+            result = await xui_session.list_clients_paged(
+                page=2, page_size=10, filter="expiring"
+            )
+
+        assert result == {"items": [{"email": "a@x.com"}], "total": 1}
+        mock_list_paged.assert_awaited_once_with(
+            page=2,
+            page_size=10,
+            search=None,
+            filter="expiring",
+            protocol=None,
+            sort=None,
+            order=None,
+        )
 
     @pytest.mark.asyncio
     async def test_add_client_returns_false_on_success_false(self, reset_circuit_breaker):

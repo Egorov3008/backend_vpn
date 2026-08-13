@@ -354,6 +354,38 @@ class _StandaloneClientAPI:
         resp.raise_for_status()
         return resp.json()
 
+    async def list_paged(
+        self,
+        page: int = 1,
+        page_size: int = 25,
+        search: Optional[str] = None,
+        filter: Optional[str] = None,
+        protocol: Optional[str] = None,
+        sort: Optional[str] = None,
+        order: Optional[str] = None,
+    ) -> dict:
+        """GET /panel/api/clients/list/paged
+
+        Постраничный список standalone-клиентов панели с поиском/фильтрами.
+        Raw-доступ к данным панели "как есть" — не источник истины для
+        бизнес-логики статусов (см. KeyStatus/KeySegmentationService).
+        """
+        params = {
+            "page": page,
+            "pageSize": page_size,
+            "search": search,
+            "filter": filter,
+            "protocol": protocol,
+            "sort": sort,
+            "order": order,
+        }
+        params = {k: v for k, v in params.items() if v is not None}
+        resp = await self._request(
+            "GET", "/api/clients/list/paged", params=params
+        )
+        resp.raise_for_status()
+        return resp.json()
+
     async def list_inbounds(self) -> dict:
         """GET /api/inbounds/list"""
         resp = await self._request("GET", "/api/inbounds/list")
@@ -967,6 +999,58 @@ class XUISession:
             raise
         finally:
             xui_api_duration.labels(method="list_clients").observe(
+                time.monotonic() - t0
+            )
+
+    @retry(
+        stop=stop.stop_after_attempt(3),
+        wait=wait.wait_fixed(2),
+        retry=retry_if_exception(XUIRetryPolicy.is_retryable_exception),
+        reraise=True,
+    )
+    async def list_clients_paged(
+        self,
+        page: int = 1,
+        page_size: int = 25,
+        search: Optional[str] = None,
+        filter: Optional[str] = None,
+        protocol: Optional[str] = None,
+        sort: Optional[str] = None,
+        order: Optional[str] = None,
+    ) -> dict:
+        """Получает постраничный список standalone-клиентов панели (v3.2.0 API).
+
+        Raw-доступ к данным панели "как есть" (не источник истины для
+        бизнес-логики статусов ключей — см. KeyStatus/KeySegmentationService).
+        Возвращает сырой obj-ответ панели: {items, total, filtered, page,
+        pageSize, summary}.
+        """
+        await self.ensure_auth()
+        await self._ensure_standalone()
+        t0 = time.monotonic()
+        xui_api_calls_total.labels(method="list_clients_paged").inc()
+        try:
+            result = await self._standalone.list_paged(
+                page=page,
+                page_size=page_size,
+                search=search,
+                filter=filter,
+                protocol=protocol,
+                sort=sort,
+                order=order,
+            )
+            return result.get("obj", {}) if isinstance(result, dict) else result
+        except Exception as e:
+            xui_api_errors_total.labels(
+                method="list_clients_paged", error_type=type(e).__name__
+            ).inc()
+            logger.error(
+                "Ошибка при получении постраничного списка standalone клиентов",
+                extra={"error_type": type(e).__name__, "error_message": str(e), "exc_info": True}
+            )
+            raise
+        finally:
+            xui_api_duration.labels(method="list_clients_paged").observe(
                 time.monotonic() - t0
             )
 
