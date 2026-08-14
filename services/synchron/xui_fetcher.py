@@ -72,7 +72,7 @@ class XUIFetcher:
             Список корректных PanelClient с email и tg_id
         """
         try:
-            raw_list = await xui_session.list_clients()
+            raw_list = await xui_session.list_clients_all()
         except Exception as e:
             logger.error(
                 "Ошибка получения списка клиентов через standalone API",

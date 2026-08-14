@@ -32,7 +32,7 @@ async def test_extract_clients_includes_zero_tgid():  # noqa: PT006
     ]
 
     xui_session = AsyncMock()
-    xui_session.list_clients = AsyncMock(return_value=raw)
+    xui_session.list_clients_all = AsyncMock(return_value=raw)
 
     result = await fetcher.extract_clients(xui_session)
 
@@ -56,7 +56,7 @@ async def test_extract_clients_still_filters_invalid_email():  # noqa: PT006
         {"id": "uuid-2", "email": "valid", "tgId": 0, "inboundIds": [1]},
     ]
     xui_session = AsyncMock()
-    xui_session.list_clients = AsyncMock(return_value=raw)
+    xui_session.list_clients_all = AsyncMock(return_value=raw)
 
     result = await fetcher.extract_clients(xui_session)
 
