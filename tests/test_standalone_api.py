@@ -244,6 +244,35 @@ class TestStandaloneClientAPI:
             assert result == expected
 
     @pytest.mark.asyncio
+    async def test_external_links_payload_structure(self):
+        api = _StandaloneClientAPI(
+            base_url="http://localhost:2053",
+            username="admin",
+            password="admin",
+            session_cookie="abc123",
+        )
+        with patch("httpx.AsyncClient.request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = MagicMock(
+                status_code=200,
+                json=MagicMock(return_value={"success": True}),
+                raise_for_status=MagicMock(),
+            )
+            result = await api.external_links(
+                "user@x.com",
+                [{"kind": "subscription", "value": "https://sub.example.com/user@x.com"}],
+            )
+            args, kwargs = mock_req.call_args
+            method, url = args
+            assert method == "POST"
+            assert url.endswith("/api/clients/user@x.com/externalLinks")
+            assert kwargs["json"] == {
+                "externalLinks": [
+                    {"kind": "subscription", "value": "https://sub.example.com/user@x.com"}
+                ]
+            }
+            assert result == {"success": True}
+
+    @pytest.mark.asyncio
     async def test_add_raises_on_success_false(self):
         """3x-ui возвращает HTTP 200 с success:false (напр. несуществующий inbound).
         Backend НЕ должен считать это успехом — иначе появится фантомный ключ в БД."""
@@ -525,3 +554,118 @@ class TestXUISessionStandaloneMethods:
 
         assert _xui_circuit_breaker._state == "closed"
         assert _xui_circuit_breaker._consecutive_failures == 0
+
+    @pytest.mark.asyncio
+    async def test_add_client_registers_external_subscription_on_success(
+        self, reset_circuit_breaker
+    ):
+        """subscription_link передан и add succeeded → externalLinks вызван
+        с тем же URL, оформленным как kind='subscription'."""
+        mock_server = MagicMock()
+        mock_server.api_url = "http://localhost:8000"
+        mock_server.login = "admin"
+        mock_server.password = "admin"
+        mock_model_service = MagicMock()
+        mock_model_service.servers = MagicMock()
+        mock_model_service.servers.get_data = AsyncMock(return_value=mock_server)
+
+        session = XUISession(model_service=mock_model_service, loading=MagicMock())
+        await session.server_init()
+        session._standalone = _StandaloneClientAPI(
+            base_url="http://localhost:8000", username="admin", password="admin",
+            session_cookie="sess",
+        )
+        session._is_authenticated = True
+
+        with patch.object(
+            _StandaloneClientAPI, "add", new_callable=AsyncMock
+        ) as mock_add, patch.object(
+            _StandaloneClientAPI, "external_links", new_callable=AsyncMock
+        ) as mock_external_links:
+            mock_add.return_value = {"success": True}
+            mock_external_links.return_value = {"success": True}
+            result = await session.add_client(
+                client_id="uuid", email="user@x.com", tg_id=1, limit_ip=1,
+                inbound_ids=[1], expiry_time=0,
+                subscription_link="https://sub.example.com/user@x.com",
+            )
+
+        assert result is True
+        mock_external_links.assert_awaited_once_with(
+            "user@x.com",
+            [{"kind": "subscription", "value": "https://sub.example.com/user@x.com"}],
+        )
+
+    @pytest.mark.asyncio
+    async def test_add_client_without_subscription_link_skips_external_links(
+        self, reset_circuit_breaker
+    ):
+        """Без subscription_link (не передан) externalLinks не вызывается."""
+        mock_server = MagicMock()
+        mock_server.api_url = "http://localhost:8000"
+        mock_server.login = "admin"
+        mock_server.password = "admin"
+        mock_model_service = MagicMock()
+        mock_model_service.servers = MagicMock()
+        mock_model_service.servers.get_data = AsyncMock(return_value=mock_server)
+
+        session = XUISession(model_service=mock_model_service, loading=MagicMock())
+        await session.server_init()
+        session._standalone = _StandaloneClientAPI(
+            base_url="http://localhost:8000", username="admin", password="admin",
+            session_cookie="sess",
+        )
+        session._is_authenticated = True
+
+        with patch.object(
+            _StandaloneClientAPI, "add", new_callable=AsyncMock
+        ) as mock_add, patch.object(
+            _StandaloneClientAPI, "external_links", new_callable=AsyncMock
+        ) as mock_external_links:
+            mock_add.return_value = {"success": True}
+            result = await session.add_client(
+                client_id="uuid", email="user@x.com", tg_id=1, limit_ip=1,
+                inbound_ids=[1], expiry_time=0,
+            )
+
+        assert result is True
+        mock_external_links.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_set_external_subscription_success(self, xui_session):
+        xui_session._initialized = True
+        xui_session._is_authenticated = True
+        xui_session.server = MagicMock(api_url="http://panel", login="u", password="p")
+        xui_session._standalone = MagicMock()
+        xui_session._standalone.external_links = AsyncMock(return_value={"success": True})
+
+        result = await xui_session.set_external_subscription(
+            "user@x.com", "https://sub.example.com/user@x.com"
+        )
+
+        assert result is True
+        xui_session._standalone.external_links.assert_awaited_once_with(
+            "user@x.com",
+            [{"kind": "subscription", "value": "https://sub.example.com/user@x.com"}],
+        )
+
+    @pytest.mark.asyncio
+    async def test_set_external_subscription_failure_does_not_raise(self, xui_session):
+        """Панель недоступна/провалила externalLinks → возвращает False,
+        не пробрасывает исключение (не критичный путь)."""
+        xui_session._initialized = True
+        xui_session._is_authenticated = True
+        xui_session.server = MagicMock(api_url="http://panel", login="u", password="p")
+        xui_session._standalone = MagicMock()
+        xui_session._standalone.external_links = AsyncMock(side_effect=RuntimeError("boom"))
+
+        result = await xui_session.set_external_subscription(
+            "user@x.com", "https://sub.example.com/user@x.com"
+        )
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_set_external_subscription_empty_url_returns_false(self, xui_session):
+        result = await xui_session.set_external_subscription("user@x.com", "")
+        assert result is False

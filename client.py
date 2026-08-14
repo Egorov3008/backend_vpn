@@ -342,6 +342,16 @@ class _StandaloneClientAPI:
         resp.raise_for_status()
         return resp.json()
 
+    async def external_links(self, email: str, links: list[dict]) -> dict:
+        """POST /api/clients/{email}/externalLinks"""
+        resp = await self._request(
+            "POST",
+            f"/api/clients/{email}/externalLinks",
+            json={"externalLinks": links},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
     async def onlines(self) -> dict:
         """POST /api/clients/onlines"""
         resp = await self._request("POST", "/api/clients/onlines")
@@ -501,6 +511,36 @@ class XUISession:
                 )
                 raise
 
+    async def set_external_subscription(self, email: str, subscription_url: str) -> bool:
+        """Best-effort: регистрирует subscription_url как внешнюю подписку
+        клиента в панели (externalLinks, kind="subscription"). Не критично
+        для работы VPN — ошибка логируется и не пробрасывается наверх, чтобы
+        не ронять create/renew ключа из-за декоративной ссылки в панели."""
+        if not subscription_url:
+            return False
+        t0 = time.monotonic()
+        xui_api_calls_total.labels(method="set_external_subscription").inc()
+        try:
+            await self.ensure_auth()
+            await self._ensure_standalone()
+            await self._standalone.external_links(
+                email, [{"kind": "subscription", "value": subscription_url}]
+            )
+            return True
+        except Exception as e:
+            xui_api_errors_total.labels(
+                method="set_external_subscription", error_type=type(e).__name__
+            ).inc()
+            logger.warning(
+                "Не удалось прописать внешнюю подписку клиента (не критично)",
+                extra={"email": email, "error_type": type(e).__name__, "error_message": str(e)},
+            )
+            return False
+        finally:
+            xui_api_duration.labels(method="set_external_subscription").observe(
+                time.monotonic() - t0
+            )
+
     @retry(
         stop=stop.stop_after_attempt(3),
         wait=wait.wait_fixed(2),  # Фиксированная задержка для операций с клиентами
@@ -518,6 +558,7 @@ class XUISession:
         expiry_time: int,
         enable: bool = True,
         flow: str = "xtls-rprx-vision",
+        subscription_link: Optional[str] = None,
     ) -> Any:
         """Добавляет standalone-клиента и привязывает к inbound-ам (v3.2.0 API).
 
@@ -563,6 +604,8 @@ class XUISession:
             logger.info(
                 "Клиент успешно добавлен", extra={"email": email, "client_id": client_id}
             )
+            if subscription_link:
+                await self.set_external_subscription(email, subscription_link)
             return True
 
         except CircuitBreakerError:
@@ -635,6 +678,9 @@ class XUISession:
             )
             # reset_traffic НЕ вызываем — 3x-ui обнуляет totalGB и expiryTime (баг #6cx7ah)
             # Сброс трафика происходит через БД (used_traffic=0) после продления
+
+            if key_details.key:
+                await self.set_external_subscription(key_details.email, key_details.key)
 
             logger.info("Ключ клиента продлён", extra={"email": key_details.email})
             return True

@@ -83,6 +83,7 @@ class CreateKey:
                 limit_ip=key.limit_ip,
                 inbound_ids=key.inbound_ids or [key.inbound_id],
                 expiry_time=panel_expiry,
+                subscription_link=key.key,
             )
 
             # add_client возвращает False при провале панели (success:false,

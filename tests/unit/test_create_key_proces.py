@@ -79,6 +79,19 @@ async def test_proces_saves_and_returns_link_when_add_client_succeeds():
 
 
 @pytest.mark.asyncio
+async def test_proces_passes_key_link_as_subscription_link_to_add_client():
+    """add_client должен получать subscription_link=key.key, чтобы XUISession
+    прописал внешнюю подписку клиенту в панели."""
+    create_key, model_data, xui_session = _make_create_key(add_client_return=True)
+    tariff = MagicMock(id=1, amount=100, limit_ip=1, period=1)
+
+    await create_key.proces(tg_id=1, tariff=tariff, server_id=2, conn=MagicMock())
+
+    _, kwargs = xui_session.add_client.await_args
+    assert kwargs["subscription_link"] == "https://sub.example/phantom@x.com"
+
+
+@pytest.mark.asyncio
 async def test_proces_blocked_when_maintenance_mode_enabled(monkeypatch):
     """Режим профилактики включён → PanelMaintenanceError до обращения к панели."""
     monkeypatch.setattr(maintenance_mode, "is_enabled", AsyncMock(return_value=True))
