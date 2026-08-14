@@ -42,7 +42,10 @@ from pathlib import Path
 
 import asyncpg
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+_BACKEND_DIR = Path(__file__).resolve().parent.parent
+_REPO_ROOT = _BACKEND_DIR.parent
+sys.path.insert(0, str(_REPO_ROOT))
+sys.path.insert(0, str(_BACKEND_DIR))
 from client import XUISession  # noqa: E402
 
 ENV_PATH = os.environ.get("ENV_PATH", "/home/admin/platform/.env")
