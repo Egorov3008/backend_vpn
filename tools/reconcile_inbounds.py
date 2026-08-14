@@ -36,10 +36,14 @@
 import argparse
 import asyncio
 import os
+import sys
 import time
+from pathlib import Path
 
 import asyncpg
-import httpx
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from client import XUISession  # noqa: E402
 
 ENV_PATH = os.environ.get("ENV_PATH", "/home/admin/platform/.env")
 
@@ -63,70 +67,20 @@ def parse_list(raw: str) -> list[int]:
     return [int(x.strip()) for x in raw.split(",") if x.strip()]
 
 
-class PanelClient:
-    """Минимальный standalone-клиент 3x-ui v3.2.0 (token-first, cookie fallback)."""
+class _NoDBServers:
+    """Заставляет XUISession.server_init() взять сервер из .env
+    (get_env_server()) вместо похода в БД — см. backend/client.py:439-447."""
 
-    def __init__(self, base_url, username, password, token=None):
-        self.base = base_url.rstrip("/")
-        if not self.base.endswith("/panel"):
-            self.base += "/panel"
-        self.username = username
-        self.password = password
-        self._token = token
-        self._cookie = None
-        self._client = httpx.AsyncClient(timeout=30.0, verify=False)
+    async def get_data(self, server_id):
+        return None
 
-    async def _ensure_auth(self):
-        if self._token or self._cookie:
-            return
-        csrf = await self._client.get(f"{self.base}/csrf-token",
-                                      headers={"Accept": "application/json"})
-        csrf.raise_for_status()
-        csrf_token = csrf.json().get("obj") or csrf.json().get("csrfToken")
-        for n in ("session", "3x-ui"):
-            v = csrf.cookies.get(n)
-            if v:
-                self._cookie = v
-                break
-        login = await self._client.post(
-            f"{self.base}/login",
-            data={"username": self.username, "password": self.password},
-            headers={"X-CSRF-Token": csrf_token},
-        )
-        login.raise_for_status()
-        for n in ("session", "3x-ui"):
-            v = login.cookies.get(n)
-            if v:
-                self._cookie = v
-                break
-        if not self._cookie:
-            raise RuntimeError("no session cookie after login")
 
-    async def _req(self, method, path, **kw):
-        await self._ensure_auth()
-        headers = kw.pop("headers", {})
-        if self._token:
-            headers["Authorization"] = f"Bearer {self._token}"
-        elif self._cookie:
-            headers["Cookie"] = f"session={self._cookie}"
-        return await self._client.request(method, f"{self.base}{path}",
-                                          headers=headers, **kw)
+class _StubServiceData:
+    servers = _NoDBServers()
 
-    async def list_inbounds(self):
-        r = await self._req("GET", "/api/inbounds/list")
-        r.raise_for_status()
-        return r.json()
 
-    async def list_clients(self):
-        r = await self._req("GET", "/api/clients/list")
-        r.raise_for_status()
-        return r.json()
-
-    async def attach(self, email, inbound_ids):
-        r = await self._req("POST", f"/api/clients/{email}/attach",
-                            json={"inboundIds": inbound_ids})
-        r.raise_for_status()
-        return r.json()
+class _StubLoading:
+    pass
 
 
 def classify(tariff_id, amount, trial_id, landing_id=999) -> tuple[str, list[int] | None]:
@@ -176,11 +130,8 @@ def main():
     print(f"=== grace (sub) target : {grace_target}")
     print()
 
-    panel = PanelClient(
-        base_url=env["XUI_API_URL"],
-        username=env.get("XUI_LOGIN", ""),
-        password=env.get("XUI_PASSWORD", ""),
-        token=env.get("XUI_TOKEN") or env.get("XUI_API_TOKEN"),
+    xui_session = XUISession(
+        model_service=_StubServiceData(), loading=_StubLoading()
     )
 
     async def run():
@@ -200,8 +151,7 @@ def main():
         print(f"=== DB rows (keys): {len(db)}")
 
         # --- panel inbounds ---
-        inb = await panel.list_inbounds()
-        inb_objs = inb.get("obj", []) if isinstance(inb, dict) else (inb or [])
+        inb_objs = await xui_session.get_inbounds()
         panel_inbound_ids = sorted(int(o.get("id")) for o in inb_objs if o.get("id") is not None)
         print(f"=== panel inbound IDs: {panel_inbound_ids}")
         all_target_ids = set(sub_target) | set(free_target) | set(landing_target)
@@ -211,8 +161,7 @@ def main():
         print()
 
         # --- panel clients ---
-        lst = await panel.list_clients()
-        clients = lst.get("obj", []) if isinstance(lst, dict) else (lst or [])
+        clients = await xui_session.list_clients_all()
         now_ms = int(time.time() * 1000)
 
         rows_out = []
@@ -320,7 +269,7 @@ def main():
         ok, fail = 0, 0
         for email, missing, status, typ in to_attach:
             try:
-                resp = await panel.attach(email, missing)
+                resp = await xui_session.attach_to_inbounds(email, missing)
                 if isinstance(resp, dict) and resp.get("success") is False:
                     print(f"  FAIL {email} [{typ}/{status}]: {resp.get('msg')!r}")
                     fail += 1
