@@ -400,16 +400,53 @@ class TestXUISessionStandaloneMethods:
     @pytest.mark.asyncio
     async def test_list_clients_all_stops_on_empty_batch_even_if_total_wrong(self, xui_session):
         """Защита от зацикливания: если панель врёт про total, пустая
-        страница обрывает цикл вместо бесконечного опроса."""
+        страница обрывает цикл вместо бесконечного опроса. Но раз собранных
+        клиентов меньше заявленного total, выгрузка неполна и должна
+        бросать ошибку, а не молча возвращать усечённый список (иначе
+        DatabaseSynchronizer примет "не прочитано" за "удалено из панели"
+        и снесёт реальные ключи)."""
         pages = [
             {"items": [{"email": "a@x.com"}], "total": 999},
             {"items": [], "total": 999},
         ]
         xui_session.list_clients_paged = AsyncMock(side_effect=pages)
 
-        result = await xui_session.list_clients_all(page_size=1)
+        with pytest.raises(XUIAPIError):
+            await xui_session.list_clients_all(page_size=1)
 
-        assert result == [{"email": "a@x.com"}]
+        assert xui_session.list_clients_paged.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_list_clients_all_raises_on_malformed_page_mid_pagination(self, xui_session):
+        """Ревьюер: страница 2 из ожидаемых 3 возвращается пустой/битой
+        (например {} без обычного 'items') при total, всё ещё большем
+        накопленного — раньше это тихо давало усечённый список, теперь
+        должно бросать исключение."""
+        pages = [
+            {"items": [{"email": "a@x.com"}], "total": 3},
+            {"items": [], "total": 3},  # malformed/empty page mid-pagination
+        ]
+        xui_session.list_clients_paged = AsyncMock(side_effect=pages)
+
+        with pytest.raises(XUIAPIError):
+            await xui_session.list_clients_all(page_size=1)
+
+        assert xui_session.list_clients_paged.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_list_clients_all_dedup_matches_total_does_not_raise(self, xui_session):
+        """Легитимный случай: дубликат клиента на стыке страниц раздувает
+        len(items) перед дедупом, но после дедупа по email количество
+        ровно совпадает с total — это нормальное завершение, не бросать."""
+        pages = [
+            {"items": [{"email": "a@x.com"}, {"email": "b@x.com"}], "total": 3},
+            {"items": [{"email": "b@x.com"}, {"email": "c@x.com"}], "total": 3},
+        ]
+        xui_session.list_clients_paged = AsyncMock(side_effect=pages)
+
+        result = await xui_session.list_clients_all(page_size=2)
+
+        assert sorted(c["email"] for c in result) == ["a@x.com", "b@x.com", "c@x.com"]
         assert xui_session.list_clients_paged.await_count == 2
 
     @pytest.mark.asyncio

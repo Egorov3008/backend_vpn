@@ -1064,9 +1064,19 @@ class XUISession:
         """Выгружает всех клиентов панели через постраничный API, накапливая
         страницы до исчерпания total. Без filter/search — полная замена
         list_clients() с тем же форматом результата (list[dict]).
+
+        После завершения пагинации результат дедуплицируется по email (или
+        id, если email отсутствует) и сверяется с заявленным total: если
+        уникальных клиентов оказалось меньше total, выгрузка считается
+        неполной (например, панель вернула пустую/битую страницу
+        посередине пагинации) и метод бросает XUIAPIError вместо того,
+        чтобы молча вернуть усечённый список — иначе вызывающий код может
+        принять "не прочитано" за "удалено из панели" и снести реальные
+        ключи из БД.
         """
         items: list[dict] = []
         page = 1
+        reported_total: Optional[int] = None
         while True:
             obj = await self.list_clients_paged(
                 page=page,
@@ -1078,10 +1088,26 @@ class XUISession:
             batch = obj.get("items", []) or []
             items.extend(batch)
             total = obj.get("total", len(items))
+            reported_total = total
             if not batch or len(items) >= total:
                 break
             page += 1
-        return items
+
+        deduped: dict[object, dict] = {}
+        for item in items:
+            key = item.get("email") or item.get("id") or id(item)
+            deduped[key] = item
+        unique_items = list(deduped.values())
+
+        if reported_total is not None and len(unique_items) < reported_total:
+            raise XUIAPIError(
+                "Постраничная выгрузка клиентов панели неполна: получено "
+                f"{len(unique_items)} уникальных клиентов из заявленных "
+                f"{reported_total} (панель могла оборвать пагинацию раньше "
+                "времени)"
+            )
+
+        return unique_items
 
     @retry(
         stop=stop.stop_after_attempt(3),
