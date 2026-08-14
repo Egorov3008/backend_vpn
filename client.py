@@ -1054,6 +1054,35 @@ class XUISession:
                 time.monotonic() - t0
             )
 
+    async def list_clients_all(
+        self,
+        page_size: int = 100,
+        filter: Optional[str] = None,
+        search: Optional[str] = None,
+        protocol: Optional[str] = None,
+    ) -> list[dict]:
+        """Выгружает всех клиентов панели через постраничный API, накапливая
+        страницы до исчерпания total. Без filter/search — полная замена
+        list_clients() с тем же форматом результата (list[dict]).
+        """
+        items: list[dict] = []
+        page = 1
+        while True:
+            obj = await self.list_clients_paged(
+                page=page,
+                page_size=page_size,
+                filter=filter,
+                search=search,
+                protocol=protocol,
+            )
+            batch = obj.get("items", []) or []
+            items.extend(batch)
+            total = obj.get("total", len(items))
+            if not batch or len(items) >= total:
+                break
+            page += 1
+        return items
+
     @retry(
         stop=stop.stop_after_attempt(3),
         wait=wait.wait_fixed(2),

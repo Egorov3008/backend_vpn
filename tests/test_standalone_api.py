@@ -365,6 +365,54 @@ class TestXUISessionStandaloneMethods:
         )
 
     @pytest.mark.asyncio
+    async def test_list_clients_all_accumulates_all_pages(self, xui_session):
+        pages = [
+            {"items": [{"email": "a@x.com"}, {"email": "b@x.com"}], "total": 5},
+            {"items": [{"email": "c@x.com"}, {"email": "d@x.com"}], "total": 5},
+            {"items": [{"email": "e@x.com"}], "total": 5},
+        ]
+        xui_session.list_clients_paged = AsyncMock(side_effect=pages)
+
+        result = await xui_session.list_clients_all(page_size=2)
+
+        assert [c["email"] for c in result] == [
+            "a@x.com", "b@x.com", "c@x.com", "d@x.com", "e@x.com",
+        ]
+        assert xui_session.list_clients_paged.await_count == 3
+        xui_session.list_clients_paged.assert_any_await(
+            page=1, page_size=2, filter=None, search=None, protocol=None,
+        )
+        xui_session.list_clients_paged.assert_any_await(
+            page=3, page_size=2, filter=None, search=None, protocol=None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_list_clients_all_empty_panel_returns_empty_list(self, xui_session):
+        xui_session.list_clients_paged = AsyncMock(
+            return_value={"items": [], "total": 0}
+        )
+
+        result = await xui_session.list_clients_all()
+
+        assert result == []
+        xui_session.list_clients_paged.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_list_clients_all_stops_on_empty_batch_even_if_total_wrong(self, xui_session):
+        """Защита от зацикливания: если панель врёт про total, пустая
+        страница обрывает цикл вместо бесконечного опроса."""
+        pages = [
+            {"items": [{"email": "a@x.com"}], "total": 999},
+            {"items": [], "total": 999},
+        ]
+        xui_session.list_clients_paged = AsyncMock(side_effect=pages)
+
+        result = await xui_session.list_clients_all(page_size=1)
+
+        assert result == [{"email": "a@x.com"}]
+        assert xui_session.list_clients_paged.await_count == 2
+
+    @pytest.mark.asyncio
     async def test_add_client_returns_false_on_success_false(self, reset_circuit_breaker):
         """Панель ответила success:false (несуществующий inbound) → add_client
         обязан вернуть False, иначе CreateKey.proces сохранит фантомный ключ."""
