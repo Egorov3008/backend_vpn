@@ -14,6 +14,7 @@ from app.schemas.admin import (
     AdminChangeDateRequest,
     AdminChangeTariffRequest,
     AdminMaintenanceModeRequest,
+    AdminUpdatePanelMetaRequest,
 )
 from models.stocks.stock import Stock
 from database.service import DataService
@@ -504,6 +505,49 @@ async def admin_change_key_tariff(
     await AuditLogger(pool).record(principal.admin_tg_id, "change_tariff", email)
     await resetter.reset_key_after_renewal(pool, key)
     return {"email": email, "tariff_id": tariff.id}
+
+
+@destructive_router.post("/keys/{email}/panel-meta")
+async def admin_update_key_panel_meta(
+    email: str,
+    body: AdminUpdatePanelMetaRequest,
+    principal: AdminPrincipal = Depends(verify_admin_actor),
+    pool=Depends(get_pool),
+    service_data: ServiceDataModel = Depends(get_service_data),
+    cache: CacheService = Depends(get_cache),
+):
+    """Admin: change panel-only client metadata (group, comment).
+
+    Эти поля существуют только в 3x-ui (не хранятся в БД/кэше платформы),
+    поэтому эндпоинт мутирует исключительно панель.
+    """
+    overrides = body.model_dump(exclude_none=True)
+    if not overrides:
+        raise HTTPException(
+            status_code=400, detail="At least one of group/comment must be provided"
+        )
+
+    data_service = DataService()
+    _, _, xui = build_key_services(pool, service_data, cache, data_service)
+
+    key = await service_data.keys.get_data(email)
+    if not key:
+        key = await service_data.data_service.keys.get(pool, email=email)
+    if not key:
+        raise HTTPException(status_code=404, detail="Key not found")
+
+    try:
+        await xui.update_standalone_client(email, **overrides)
+    except Exception as e:
+        logger.error(
+            "Не удалось обновить group/comment клиента в панели",
+            email=email,
+            error=str(e),
+        )
+        raise HTTPException(status_code=500, detail="Failed to update key in panel")
+
+    await AuditLogger(pool).record(principal.admin_tg_id, "update_panel_meta", email)
+    return {"email": email, **overrides}
 
 
 @router.get("/gifts/{token}")

@@ -25,3 +25,8 @@ class AdminChangeTariffRequest(BaseModel):
 class AdminMaintenanceModeRequest(BaseModel):
     enabled: bool
     reason: Optional[str] = None
+
+
+class AdminUpdatePanelMetaRequest(BaseModel):
+    group: Optional[str] = None
+    comment: Optional[str] = None
