@@ -1,8 +1,48 @@
-from typing import List
+import json
+from typing import Dict, List
 
 from logger import logger
 
 from client import XUISession, PanelClient
+
+
+async def _fetch_id_tgid_map(xui_session: XUISession) -> Dict[str, dict]:
+    """Строит email -> {"id", "tg_id"} по данным всех инбаундов.
+
+    Пагинированный список клиентов (``list_clients_all``, standalone API
+    /clients/list) НЕ содержит полей id/tgId в ответе панели — проверено на
+    живых данных: там есть только email/traffic/expiry. Единственное место,
+    где эти поля реально есть — полный дамп инбаундов (get_inbounds),
+    settings.clients[]. Без этого обогащения _to_panel_client всегда получал
+    id="" и tg_id=0 для каждого клиента, из-за чего синхронизатор считал
+    ВСЕХ клиентов "потерявшими tgId" и пересоздавал эту привязку заново на
+    каждом прогоне синка, даже если на панели всё уже было корректно.
+    """
+    try:
+        inbounds = await xui_session.get_inbounds()
+    except Exception as e:
+        logger.error("Ошибка получения инбаундов для обогащения id/tgId", error=str(e))
+        return {}
+
+    id_tgid_map: Dict[str, dict] = {}
+    for inbound in inbounds:
+        settings = inbound.get("settings")
+        if isinstance(settings, str):
+            try:
+                settings = json.loads(settings)
+            except (ValueError, TypeError):
+                continue
+        if not isinstance(settings, dict):
+            continue
+        for raw_client in settings.get("clients", []) or []:
+            email = raw_client.get("email")
+            if not email or email in id_tgid_map:
+                continue
+            id_tgid_map[email] = {
+                "id": str(raw_client.get("id", "")),
+                "tg_id": raw_client.get("tgId") or raw_client.get("tg_id") or 0,
+            }
+    return id_tgid_map
 
 
 def _to_panel_client(raw: dict) -> PanelClient:
@@ -100,6 +140,25 @@ class XUIFetcher:
                     error=str(e),
                 )
                 continue
+
+        # Обогащаем id/tgId из инбаундов — list_clients_all их не отдаёт.
+        id_tgid_map = await _fetch_id_tgid_map(xui_session)
+        enriched = 0
+        not_found_in_inbounds = 0
+        for client in all_clients:
+            enrich = id_tgid_map.get(client.email)
+            if enrich:
+                client.id = enrich["id"]
+                client.tg_id = enrich["tg_id"]
+                enriched += 1
+            else:
+                not_found_in_inbounds += 1
+        logger.info(
+            "Клиенты обогащены id/tgId из инбаундов",
+            enriched=enriched,
+            not_found_in_inbounds=not_found_in_inbounds,
+            inbound_clients_total=len(id_tgid_map),
+        )
 
         # Фильтруем только валидных клиентов.
         # ВАЖНО: tg_id может быть 0 (например, когда на панели клиент потерял

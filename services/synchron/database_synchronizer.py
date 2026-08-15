@@ -138,7 +138,8 @@ class DatabaseSynchronizer:
                 "Восстановление tg_id на панели завершено",
                 restore_time=f"{tg_restore_time:.2f}s",
                 restored=tg_restore_stats["restored"],
-                failed=tg_restore_stats["failed"]
+                failed=tg_restore_stats["failed"],
+                rejected=tg_restore_stats["rejected"],
             )
 
             # 4. Обновляем трафик пакетно
@@ -155,6 +156,7 @@ class DatabaseSynchronizer:
             stats["restored_keys"] = restore_stats["restored_keys"]
             stats["restored_users"] = restore_stats["restored_users"]
             stats["restored_tg_ids"] = tg_restore_stats["restored"]
+            stats["rejected_tg_ids"] = tg_restore_stats["rejected"]
             stats["panel_clients"] = len(clients)
             stats["missing_keys"] = len(out_keys)
             stats["missing_users"] = len(out_users)
@@ -209,10 +211,24 @@ class DatabaseSynchronizer:
             if not client:
                 continue
 
+            if not client.id:
+                logger.warning(
+                    "Пропущено восстановление ключа: у клиента на панели пустой id",
+                    email=email,
+                    tg_id=client.tg_id,
+                )
+                continue
+
             if client.tg_id in out_users:
                 await self.key_creator.ensure_user_exists(client.tg_id)
                 restored_users += 1
 
+            logger.debug(
+                "Восстановление отсутствующего ключа: начало",
+                email=email,
+                tg_id=client.tg_id,
+                panel_client_id=client.id,
+            )
             result = await self.key_creator.create_key(client)
             if result:
                 restored_keys += 1
@@ -221,6 +237,8 @@ class DatabaseSynchronizer:
                     "Восстановлен отсутствующий ключ",
                     email=email,
                     tg_id=client.tg_id,
+                    panel_client_id=client.id,
+                    expiry_time=client.expiry_time,
                 )
 
         return {
@@ -262,34 +280,64 @@ class DatabaseSynchronizer:
         """
         restored = 0
         failed = 0
+        rejected = 0
         for client in clients:
             if not client.email or client.tg_id != 0:
                 continue
             try:
                 db_key = await self.model_data.keys.get_data(client.email)
                 if not db_key or not getattr(db_key, "tg_id", None):
+                    logger.debug(
+                        "Пропущено восстановление tgId: нет ключа/tg_id в БД",
+                        email=client.email,
+                        panel_client_id=client.id or None,
+                    )
                     continue
                 if db_key.tg_id <= 0:
                     continue
-                await xui_session.update_standalone_client(
+                result = await xui_session.update_standalone_client(
                     client.email,
                     panel_client=client,
                     tgId=db_key.tg_id,
                 )
+                # 3x-ui возвращает 200 OK даже когда сам апдейт логически отклонён
+                # (envelope {"success": false, ...}) — raise_for_status() этого
+                # не ловит, поэтому проверяем success явно, а не полагаемся на
+                # отсутствие исключения.
+                panel_success = result.get("success") if isinstance(result, dict) else None
+                if panel_success is False:
+                    rejected += 1
+                    logger.warning(
+                        "Панель отклонила восстановление tgId (success=false)",
+                        email=client.email,
+                        panel_client_id=client.id or None,
+                        target_tg_id=db_key.tg_id,
+                        panel_response=result,
+                    )
+                    continue
                 restored += 1
                 logger.info(
                     "Восстановлен tgId на панели",
                     email=client.email,
-                    tg_id=db_key.tg_id,
+                    panel_client_id=client.id or None,
+                    panel_tg_id_before=0,
+                    target_tg_id=db_key.tg_id,
+                    panel_response_success=panel_success,
                 )
             except Exception as e:
                 failed += 1
                 logger.error(
                     "Ошибка восстановления tgId на панели",
                     email=client.email,
+                    panel_client_id=client.id or None,
                     error=str(e),
                 )
-        return {"restored": restored, "failed": failed}
+        if rejected:
+            logger.warning(
+                "Часть восстановлений tgId отклонена панелью",
+                rejected=rejected,
+            )
+        return {"restored": restored, "failed": failed, "rejected": rejected}
 
     async def _update_traffic_in_batches(
         self, clients: List[PanelClient], batch_size: int
