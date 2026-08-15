@@ -119,7 +119,6 @@ CREATE TABLE IF NOT EXISTS keys (
     notified_expired_grace boolean DEFAULT false,
     landing_uid varchar(64),
     converted_tg_id bigint,
-    grace_expiry bigint,
     CONSTRAINT uq_keys_email UNIQUE (email)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS keys_pkey ON keys (tg_id, client_id);

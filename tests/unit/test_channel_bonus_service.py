@@ -10,7 +10,7 @@ def _ms(days: int) -> int:
     return days * 24 * 60 * 60 * 1000
 
 
-def make_key(email="test@vpn.ru", tg_id=123, expiry_offset_days=30, grace_offset_days=37):
+def make_key(email="test@vpn.ru", tg_id=123, expiry_offset_days=30):
     now = int(datetime.now(timezone.utc).timestamp() * 1000)
     return Key(
         tg_id=tg_id,
@@ -22,7 +22,6 @@ def make_key(email="test@vpn.ru", tg_id=123, expiry_offset_days=30, grace_offset
         tariff_id=9,
         name_tariff="Pro",
         used_traffic=1.0,
-        grace_expiry=now + _ms(grace_offset_days),
     )
 
 
@@ -84,7 +83,7 @@ async def test_claim_already_claimed(mock_pool, mock_conn, mock_xui, mock_servic
 async def test_claim_race_on_insert(mock_pool, mock_conn, mock_xui, mock_service_data):
     # SELECT говорит "не получен", но параллельный вызов успел вставить флаг —
     # INSERT ... ON CONFLICT DO NOTHING не вернул строку → already_claimed.
-    key = make_key(expiry_offset_days=30, grace_offset_days=37)
+    key = make_key(expiry_offset_days=30)
     mock_conn.fetch = AsyncMock(return_value=[dict(key.to_dict())])
     mock_conn.fetchrow = AsyncMock(return_value=None)  # INSERT конфликт
     svc = ChannelBonusService(pool=mock_pool, service_data=mock_service_data, cache=mock_service_data.cache_service, xui=mock_xui)
@@ -106,7 +105,6 @@ async def test_claim_no_active_keys(mock_pool, mock_conn, mock_xui, mock_service
         key="https://sub.example.com/abc",
         inbound_id=11,
         tariff_id=9,
-        grace_expiry=now - _ms(1),
     )
     mock_conn.fetch = AsyncMock(return_value=[dict(expired.to_dict())])
     svc = ChannelBonusService(pool=mock_pool, service_data=mock_service_data, cache=mock_service_data.cache_service, xui=mock_xui)
@@ -124,7 +122,7 @@ async def test_claim_no_active_keys(mock_pool, mock_conn, mock_xui, mock_service
 
 @pytest.mark.asyncio
 async def test_claim_single_key_extends(mock_pool, mock_conn, mock_xui, mock_service_data):
-    key = make_key(expiry_offset_days=30, grace_offset_days=37)
+    key = make_key(expiry_offset_days=30)
     mock_conn.fetch = AsyncMock(return_value=[dict(key.to_dict())])
     svc = ChannelBonusService(pool=mock_pool, service_data=mock_service_data, cache=mock_service_data.cache_service, xui=mock_xui)
 
@@ -135,7 +133,7 @@ async def test_claim_single_key_extends(mock_pool, mock_conn, mock_xui, mock_ser
     assert result.new_expiry_time is not None
     assert result.new_expiry_date is not None
 
-    # Панель продлена до grace_expiry
+    # Панель продлена до нового expiry_time
     assert mock_xui.extend_client_key.called
     # БД обновлена
     update_call = [c for c in mock_conn.execute.call_args_list if "UPDATE keys" in str(c) and "expiry_time = $1" in str(c)]
@@ -144,8 +142,8 @@ async def test_claim_single_key_extends(mock_pool, mock_conn, mock_xui, mock_ser
 
 @pytest.mark.asyncio
 async def test_claim_multiple_keys_choose(mock_pool, mock_conn, mock_xui, mock_service_data):
-    key1 = make_key(email="key1@vpn.ru", expiry_offset_days=30, grace_offset_days=37)
-    key2 = make_key(email="key2@vpn.ru", expiry_offset_days=60, grace_offset_days=67)
+    key1 = make_key(email="key1@vpn.ru", expiry_offset_days=30)
+    key2 = make_key(email="key2@vpn.ru", expiry_offset_days=60)
     mock_conn.fetch = AsyncMock(return_value=[dict(key1.to_dict()), dict(key2.to_dict())])
     svc = ChannelBonusService(pool=mock_pool, service_data=mock_service_data, cache=mock_service_data.cache_service, xui=mock_xui)
 
@@ -165,8 +163,8 @@ async def test_claim_multiple_keys_choose(mock_pool, mock_conn, mock_xui, mock_s
 
 @pytest.mark.asyncio
 async def test_claim_specific_key(mock_pool, mock_conn, mock_xui, mock_service_data):
-    key1 = make_key(email="key1@vpn.ru", expiry_offset_days=30, grace_offset_days=37)
-    key2 = make_key(email="key2@vpn.ru", expiry_offset_days=60, grace_offset_days=67)
+    key1 = make_key(email="key1@vpn.ru", expiry_offset_days=30)
+    key2 = make_key(email="key2@vpn.ru", expiry_offset_days=60)
     mock_conn.fetch = AsyncMock(return_value=[dict(key1.to_dict()), dict(key2.to_dict())])
     svc = ChannelBonusService(pool=mock_pool, service_data=mock_service_data, cache=mock_service_data.cache_service, xui=mock_xui)
 

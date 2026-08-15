@@ -75,6 +75,7 @@ class KeyCreator:
                 return None
 
             tariff_id = await self.tariff_matcher.match(client)
+            tariff = await self.model_data.tariffs.get_data(tariff_id, conn=self.pool)
 
             sub_url = settings.xui_subscription_url or server.subscription_url
             link = (

@@ -386,14 +386,7 @@ async def admin_mass_renew(
             old_expiry = key.expiry_time
             base_expiry = max(old_expiry, now_ms)
             new_expiry = base_expiry + (body.days * 24 * 3600 * 1000)
-            key.expiry_time = new_expiry
 
-            # Синхронизируем inbound-набор с .env перед продлением.
-            # Повторяет логику KeyRenewal.extension_key (grace→active ветка):
-            # конвергируем к paid_inbound_ids() = BASELINE_INBOUNDS + LIST_AVAILABLE_CONNECTIONS.
-            # set_inbounds идемпотентен и best-effort: ошибки логируются, но не
-            # блокируют операцию — reconcile-цикл (3ч) вытянет расхождения,
-            # а extend_client_key важнее для пользователя.
             inbound_ok = await xui.set_inbounds(key.email, paid_inbound_ids())
             if not inbound_ok:
                 logger.warning(
@@ -402,8 +395,9 @@ async def admin_mass_renew(
                     operation="mass_renew",
                     admin_tg_id=principal.admin_tg_id,
                 )
-
+            key.expiry_time = new_expiry
             await xui.extend_client_key(key)
+
             await service_data.keys.update(pool, key, {"email": key.email})
             await resetter.reset_key_after_renewal(pool, key)
 

@@ -12,7 +12,7 @@ def _ms(days: int) -> int:
     return days * 24 * 60 * 60 * 1000
 
 
-def make_key(email="a@x.c", tg_id=123, created_days_ago=10, expiry_offset_days=30, grace_offset_days=37):
+def make_key(email="a@x.c", tg_id=123, created_days_ago=10, expiry_offset_days=30):
     now = int(datetime.now(timezone.utc).timestamp() * 1000)
     return Key(
         tg_id=tg_id,
@@ -23,7 +23,6 @@ def make_key(email="a@x.c", tg_id=123, created_days_ago=10, expiry_offset_days=3
         inbound_id=11,
         tariff_id=9,
         created_at=now - _ms(created_days_ago),
-        grace_expiry=now + _ms(grace_offset_days),
     )
 
 

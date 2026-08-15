@@ -1,4 +1,8 @@
-"""Тесты endpoint /api/v1/admin/grace-bonus-stats и сервиса GraceBonusStatsService."""
+"""Тесты endpoint /api/v1/admin/grace-bonus-stats и сервиса GraceBonusStatsService.
+
+Grace-модель удалена из бэкенда; сервис теперь отдаёт только метрики
+канального бонуса (cumulative/today/yesterday), без "grace"-ключа.
+"""
 from unittest.mock import AsyncMock
 
 import pytest
@@ -7,11 +11,6 @@ from services.grace_bonus_stats import GraceBonusStatsService
 
 
 EXPECTED = {
-    "grace": {
-        "currently_in_grace": 3,
-        "expired_after_grace": {"cumulative": 10, "today": 1, "yesterday": 2},
-        "renewed_from_grace": {"cumulative": 5, "today": 0, "yesterday": 1},
-    },
     "channel_bonus": {"cumulative": 7, "today": 1, "yesterday": 0},
 }
 
@@ -47,7 +46,7 @@ class _Pool:
 
 
 @pytest.mark.asyncio
-async def test_grace_bonus_stats_endpoint_returns_service_result(api_client, monkeypatch):
+async def test_channel_bonus_stats_endpoint_returns_service_result(api_client, monkeypatch):
     """Endpoint отдаёт результат сервиса и проходит auth-override."""
     monkeypatch.setattr(
         GraceBonusStatsService, "get", AsyncMock(return_value=EXPECTED)
@@ -55,26 +54,25 @@ async def test_grace_bonus_stats_endpoint_returns_service_result(api_client, mon
     r = await api_client.get("/api/v1/admin/grace-bonus-stats")
     assert r.status_code == 200
     assert r.json() == EXPECTED
+    assert "grace" not in r.json()
 
 
 @pytest.mark.asyncio
 async def test_service_aggregates_in_expected_order():
-    """fetchval вызывается 10 раз в порядке метрик; ответ собирается корректно."""
-    # порядок: currently_in_grace, expired_cum, expired_today, expired_yesterday,
-    # renewed_cum, renewed_today, renewed_yesterday, bonus_cum, bonus_today, bonus_yesterday
-    conn = _Conn([3, 10, 1, 2, 5, 0, 1, 7, 1, 0])
+    """fetchval вызывается 3 раза в порядке метрик: cumulative, today, yesterday."""
+    conn = _Conn([7, 1, 0])
     service = GraceBonusStatsService(_Pool(conn))
     result = await service.get()
 
     assert result == EXPECTED
-    # 10 запросов, все с COUNT(*)
-    assert len(conn.queries) == 10
+    # 3 запроса, все с COUNT(*)
+    assert len(conn.queries) == 3
     assert all("COUNT(*)" in q for q in conn.queries)
-    # ключевые таблицы присутствуют
+    # ключевая таблица присутствует, grace-таблицы больше не запрашиваются
     joined = "\n".join(conn.queries)
-    assert "FROM keys" in joined
-    assert "FROM grace_renewal_log" in joined
     assert "FROM user_promo_claims" in joined
+    assert "FROM grace_renewal_log" not in joined
+    assert "FROM keys" not in joined
     # promo_id передан параметром $1, не inline — проверяем аргумент вызова
     promo_calls = [c for c in conn.calls if c and c[0] == "channel_subscription_bonus"]
     assert len(promo_calls) == 3  # cumulative + today + yesterday

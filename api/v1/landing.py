@@ -32,15 +32,19 @@ from pydantic import BaseModel
 
 from app.auth import verify_bot_secret
 from app.dependencies import get_cache, get_pool, get_service_data
-from app.factories import build_key_services, build_grace_manager
+from app.factories import build_key_services
+from client import XUISession
 from config import DEFAULT_PRICING_PLAN, settings
 from database.service import DataService
 from logger import logger
 from models import Tariff
 from models.referrals.referral_redemption import ReferralRedemption
 from services.cache.key_manager import CacheKeyManager
+from services.cache.loader import LoadingService
 from services.cache.service import CacheService
 from services.core.data.service import ServiceDataModel
+from services.core.keys.utils.calculator import ExpiryCalculator
+from services.core.keys.utils.landing_upgrade import upgrade_landing_key
 from services.core.user.utils.saver import SeverUser
 from services.core.user.utils.trial import TrialService
 
@@ -860,15 +864,26 @@ async def claim_key(
     if not user:
         raise HTTPException(status_code=404, detail="User not registered")
 
-    # Апгрейд того же клиента: attach [11,12], trial expiry, grace_expiry,
-    # перенос tg_id на реальный. Happ-URL (key.key) сохраняется.
-    # converted_tg_id ставится до вызова — upgrade_from_landing читает его,
-    # чтобы перенести tg_id (transfer_tg). При провале откатываем, иначе
-    # key_obj (живой объект кеша на cache-hit) остался бы «привязанным» и
-    # повторный клик упёрся бы в already_claimed без рабочего ключа.
+    # Апгрейд того же клиента: attach [11,12], trial expiry, перенос tg_id
+    # на реальный. Happ-URL (key.key) сохраняется. converted_tg_id ставится
+    # до вызова — upgrade_landing_key читает его, чтобы перенести tg_id
+    # (transfer_tg). При провале откатываем, иначе key_obj (живой объект
+    # кеша на cache-hit) остался бы «привязанным» и повторный клик упёрся
+    # бы в already_claimed без рабочего ключа.
     key_obj.converted_tg_id = body.tg_id
-    grace = build_grace_manager(pool, service_data, cache, DataService())
-    upgraded = await grace.upgrade_from_landing(key_obj, trial_tariff, number_of_months=1)
+    loading = LoadingService(cache=cache, data_service=DataService(), pool=pool)
+    xui = XUISession(model_service=service_data, loading=loading)
+    new_expiry = ExpiryCalculator().key_duration_new_key(trial_tariff.period, 1)
+    upgraded = await upgrade_landing_key(
+        xui_session=xui,
+        model_data=service_data,
+        cache=cache,
+        pool=pool,
+        key=key_obj,
+        tariff=trial_tariff,
+        new_expiry=new_expiry,
+        transfer_tg=True,
+    )
     if not upgraded:
         key_obj.converted_tg_id = None  # откат, чтобы повторный клик мог retry
         raise HTTPException(status_code=500, detail="Failed to upgrade landing key")
@@ -888,9 +903,9 @@ async def claim_key(
     await _attach_referral_if_any(pool, service_data, cache, tg_ref, body.tg_id, raw_ref_token=body.ref_token)
 
     logger.info(
-        "Landing key привязан к юзеру и апгрейдирован (trial + grace)",
+        "Landing key привязан к юзеру и апгрейдирован (trial)",
         landing_uid=landing_uid, tg_id=body.tg_id, email=upgraded.email,
-        new_expiry_ms=upgraded.expiry_time, grace_expiry_ms=upgraded.grace_expiry,
+        new_expiry_ms=upgraded.expiry_time,
     )
 
     return {

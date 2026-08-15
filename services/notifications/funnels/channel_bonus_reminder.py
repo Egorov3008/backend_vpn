@@ -70,17 +70,17 @@ def _extract_channel_username(channel_url: str | None) -> str | None:
 
 
 def _select_anchor_key(keys: list[Key]) -> Optional[Key]:
-    """Активный/grace ключ с максимальным expiry_time; None если нет."""
+    """Активный ключ с максимальным expiry_time; None если нет."""
     anchor: Optional[Key] = None
     for k in keys:
-        if KeyStatus.of(k) in (KeyStatus.ACTIVE, KeyStatus.GRACE):
+        if KeyStatus.of(k) == KeyStatus.ACTIVE:
             if anchor is None or (k.expiry_time or 0) > (anchor.expiry_time or 0):
                 anchor = k
     return anchor
 
 
 class ChannelBonusReminderFunnel:
-    """3 напоминания не-подписанным с active/grace-ключом."""
+    """3 напоминания не-подписанным с active-ключом."""
 
     funnel_id = "channel_bonus_reminder"
 
@@ -95,7 +95,7 @@ class ChannelBonusReminderFunnel:
         if not channel:
             return False
 
-        # 1. cheap: есть active/grace ключ?
+        # 1. cheap: есть active ключ?
         anchor = _select_anchor_key(ctx.keys)
         if anchor is None:
             return False

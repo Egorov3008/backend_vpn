@@ -1,18 +1,9 @@
-"""Сервис метрик grace-периода и канального бонуса.
+"""Сервис метрик канального бонуса.
 
-Отдаёт админу:
-- Grace: сейчас в grace (срез), истекли после grace, продлены из grace.
-- Канальный бонус: воспользовались подпиской на канал.
+Отдаёт админу факт использования бонуса «+N дней за подписку на канал»
+(cumulative + today + yesterday).
 
-Каждая метрика (кроме среза «сейчас в grace») — cumulative + today + yesterday.
-
-Источники:
-- keys.grace_expiry / keys.expiry_time (ms) — статус GRACE и момент истечения
-  grace выводятся из полей; истории переходов нет, но «истекли после grace»
-  выводимо из grace_expiry.
-- grace_renewal_log — журнал продлений из grace (миграция 018). Cumulative
-  считается с момента внедрения журнала.
-- user_promo_claims (promo_id='channel_subscription_bonus') — факт бонуса.
+Источник: user_promo_claims (promo_id='channel_subscription_bonus').
 """
 
 from datetime import datetime, timedelta, timezone
@@ -26,7 +17,7 @@ PROMO_CHANNEL_BONUS = "channel_subscription_bonus"
 
 
 class GraceBonusStatsService:
-    """Считает cumulative + today/yesterday метрики по grace и канальному бонусу."""
+    """Считает cumulative + today/yesterday метрики по канальному бонусу."""
 
     def __init__(self, pool: asyncpg.Pool):
         self.pool = pool
@@ -37,53 +28,8 @@ class GraceBonusStatsService:
         today_end = today_start + timedelta(days=1)
         yesterday_start = today_start - timedelta(days=1)
 
-        # ms-границы для BIGINT-полей keys.expiry_time / keys.grace_expiry
-        now_ms = int(now.timestamp() * 1000)
-        today_start_ms = int(today_start.timestamp() * 1000)
-        today_end_ms = today_start_ms + 86_400_000
-        yesterday_start_ms = today_start_ms - 86_400_000
-
         try:
             async with self.pool.acquire() as conn:
-                currently_in_grace = await conn.fetchval(
-                    "SELECT COUNT(*) FROM keys "
-                    "WHERE grace_expiry IS NOT NULL "
-                    "AND expiry_time <= $1 AND grace_expiry > $1",
-                    now_ms,
-                )
-
-                expired_cumulative = await conn.fetchval(
-                    "SELECT COUNT(*) FROM keys "
-                    "WHERE grace_expiry IS NOT NULL AND grace_expiry < $1",
-                    now_ms,
-                )
-                expired_today = await conn.fetchval(
-                    "SELECT COUNT(*) FROM keys "
-                    "WHERE grace_expiry IS NOT NULL "
-                    "AND grace_expiry >= $1 AND grace_expiry < $2",
-                    today_start_ms, today_end_ms,
-                )
-                expired_yesterday = await conn.fetchval(
-                    "SELECT COUNT(*) FROM keys "
-                    "WHERE grace_expiry IS NOT NULL "
-                    "AND grace_expiry >= $1 AND grace_expiry < $2",
-                    yesterday_start_ms, today_start_ms,
-                )
-
-                renewed_cumulative = await conn.fetchval(
-                    "SELECT COUNT(*) FROM grace_renewal_log"
-                )
-                renewed_today = await conn.fetchval(
-                    "SELECT COUNT(*) FROM grace_renewal_log "
-                    "WHERE occurred_at >= $1 AND occurred_at < $2",
-                    today_start, today_end,
-                )
-                renewed_yesterday = await conn.fetchval(
-                    "SELECT COUNT(*) FROM grace_renewal_log "
-                    "WHERE occurred_at >= $1 AND occurred_at < $2",
-                    yesterday_start, today_start,
-                )
-
                 bonus_cumulative = await conn.fetchval(
                     "SELECT COUNT(*) FROM user_promo_claims "
                     "WHERE promo_id = $1",
@@ -104,19 +50,6 @@ class GraceBonusStatsService:
             raise
 
         return {
-            "grace": {
-                "currently_in_grace": currently_in_grace,
-                "expired_after_grace": {
-                    "cumulative": expired_cumulative,
-                    "today": expired_today,
-                    "yesterday": expired_yesterday,
-                },
-                "renewed_from_grace": {
-                    "cumulative": renewed_cumulative,
-                    "today": renewed_today,
-                    "yesterday": renewed_yesterday,
-                },
-            },
             "channel_bonus": {
                 "cumulative": bonus_cumulative,
                 "today": bonus_today,

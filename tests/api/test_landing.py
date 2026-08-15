@@ -246,7 +246,7 @@ async def test_pseudo_tg_id_is_negative_and_deterministic():
 
 @pytest.mark.asyncio
 async def test_claim_new_user(api_client, mock_service_data, monkeypatch):
-    """Новый юзер → ключ привязан, апгрейдирован через GraceManager, trial=1, converted."""
+    """Новый юзер → ключ привязан, апгрейдирован через upgrade_landing_key, trial=1, converted."""
     from api.v1 import landing as landing_module
 
     landing_uid = "claimuid123456"
@@ -262,18 +262,13 @@ async def test_claim_new_user(api_client, mock_service_data, monkeypatch):
     trial_tariff = MagicMock(id=10, name_tariff="trial7", period=7, amount=0.0, limit_ip=1)
     mock_service_data.tariffs.get_data = AsyncMock(return_value=trial_tariff)
 
-    # Патчим GraceManager.upgrade_from_landing → возвращает апгрейднутый ключ
+    # Патчим upgrade_landing_key → возвращает апгрейднутый ключ
     upgraded = MagicMock()
     upgraded.email = "landing_claim@anon"
     upgraded.key = "vless://test@example.com"
     upgraded.expiry_time = int((time.time() + 7 * 24 * 3600) * 1000)
-    upgraded.grace_expiry = upgraded.expiry_time + 7 * 86_400_000
-    grace = MagicMock()
-    grace.upgrade_from_landing = AsyncMock(return_value=upgraded)
-    monkeypatch.setattr(
-        landing_module, "build_grace_manager",
-        lambda *a, **k: grace,
-    )
+    upgrade_mock = AsyncMock(return_value=upgraded)
+    monkeypatch.setattr(landing_module, "upgrade_landing_key", upgrade_mock)
     # Патчим TrialService, чтобы не шёл в реальную БД
     monkeypatch.setattr(
         landing_module.TrialService, "installation_trial",
@@ -296,7 +291,7 @@ async def test_claim_new_user(api_client, mock_service_data, monkeypatch):
     assert key.converted_tg_id == 999
     # Срок из апгрейднутого ключа
     assert data["expires_at_ms"] > int((time.time() + 24 * 3600) * 1000)
-    grace.upgrade_from_landing.assert_awaited_once()
+    upgrade_mock.assert_awaited_once()
     mock_service_data.users.update.assert_awaited_once()  # server_id 2→1
 
 
@@ -382,7 +377,7 @@ async def test_claim_key_not_found(api_client, mock_service_data):
 
 @pytest.mark.asyncio
 async def test_claim_panel_extend_fails(api_client, mock_service_data, monkeypatch):
-    """upgrade_from_landing вернул None → 500, converted_tg_id откатывается."""
+    """upgrade_landing_key вернул None → 500, converted_tg_id откатывается."""
     from api.v1 import landing as landing_module
 
     landing_uid = "claimuid_xuifail"
@@ -394,11 +389,8 @@ async def test_claim_panel_extend_fails(api_client, mock_service_data, monkeypat
     trial_tariff = MagicMock(id=10, name_tariff="trial7", period=7, amount=0.0, limit_ip=1)
     mock_service_data.tariffs.get_data = AsyncMock(return_value=trial_tariff)
 
-    grace = MagicMock()
-    grace.upgrade_from_landing = AsyncMock(return_value=None)
     monkeypatch.setattr(
-        landing_module, "build_grace_manager",
-        lambda *a, **k: grace,
+        landing_module, "upgrade_landing_key", AsyncMock(return_value=None)
     )
     _override_cache(_mock_cache())
 
@@ -939,17 +931,14 @@ async def test_claim_triggers_attach_referral(
     trial_tariff = MagicMock(id=10, name_tariff="trial7", period=7, amount=0.0, limit_ip=1)
     mock_service_data.tariffs.get_data = AsyncMock(return_value=trial_tariff)
 
-    # Patch GraceManager.upgrade_from_landing
+    # Patch upgrade_landing_key
     from api.v1 import landing as landing_module
     upgraded = MagicMock()
     upgraded.email = "claim_ref@anon"
     upgraded.key = "vless://test@example.com"
     upgraded.expiry_time = int((time.time() + 7 * 24 * 3600) * 1000)
-    upgraded.grace_expiry = upgraded.expiry_time + 7 * 86_400_000
-    grace = MagicMock()
-    grace.upgrade_from_landing = AsyncMock(return_value=upgraded)
     monkeypatch.setattr(
-        landing_module, "build_grace_manager", lambda *a, **k: grace
+        landing_module, "upgrade_landing_key", AsyncMock(return_value=upgraded)
     )
     monkeypatch.setattr(
         landing_module.TrialService, "installation_trial",
@@ -1040,11 +1029,8 @@ async def test_claim_without_cookie_no_merge(api_client, mock_service_data, monk
     upgraded.email = "claim_noref@anon"
     upgraded.key = "vless://test@example.com"
     upgraded.expiry_time = int((time.time() + 7 * 24 * 3600) * 1000)
-    upgraded.grace_expiry = upgraded.expiry_time + 7 * 86_400_000
-    grace = MagicMock()
-    grace.upgrade_from_landing = AsyncMock(return_value=upgraded)
     monkeypatch.setattr(
-        landing_module, "build_grace_manager", lambda *a, **k: grace
+        landing_module, "upgrade_landing_key", AsyncMock(return_value=upgraded)
     )
     monkeypatch.setattr(
         landing_module.TrialService, "installation_trial",
@@ -1093,10 +1079,9 @@ async def test_claim_with_ref_token_in_body_triggers_merge(
     upgraded.email = "claim_ref_body@anon"
     upgraded.key = "vless://test@example.com"
     upgraded.expiry_time = int((time.time() + 7 * 24 * 3600) * 1000)
-    upgraded.grace_expiry = upgraded.expiry_time + 7 * 86_400_000
-    grace = MagicMock()
-    grace.upgrade_from_landing = AsyncMock(return_value=upgraded)
-    monkeypatch.setattr(landing_module, "build_grace_manager", lambda *a, **k: grace)
+    monkeypatch.setattr(
+        landing_module, "upgrade_landing_key", AsyncMock(return_value=upgraded)
+    )
     monkeypatch.setattr(
         landing_module.TrialService, "installation_trial", AsyncMock(return_value=user)
     )

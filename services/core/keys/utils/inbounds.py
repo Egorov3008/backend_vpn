@@ -1,12 +1,14 @@
-"""Inbound-set helpers for the grace model.
+"""Inbound-set helpers for key creation/renewal.
 
 XUI_INBOUND_ID_LANDING (7) is the always-on baseline inbound.
-AVAILABLE_CONNECTIONS (env; [2,3,4,5] in this deployment) is the paid overlay, toggled by subscription state.
+AVAILABLE_CONNECTIONS (env; [2,3,4,5] in this deployment) is the paid overlay.
+Subscription keys are created with the full baseline+overlay set and stay
+there — the 3x-ui panel cuts access on its own once its client's
+``expiryTime`` passes, so nothing here toggles inbounds by status.
 """
 from config import (
     LIST_AVAILABLE_CONNECTIONS,
     settings,
-    GRACE_PERIOD_DAYS,
     DEFAULT_PRICING_PLAN,
 )
 from models import Tariff  # noqa: F401  (type hint only)
@@ -17,8 +19,6 @@ BASELINE_INBOUNDS: list[int] = (
 )
 # Paid overlay (full VPN), filtered to env list.
 PAID_OVERLAY_INBOUNDS: list[int] = list(LIST_AVAILABLE_CONNECTIONS)
-
-GRACE_PERIOD_MS: int = GRACE_PERIOD_DAYS * 86_400_000
 
 _TRIAL_TARIFF_ID = int(DEFAULT_PRICING_PLAN)
 
@@ -34,26 +34,8 @@ def paid_inbound_ids() -> list[int]:
     return out
 
 
-def grace_inbound_ids() -> list[int]:
-    """grace: baseline only (telegram)."""
-    return list(BASELINE_INBOUNDS)
-
-
-def expired_inbound_ids() -> list[int]:
-    """expired: no inbounds (client disabled/deleted)."""
-    return []
-
-
-def expected_inbound_ids(status: str) -> list[int]:
-    if status == "active":
-        return paid_inbound_ids()
-    if status == "grace":
-        return grace_inbound_ids()
-    return expired_inbound_ids()
-
-
 def is_subscription(tariff) -> bool:
-    """A subscription is a paid tariff OR the trial tariff (both get grace)."""
+    """A subscription is a paid tariff OR the trial tariff."""
     if tariff is None:
         return False
     return (getattr(tariff, "amount", 0) or 0) > 0 or int(getattr(tariff, "id", 0)) == _TRIAL_TARIFF_ID

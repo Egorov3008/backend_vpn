@@ -9,7 +9,7 @@ def make_user(tg_id=123):
     return User(tg_id=tg_id)
 
 
-def make_key(email="test@vpn.ru", tg_id=123, expiry_offset_days=30, grace_offset_days=37):
+def make_key(email="test@vpn.ru", tg_id=123, expiry_offset_days=30):
     now = int(datetime.now(timezone.utc).timestamp() * 1000)
     return Key(
         tg_id=tg_id,
@@ -21,7 +21,6 @@ def make_key(email="test@vpn.ru", tg_id=123, expiry_offset_days=30, grace_offset
         tariff_id=9,
         name_tariff="Pro",
         used_traffic=1.0,
-        grace_expiry=now + grace_offset_days * 86_400_000,
     )
 
 

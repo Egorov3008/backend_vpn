@@ -11,13 +11,12 @@ from typing import List, Optional
 import asyncpg
 
 from client import XUISession
-from config import GRACE_PERIOD_DAYS, settings
+from config import settings
 from logger import logger
 from models import Key, User
 from services.cache.key_manager import CacheKeyManager
 from services.cache.service import CacheService
 from services.core.data.service import ServiceDataModel
-from services.core.keys.utils.inbounds import GRACE_PERIOD_MS, paid_inbound_ids
 from services.core.keys.utils.reset import KeyResetter
 from services.core.keys.utils.status import KeyStatus
 
@@ -98,9 +97,9 @@ class ChannelBonusService:
                     logger.info("Канальный бонус уже получен", tg_id=tg_id)
                     return ChannelBonusResult(status="already_claimed")
 
-                # 2. Находим активные/grace ключи пользователя
+                # 2. Находим активные ключи пользователя
                 keys = await self._load_user_keys(conn, tg_id)
-                eligible = [k for k in keys if KeyStatus.of(k) in (KeyStatus.ACTIVE, KeyStatus.GRACE)]
+                eligible = [k for k in keys if KeyStatus.of(k) == KeyStatus.ACTIVE]
                 if not eligible:
                     # Нет активных ключей — флаг не ставим, пользователь
                     # сможет получить бонус позже, когда создаст ключ.
@@ -152,7 +151,7 @@ class ChannelBonusService:
                 tg_id, client_id, email, created_at, expiry_time, key,
                 inbound_id, notified_10h, notified_24h, tariff_id,
                 limit_ip, notified_expired_grace, converted_tg_id,
-                landing_uid, grace_expiry
+                landing_uid
             FROM keys
             WHERE tg_id = $1
             """,
@@ -188,32 +187,18 @@ class ChannelBonusService:
         return dt.strftime("%Y-%m-%d %H:%M")
 
     async def _extend_key(self, conn: asyncpg.Connection, key: Key) -> ChannelBonusResult:
-        """Продлевает ключ на bonus_days с корректным grace_expiry."""
+        """Продлевает ключ на bonus_days."""
         now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
         bonus_ms = _ms(self.bonus_days)
 
+        old_expiry = key.expiry_time
         new_expiry = max(key.expiry_time, now_ms) + bonus_ms
-        new_grace = new_expiry + GRACE_PERIOD_MS
 
-        status = KeyStatus.of(key)
-
-        # Для grace-ключа восстанавливаем paid overlay
-        if status == KeyStatus.GRACE:
-            if not await self.xui.set_inbounds(key.email, paid_inbound_ids()):
-                logger.error(
-                    "ChannelBonusService: не удалось восстановить paid overlay",
-                    email=key.email,
-                )
-                raise RuntimeError("Не удалось восстановить paid overlay для grace-ключа")
-
-        # Панель всегда хранит grace_expiry как expiryTime
-        saved_expiry = key.expiry_time
-        key.expiry_time = new_grace
-        key.grace_expiry = new_grace
+        key.expiry_time = new_expiry
         panel_ok = await self.xui.extend_client_key(key)
-        key.expiry_time = saved_expiry
 
         if not panel_ok:
+            key.expiry_time = old_expiry
             logger.error("ChannelBonusService: не удалось продлить ключ в панели", email=key.email)
             raise RuntimeError("Не удалось продлить ключ в 3x-UI панели")
 
@@ -222,19 +207,15 @@ class ChannelBonusService:
             """
             UPDATE keys
             SET expiry_time = $1,
-                grace_expiry = $2,
                 notified_10h = FALSE,
                 notified_24h = FALSE
-            WHERE email = $3
+            WHERE email = $2
             """,
             new_expiry,
-            new_grace,
             key.email,
         )
 
         # Обновляем объект и кеш
-        key.expiry_time = new_expiry
-        key.grace_expiry = new_grace
         key.notified_10h = False
         key.notified_24h = False
         await self.cache.keys.set(CacheKeyManager.key(key.email), key)
@@ -244,9 +225,8 @@ class ChannelBonusService:
             tg_id=key.tg_id,
             email=key.email,
             bonus_days=self.bonus_days,
-            old_expiry=saved_expiry,
+            old_expiry=old_expiry,
             new_expiry=new_expiry,
-            new_grace=new_grace,
         )
 
         return ChannelBonusResult(

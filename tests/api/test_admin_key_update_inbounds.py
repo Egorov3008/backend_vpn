@@ -1,9 +1,10 @@
 """Tests: admin destructive endpoints must sync inbound set to .env before extend.
 
-Mirrors the grace→active branch of KeyRenewal.extension_key:
 admin_mass_renew, admin_change_key_date, admin_change_key_tariff must call
 xui.set_inbounds(key.email, paid_inbound_ids()) before xui.extend_client_key,
-and must continue best-effort if set_inbounds returns False.
+and must continue best-effort if set_inbounds returns False. This is now the
+single unconditional code path (the old grace_expiry conditional branching
+was removed along with the grace-period model).
 """
 from unittest.mock import AsyncMock, MagicMock, patch
 

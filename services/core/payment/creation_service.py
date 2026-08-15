@@ -1,11 +1,17 @@
 from typing import Optional, Dict, Any
 
+from asyncpg import Pool
+
+from client import XUISession
 from logger import logger
 
+from services.cache.service import CacheService
+from services.core.keys.utils.calculator import ExpiryCalculator
 from services.core.keys.utils.create_key import CreateKey
+from services.core.keys.utils.inbounds import BASELINE_INBOUNDS
+from services.core.keys.utils.landing_upgrade import upgrade_landing_key
 from services.core.payment.processor import PaymentProcessor
 from services.core.notifications.protocols import INotifier
-from services.core.keys.utils.inbounds import grace_inbound_ids
 
 
 class KeyCreationService:
@@ -21,27 +27,31 @@ class KeyCreationService:
         processor: PaymentProcessor,
         create_key: CreateKey,
         notifier: Optional[INotifier] = None,
-        grace_manager=None,
+        xui_session: Optional[XUISession] = None,
+        cache: Optional[CacheService] = None,
+        pool: Optional[Pool] = None,
     ):
         self.processor = processor
         self.create_key = create_key
         self.notifier = notifier
-        # landing-upgrade flow is implemented in Task 9 (KeyCreationService.process).
-        self.grace_manager = grace_manager
+        # landing-upgrade flow (см. _find_landing_origin_key/process ниже).
+        self.xui_session = xui_session
+        self.cache = cache
+        self.pool = pool
+        self.expiry = ExpiryCalculator()
 
     async def _find_landing_origin_key(self, tg_id: int):
         """Найти landing-ключ юзера, готовый к апгрейду:
-        landing_uid set, converted_tg_id == tg_id, grace_expiry is None,
-        inbound set == baseline (telegram-only)."""
+        landing_uid set, converted_tg_id == tg_id, ещё не апгрейжен
+        (inbound set == baseline, telegram-only)."""
         try:
             keys = await self.processor._model_service.keys.get_all()
         except Exception:
             return None
-        baseline = set(grace_inbound_ids())
+        baseline = set(BASELINE_INBOUNDS)
         for k in keys or []:
             if (getattr(k, "landing_uid", None)
                     and getattr(k, "converted_tg_id", None) == tg_id
-                    and getattr(k, "grace_expiry", None) is None
                     and set(getattr(k, "inbound_ids", None) or []) == baseline):
                 return k
         return None
@@ -80,13 +90,23 @@ class KeyCreationService:
                 paid_amount=self.processor.amount,
             )
 
-            # Landing-upgrade: если у юзера есть landing-ключ [7] без grace —
+            # Landing-upgrade: если у юзера есть неапгрейженный landing-ключ [7] —
             # апгрейдим тот же клиент (Happ-URL сохраняется), не создаём новый.
-            if self.grace_manager is not None:
+            if self.xui_session is not None and self.cache is not None and self.pool is not None:
                 landing_key = await self._find_landing_origin_key(self.processor.tg_id)
                 if landing_key is not None:
-                    upgraded = await self.grace_manager.upgrade_from_landing(
-                        landing_key, tariff, self.processor.number_of_months
+                    new_expiry = self.expiry.key_duration_new_key(
+                        tariff.period, self.processor.number_of_months
+                    )
+                    upgraded = await upgrade_landing_key(
+                        xui_session=self.xui_session,
+                        model_data=self.processor._model_service,
+                        cache=self.cache,
+                        pool=self.pool,
+                        key=landing_key,
+                        tariff=tariff,
+                        new_expiry=new_expiry,
+                        transfer_tg=True,
                     )
                     if upgraded is not None:
                         logger.info(
@@ -101,7 +121,7 @@ class KeyCreationService:
                             "email": upgraded.email,
                         }
                     logger.warning(
-                        "[Цена:CreateKey] upgrade_from_landing провален, создаём новый ключ",
+                        "[Цена:CreateKey] upgrade_landing_key провален, создаём новый ключ",
                         tg_id=self.processor.tg_id,
                     )
 

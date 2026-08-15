@@ -1,4 +1,4 @@
-"""Tests for inbound-set helpers (grace model).
+"""Tests for inbound-set helpers.
 
 Assertions are env-derived (read from `config`) so they hold against the real
 repo-root .env, not hardcoded to any particular inbound list.
@@ -20,7 +20,7 @@ def test_baseline_and_overlay():
     assert ib.PAID_OVERLAY_INBOUNDS == list(LIST_AVAILABLE_CONNECTIONS)
 
 
-def test_paid_grace_expired_sets():
+def test_paid_inbound_ids():
     expected_baseline = (
         [settings.xui_inbound_id_landing] if settings.xui_inbound_id_landing else []
     )
@@ -31,24 +31,6 @@ def test_paid_grace_expired_sets():
             seen.add(i)
             expected_paid.append(int(i))
     assert ib.paid_inbound_ids() == expected_paid
-    assert ib.grace_inbound_ids() == expected_baseline
-    assert ib.expired_inbound_ids() == []
-
-
-def test_expected_inbound_ids_by_status():
-    expected_baseline = (
-        [settings.xui_inbound_id_landing] if settings.xui_inbound_id_landing else []
-    )
-    seen = set()
-    expected_paid = []
-    for i in expected_baseline + list(LIST_AVAILABLE_CONNECTIONS):
-        if i not in seen:
-            seen.add(i)
-            expected_paid.append(int(i))
-    assert ib.expected_inbound_ids("active") == expected_paid
-    assert ib.expected_inbound_ids("grace") == expected_baseline
-    assert ib.expected_inbound_ids("expired") == []
-    assert ib.expected_inbound_ids("none") == []
 
 
 def test_is_subscription_paid_and_trial():
@@ -58,8 +40,3 @@ def test_is_subscription_paid_and_trial():
     assert ib.is_subscription(paid) is True
     assert ib.is_subscription(trial) is True
     assert ib.is_subscription(free) is False
-
-
-def test_grace_period_ms():
-    assert ib.GRACE_PERIOD_DAYS == settings.grace_period_days
-    assert ib.GRACE_PERIOD_MS == settings.grace_period_days * 86_400_000

@@ -150,9 +150,7 @@ CREATE TABLE IF NOT EXISTS keys
     server_info JSONB,
     converted_tg_id BIGINT,
     landing_uid VARCHAR(64),
-    -- Planned end of the telegram-only grace window (ms). NULL = no grace.
-    grace_expiry BIGINT,
-    -- Флаг отправки уведомления об окончании grace-окна (см. key_expired_grace funnel).
+    -- Флаг отправки уведомления об истечении ключа (см. key_expired_grace funnel).
     notified_expired_grace BOOLEAN DEFAULT FALSE,
     UNIQUE (tg_id, client_id),
     UNIQUE (email)
@@ -174,22 +172,6 @@ CREATE TABLE IF NOT EXISTS user_promo_claims
 );
 
 CREATE INDEX IF NOT EXISTS idx_user_promo_claims_tg_id ON user_promo_claims(tg_id);
-
--- ============================================================================
--- 5b. Grace renewal log — журнал продлений ключей из состояния grace
--- ============================================================================
--- См. миграцию 018. Поле keys.grace_expiry переписывается при продлении, поэтому
--- историю «продлено из grace» нельзя вывести из текущих данных.
-CREATE TABLE IF NOT EXISTS grace_renewal_log
-(
-    id SERIAL PRIMARY KEY,
-    email TEXT NOT NULL,
-    tg_id BIGINT NOT NULL,
-    occurred_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_grace_renewal_log_occurred_at
-    ON grace_renewal_log(occurred_at);
 
 -- ============================================================================
 -- 5c. Admin audit log — журнал деструктивных admin-операций

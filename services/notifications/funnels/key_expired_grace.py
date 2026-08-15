@@ -1,4 +1,4 @@
-"""Воронка уведомлений об истёкших ключах (grace-период)."""
+"""Воронка уведомлений об истёкших ключах (N часов после истечения оплаченного периода)."""
 
 from datetime import datetime, timedelta
 from typing import Optional

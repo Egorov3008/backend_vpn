@@ -10,7 +10,7 @@ def _maintenance_mode_off(monkeypatch):
     monkeypatch.setattr(maintenance_mode, "is_enabled", AsyncMock(return_value=False))
 
 
-def _make_key(grace_expiry):
+def _make_key(expiry_time=2000):
     k = MagicMock()
     k.client_id = "uuid-1"
     k.email = "a@b.c"
@@ -18,8 +18,7 @@ def _make_key(grace_expiry):
     k.limit_ip = 1
     k.inbound_ids = [7, 11, 12]
     k.inbound_id = 7
-    k.expiry_time = 2000
-    k.grace_expiry = grace_expiry
+    k.expiry_time = expiry_time
     k.key = "https://sub.example/a@b.c"
     return k
 
@@ -37,8 +36,9 @@ def _create_key(key):
 
 
 @pytest.mark.asyncio
-async def test_subscription_uses_grace_expiry_as_panel_expiry():
-    ck, xui = _create_key(_make_key(grace_expiry=9000))
+async def test_proces_uses_key_expiry_time_as_panel_expiry():
+    """panel_expiry is taken directly from key.expiry_time — no fallback logic."""
+    ck, xui = _create_key(_make_key(expiry_time=9000))
     tariff = MagicMock(id=5, amount=100.0, limit_ip=1, period=1)
     await ck.proces(tg_id=1, tariff=tariff, server_id=2, conn=MagicMock())
     _, kwargs = xui.add_client.call_args
@@ -46,8 +46,8 @@ async def test_subscription_uses_grace_expiry_as_panel_expiry():
 
 
 @pytest.mark.asyncio
-async def test_non_subscription_uses_expiry_time():
-    ck, xui = _create_key(_make_key(grace_expiry=None))
+async def test_proces_free_tariff_uses_expiry_time():
+    ck, xui = _create_key(_make_key(expiry_time=2000))
     tariff = MagicMock(id=2, amount=0.0, limit_ip=1, period=1)
     await ck.proces(tg_id=1, tariff=tariff, server_id=2, conn=MagicMock())
     _, kwargs = xui.add_client.call_args

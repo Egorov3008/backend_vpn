@@ -58,7 +58,6 @@ async def test_sync_restores_tg_id_on_panel_when_db_has_it():
 
     # В кэше (БД) ключ 6cx7ah с tg_id=397349989
     db_key = MagicMock()
-    db_key.grace_expiry = None
     db_key.email = "6cx7ah"
     db_key.tg_id = 397349989
     model_data.keys.get_all = AsyncMock(return_value=[db_key])
@@ -117,7 +116,6 @@ async def test_restore_tg_id_does_not_disable_key():
     xui_fetcher.extract_clients = AsyncMock(return_value=[panel_client])
 
     db_key = MagicMock()
-    db_key.grace_expiry = None
     db_key.email = "6cx7ah"
     db_key.tg_id = 397349989
     model_data.keys.get_all = AsyncMock(return_value=[db_key])
@@ -165,7 +163,6 @@ async def test_sync_does_not_restore_tg_id_when_both_match():
     xui_fetcher.extract_clients = AsyncMock(return_value=[panel_client])
 
     db_key = MagicMock()
-    db_key.grace_expiry = None
     db_key.email = "ffoxhn"
     db_key.tg_id = 383952206
     model_data.keys.get_all = AsyncMock(return_value=[db_key])
@@ -207,7 +204,6 @@ async def test_sync_db_expiry_not_overwritten_by_panel_zero():
     xui_fetcher.extract_clients = AsyncMock(return_value=[panel_client])
 
     db_key = MagicMock()
-    db_key.grace_expiry = None
     db_key.email = "ffoxhn"
     db_key.tg_id = 383952206
     db_key.expiry_time = 1783337068246
@@ -254,7 +250,6 @@ async def test_sync_db_expiry_not_overwritten_by_panel_past():
     xui_fetcher.extract_clients = AsyncMock(return_value=[panel_client])
 
     db_key = MagicMock()
-    db_key.grace_expiry = None
     db_key.email = "ffoxhn"
     db_key.tg_id = 383952206
     db_key.expiry_time = 1783337068246
