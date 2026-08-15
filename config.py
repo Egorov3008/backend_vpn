@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     # 3x-UI panel
     api_url: str = Field(default="", alias="XUI_API_URL")
     xui_subscription_url: str = Field(default="", alias="XUI_SUB")
+    external_subscription_url: str = Field(default="", alias="EXTERNAL_SUB_URL")
     admin_username: str = Field(default="", alias="XUI_LOGIN")
     admin_password: str = Field(default="", alias="XUI_PASSWORD")
     xui_web_base_path: str = Field(default="/", alias="XUI_WEB_BASE_PATH")
@@ -54,8 +55,9 @@ class Settings(BaseSettings):
     mvp_shared_key_email: str = Field(default="", alias="MVP_SHARED_KEY_EMAIL")
 
     # Landing page
-    # Separate 3x-UI inbound for anonymous 24h keys. Must also be in
-    # AVAILABLE_CONNECTIONS so form_data can pick it up.
+    # Separate 3x-UI inbound for anonymous 24h keys. Landing-only — NOT part
+    # of a paid/trial key's inbound set (see paid_inbound_ids()), so it does
+    # not need to be in AVAILABLE_CONNECTIONS.
     xui_inbound_id_landing: int = Field(default=0, alias="XUI_INBOUND_ID_LANDING")
     # HMAC secret for signed landing cookies. Falls back to bot_secret_key if empty.
     landing_cookie_secret: str = Field(default="", alias="LANDING_COOKIE_SECRET")
@@ -113,6 +115,7 @@ settings = Settings()
 DATABASE_URL: str = settings.database_url or core_settings.database_url
 API_URL: str = settings.api_url
 XUI_SUBSCRIPTION_URL: str = settings.xui_subscription_url or settings.api_url
+EXTERNAL_SUBSCRIPTION_URL: str = settings.external_subscription_url
 ADMIN_USERNAME: str = settings.admin_username
 ADMIN_PASSWORD: str = settings.admin_password
 XUI_WEB_BASE_PATH: str = settings.xui_web_base_path

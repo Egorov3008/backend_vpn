@@ -7,6 +7,7 @@ proces сохранял фантомный ключ в БД и рапортов�
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
+from config import settings
 from services.core.keys.utils.create_key import CreateKey
 from services.system.maintenance import PanelMaintenanceError, maintenance_mode
 
@@ -79,16 +80,20 @@ async def test_proces_saves_and_returns_link_when_add_client_succeeds():
 
 
 @pytest.mark.asyncio
-async def test_proces_passes_key_link_as_subscription_link_to_add_client():
-    """add_client должен получать subscription_link=key.key, чтобы XUISession
-    прописал внешнюю подписку клиенту в панели."""
+async def test_proces_passes_external_sub_url_as_subscription_link_to_add_client():
+    """add_client должен получать subscription_link, построенный из
+    EXTERNAL_SUB_URL + email (панельная externalLinks-ссылка), а НЕ key.key
+    (это отдельная, рабочая ссылка подписки на XUI_SUB, отдаётся юзеру
+    отдельно)."""
     create_key, model_data, xui_session = _make_create_key(add_client_return=True)
     tariff = MagicMock(id=1, amount=100, limit_ip=1, period=1)
 
     await create_key.proces(tg_id=1, tariff=tariff, server_id=2, conn=MagicMock())
 
     _, kwargs = xui_session.add_client.await_args
-    assert kwargs["subscription_link"] == "https://sub.example/phantom@x.com"
+    assert kwargs["subscription_link"] == (
+        f"{settings.external_subscription_url}/phantom@x.com"
+    )
 
 
 @pytest.mark.asyncio

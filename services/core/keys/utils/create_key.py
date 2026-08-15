@@ -4,6 +4,7 @@ from typing import Optional
 
 import asyncpg
 
+from config import settings
 from client import XUISession
 from logger import logger
 from models import Tariff, Key
@@ -74,6 +75,14 @@ class CreateKey:
                 return None
 
             panel_expiry = key.expiry_time
+            # externalLinks в панели — decorative-ссылка на EXTERNAL_SUB_URL,
+            # НЕ key.key (тот строится на XUI_SUB и является реальной
+            # рабочей ссылкой подписки, отдаётся пользователю отдельно).
+            external_subscription_link = (
+                f"{settings.external_subscription_url}/{key.email}"
+                if settings.external_subscription_url
+                else None
+            )
             add_result = await self.xui_session.add_client(
                 client_id=key.client_id,
                 email=key.email,
@@ -81,7 +90,7 @@ class CreateKey:
                 limit_ip=key.limit_ip,
                 inbound_ids=key.inbound_ids or [key.inbound_id],
                 expiry_time=panel_expiry,
-                subscription_link=key.key,
+                subscription_link=external_subscription_link,
             )
 
             # add_client возвращает False при провале панели (success:false,

@@ -12,7 +12,7 @@
   - ключ работает 24ч и автоматически умирает
   - limit_ip=1 (1 устройство)
   - подписанная HMAC-кука tg_landing_id на 90 дней (только для state)
-  - inbound изолирован (XUI_INBOUND_ID_LANDING) — см. также .env AVAILABLE_CONNECTIONS
+  - inbound изолирован (XUI_INBOUND_ID_LANDING), не входит в AVAILABLE_CONNECTIONS
 """
 from __future__ import annotations
 

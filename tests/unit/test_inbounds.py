@@ -21,12 +21,11 @@ def test_baseline_and_overlay():
 
 
 def test_paid_inbound_ids():
-    expected_baseline = (
-        [settings.xui_inbound_id_landing] if settings.xui_inbound_id_landing else []
-    )
+    """paid_inbound_ids() is AVAILABLE_CONNECTIONS only — BASELINE_INBOUNDS
+    (landing inbound) is not part of a paid/trial key's inbound set."""
     expected_paid = []
     seen = set()
-    for i in expected_baseline + list(LIST_AVAILABLE_CONNECTIONS):
+    for i in list(LIST_AVAILABLE_CONNECTIONS):
         if i not in seen:
             seen.add(i)
             expected_paid.append(int(i))

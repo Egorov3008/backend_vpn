@@ -679,8 +679,15 @@ class XUISession:
             # reset_traffic НЕ вызываем — 3x-ui обнуляет totalGB и expiryTime (баг #6cx7ah)
             # Сброс трафика происходит через БД (used_traffic=0) после продления
 
-            if key_details.key:
-                await self.set_external_subscription(key_details.email, key_details.key)
+            # externalLinks в панели — decorative-ссылка на EXTERNAL_SUB_URL,
+            # НЕ key_details.key (реальная рабочая ссылка подписки на XUI_SUB).
+            if settings.external_subscription_url:
+                external_subscription_link = (
+                    f"{settings.external_subscription_url}/{key_details.email}"
+                )
+                await self.set_external_subscription(
+                    key_details.email, external_subscription_link
+                )
 
             logger.info("Ключ клиента продлён", extra={"email": key_details.email})
             return True
