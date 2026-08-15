@@ -94,7 +94,7 @@ async def test_extend_client_key_does_not_call_reset_traffic():
     # ГЛАВНОЕ: reset_traffic НЕ должен быть вызван!
     standalone.reset_traffic.assert_not_called()
 
-    # Внешняя подписка прописывается EXTERNAL_SUB_URL + email, НЕ key.key
+    # Внешняя подписка прописывается EXTERNAL_SUB_URL как есть, НЕ key.key
     # (key.key — рабочая ссылка подписки на XUI_SUB, отдаётся юзеру отдельно;
     # externalLinks в панели — decorative-ссылка на EXTERNAL_SUB_URL).
     from config import settings
@@ -103,7 +103,7 @@ async def test_extend_client_key_does_not_call_reset_traffic():
         "test@example.com",
         [{
             "kind": "subscription",
-            "value": f"{settings.external_subscription_url}/test@example.com",
+            "value": settings.external_subscription_url,
         }],
     )
 

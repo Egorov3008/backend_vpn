@@ -681,12 +681,11 @@ class XUISession:
 
             # externalLinks в панели — decorative-ссылка на EXTERNAL_SUB_URL,
             # НЕ key_details.key (реальная рабочая ссылка подписки на XUI_SUB).
+            # EXTERNAL_SUB_URL уже указывает на конкретный shared-конфиг —
+            # email к нему не добавляется.
             if settings.external_subscription_url:
-                external_subscription_link = (
-                    f"{settings.external_subscription_url}/{key_details.email}"
-                )
                 await self.set_external_subscription(
-                    key_details.email, external_subscription_link
+                    key_details.email, settings.external_subscription_url
                 )
 
             logger.info("Ключ клиента продлён", extra={"email": key_details.email})

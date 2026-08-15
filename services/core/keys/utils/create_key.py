@@ -78,11 +78,9 @@ class CreateKey:
             # externalLinks в панели — decorative-ссылка на EXTERNAL_SUB_URL,
             # НЕ key.key (тот строится на XUI_SUB и является реальной
             # рабочей ссылкой подписки, отдаётся пользователю отдельно).
-            external_subscription_link = (
-                f"{settings.external_subscription_url}/{key.email}"
-                if settings.external_subscription_url
-                else None
-            )
+            # EXTERNAL_SUB_URL уже указывает на конкретный shared-конфиг —
+            # email к нему не добавляется.
+            external_subscription_link = settings.external_subscription_url or None
             add_result = await self.xui_session.add_client(
                 client_id=key.client_id,
                 email=key.email,
