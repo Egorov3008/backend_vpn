@@ -3,8 +3,8 @@ Regression-тест: при синхронизации панели с БД, е�
 но в БД tg_id > 0, синхронизатор должен восстановить tgId на панели
 (источник истины для tg_id — наша БД).
 
-Также проверяем, что источник истины для expiry_time — БД,
-а не панель, чтобы панель не обнуляла/сдвигала срок действия.
+Поведение синка expiry_time (панель — источник истины) покрыто отдельно
+в test_traffic_updater_expiry.py — этот файл только про восстановление tg_id.
 """
 from unittest.mock import AsyncMock, MagicMock, Mock
 
@@ -187,95 +187,3 @@ async def test_sync_does_not_restore_tg_id_when_both_match():
 
     xui_session.update_standalone_client.assert_not_awaited()
     assert result.get("restored_tg_ids", 0) == 0
-
-
-@pytest.mark.asyncio
-async def test_sync_db_expiry_not_overwritten_by_panel_zero():
-    """Когда expiry_time на панели == 0, БД сохраняет свой срок действия."""
-    xui_fetcher, cache_comparator, key_creator, traffic_updater, model_data, pool = _make_synchronizer()
-
-    panel_client = PanelClient(
-        id="uuid-1",
-        email="ffoxhn",
-        tg_id=383952206,
-        expiry_time=0,
-        inbound_ids=[39],
-    )
-    xui_fetcher.extract_clients = AsyncMock(return_value=[panel_client])
-
-    db_key = MagicMock()
-    db_key.email = "ffoxhn"
-    db_key.tg_id = 383952206
-    db_key.expiry_time = 1783337068246
-    model_data.keys.get_all = AsyncMock(return_value=[db_key])
-    model_data.users.get_all = AsyncMock(return_value=[])
-    model_data.keys.get_data = AsyncMock(return_value=db_key)
-    model_data.servers.get_data = AsyncMock(return_value=None)
-    cache_comparator.set_cache_data = AsyncMock()
-    cache_comparator.set_panel_data = MagicMock()
-    cache_comparator.compare = Mock(return_value=([], [], []))
-
-    traffic_updater.fetch_traffic_batch = AsyncMock(return_value={
-        "ffoxhn": {"download": 0, "upload": 0}
-    })
-    traffic_updater.update_key_with_traffic = AsyncMock(return_value=True)
-
-    sync = _build_synchronizer(xui_fetcher, cache_comparator, key_creator, traffic_updater, model_data, pool)
-    sync.get_client_session = AsyncMock()
-
-    xui_session = MagicMock()
-    xui_session.server_id = 2
-    xui_session.update_standalone_client = AsyncMock()
-
-    await sync.sync_data(xui_session)
-
-    traffic_updater.update_key_with_traffic.assert_awaited_once()
-    args = traffic_updater.update_key_with_traffic.await_args
-    passed_key = args.args[1]  # (pool, key, client, traffic_data)
-    assert passed_key.expiry_time == 1783337068246
-
-
-@pytest.mark.asyncio
-async def test_sync_db_expiry_not_overwritten_by_panel_past():
-    """Когда expiry_time в БД впереди панели, БД сохраняет свой срок действия."""
-    xui_fetcher, cache_comparator, key_creator, traffic_updater, model_data, pool = _make_synchronizer()
-
-    panel_client = PanelClient(
-        id="uuid-1",
-        email="ffoxhn",
-        tg_id=383952206,
-        expiry_time=1700000000000,
-        inbound_ids=[39],
-    )
-    xui_fetcher.extract_clients = AsyncMock(return_value=[panel_client])
-
-    db_key = MagicMock()
-    db_key.email = "ffoxhn"
-    db_key.tg_id = 383952206
-    db_key.expiry_time = 1783337068246
-    model_data.keys.get_all = AsyncMock(return_value=[db_key])
-    model_data.users.get_all = AsyncMock(return_value=[])
-    model_data.keys.get_data = AsyncMock(return_value=db_key)
-    model_data.servers.get_data = AsyncMock(return_value=None)
-    cache_comparator.set_cache_data = AsyncMock()
-    cache_comparator.set_panel_data = MagicMock()
-    cache_comparator.compare = Mock(return_value=([], [], []))
-
-    traffic_updater.fetch_traffic_batch = AsyncMock(return_value={
-        "ffoxhn": {"download": 0, "upload": 0}
-    })
-    traffic_updater.update_key_with_traffic = AsyncMock(return_value=True)
-
-    sync = _build_synchronizer(xui_fetcher, cache_comparator, key_creator, traffic_updater, model_data, pool)
-    sync.get_client_session = AsyncMock()
-
-    xui_session = MagicMock()
-    xui_session.server_id = 2
-    xui_session.update_standalone_client = AsyncMock()
-
-    await sync.sync_data(xui_session)
-
-    traffic_updater.update_key_with_traffic.assert_awaited_once()
-    args = traffic_updater.update_key_with_traffic.await_args
-    passed_key = args.args[1]  # (pool, key, client, traffic_data)
-    assert passed_key.expiry_time == 1783337068246

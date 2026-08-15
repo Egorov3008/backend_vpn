@@ -142,7 +142,9 @@ class TrafficUpdater:
 
         Args:
             key: Объект ключа для обновления
-            client: Клиент из XUI (PanelClient) — для синхронизации expiry_time и limit_ip
+            client: Клиент из XUI (PanelClient) — источник истины для
+                expiry_time (включая 0, означающий "без срока действия")
+                и limit_ip; БД синхронизируется с панелью, а не наоборот
             traffic_data: Данные о трафике
 
         Returns:
@@ -158,11 +160,12 @@ class TrafficUpdater:
                 logger.debug("Не удалось извлечь информацию о трафике", email=key.email)
                 return False
 
-            # Обновляем данные ключа.
-            # expiry_time берём из БД (источник истины для срока действия),
-            # чтобы панель не перезаписывала его случайным zero/stale значением.
+            # Обновляем данные ключа: панель — источник истины для expiry_time
+            # (в т.ч. 0, что для отдельных тарифов означает "без срока действия")
+            # и limit_ip.
             key.used_traffic = traffic_info["used_bytes"]
             key.limit_ip = client.limit_ip
+            key.expiry_time = client.expiry_time
 
             await self.model_data.keys.update(pool, key, {"email": key.email})
 
