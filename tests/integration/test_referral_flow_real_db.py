@@ -7,7 +7,7 @@ This test exercises the production path:
 3. Create a paid payment for the referred user.
 4. Call PaymentRouter.route(payment_id) with the real db pool.
 5. Assert that the referrer gets 10% balance bonus and the referred user
-   gets check_referral=true and +3 days added to any keys.
+   gets check_referral=true (no key expiry change).
 
 Skipped unless TEST_DATABASE_URL is set. For local docker compose:
     TEST_DATABASE_URL=postgresql://egorov:tMtB1Ri9JRphMct@127.0.0.1:5433/bot_db \
@@ -395,12 +395,12 @@ async def test_full_referral_bonus_flow(payment_router, pool, service_data):
         assert reward_row is not None
         assert round(float(reward_row["reward_value"]), 2) == expected_bonus
 
-        # Referred key was extended by +3 days (259_200_000 ms)
+        # Referred user's key expiry is untouched by the referral bonus
         key_row = await conn.fetchrow(
             "SELECT expiry_time FROM keys WHERE tg_id=$1 ORDER BY email", referred.tg_id
         )
         assert key_row is not None
-        assert key_row["expiry_time"] >= now_ms + 30 * 24 * 3600 * 1000 + 3 * 24 * 3600 * 1000 - 1000
+        assert key_row["expiry_time"] == now_ms + 30 * 24 * 3600 * 1000
 
 
 @pytest.mark.asyncio

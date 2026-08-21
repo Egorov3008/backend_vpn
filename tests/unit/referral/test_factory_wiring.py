@@ -36,11 +36,6 @@ async def test_build_payment_router_wires_referral_bonus_service():
     assert isinstance(router.bonus_service, ReferralBonusService), (
         "bonus_service must be an instance of ReferralBonusService"
     )
-    # #6: бонус-сервис должен получать xui_session и cache, чтобы продлевать
-    # ключ реферала в 3x-UI панели + DB + cache согласованно.
-    assert router.bonus_service._xui is not None, (
-        "bonus_service must be wired with xui_session (panel expiry on +3 days)"
-    )
     assert router.bonus_service._cache is cache, (
         "bonus_service must reuse the same CacheService instance passed to the factory"
     )

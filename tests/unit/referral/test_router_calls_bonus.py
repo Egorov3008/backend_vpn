@@ -78,10 +78,9 @@ async def test_route_calls_referral_bonus_service():
 
 @pytest.mark.asyncio
 async def test_route_swallows_bonus_failure_so_payment_succeeds():
-    """#7: ошибка бонус-движка (например, panel/DB сбой при +3 днях) НЕ должна
-    валить обработку платежа — роутер ловит и логирует, платёж остаётся succeeded.
-    Раньше _grant_referred_bonus_days глушал ошибки сам; теперь он пробрасывает,
-    поэтому ловить должен роутер (router.py try/except вокруг process_referral_bonus).
+    """#7: ошибка бонус-движка (например, DB сбой при начислении баланса) НЕ должна
+    валить обработку платежа — роутер ловит и логирует, платёж остаётся succeeded
+    (router.py try/except вокруг process_referral_bonus).
     """
     payment = _make_payment()
 

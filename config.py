@@ -146,7 +146,6 @@ REFERRAL_BONUS_PERCENTAGES: dict = REFERRAL_BONUS_PERCENTAGES
 
 # Referral bonus constants for bonus_service.py
 REFERRAL_BONUS_PERCENT: float = 0.10  # 10% bonus for referrer
-REFERRAL_BONUS_DAYS: int = 3  # +3 days for referred user
 REFERRAL_DISCOUNT_PERCENT: float = 0.10  # 10% referral discount
 
 # Minimum amount (₽) the user must pay out-of-pocket — we never let the

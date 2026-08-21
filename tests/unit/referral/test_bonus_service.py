@@ -44,10 +44,6 @@ def make_conn(*, mark_row=None, user_lookup=None, referrer_exists=True, execute_
     conn = MagicMock()
     conn.fetchrow = AsyncMock(side_effect=[mark_row, user_lookup])
     conn.fetchval = AsyncMock(return_value=1 if referrer_exists else None)
-    # _grant_referred_bonus_days делает conn.fetch("SELECT email ... WHERE tg_id=$1").
-    # Пустой список — продление ключа не выполняется (тесты ниже покрывают
-    # INSERT/UPDATE баланса и idempotency, а не +3 дня; для +3 дней см. test_grant_*).
-    conn.fetch = AsyncMock(return_value=[])
     if execute_error:
         conn.execute = AsyncMock(side_effect=execute_error)
     else:
@@ -194,31 +190,3 @@ class TestPoolCompatibility:
         conn = make_conn(mark_row={"referral_id": 100})
         await bonus_service.process_referral_bonus(conn, 200, 500.0)
         assert conn.execute.await_count == 2
-
-
-class TestBonusDaysForReferred:
-    """Тесты для двусторонней награды: реферал получает +3 дня к подписке."""
-
-    async def test_grants_bonus_days_to_referred(self, bonus_service):
-        """Проверяем, что при начислении бонуса вызывается _grant_referred_bonus_days."""
-        conn = make_conn(mark_row={"referral_id": 100})
-        # Мокаем метод начисления дней
-        bonus_service._grant_referred_bonus_days = AsyncMock()
-        bonus_service._notify_referred_bonus_days = AsyncMock()
-
-        await bonus_service.process_referral_bonus(conn, 200, 500.0)
-
-        bonus_service._grant_referred_bonus_days.assert_awaited_once_with(conn, 200)
-        bonus_service._notify_referred_bonus_days.assert_awaited_once_with(200)
-
-    async def test_bonus_days_constant(self, bonus_service):
-        """Проверяем, что константа BONUS_DAYS_MS установлена корректно (3 дня в мс)."""
-        expected_ms = 3 * 24 * 60 * 60 * 1000  # 259_200_000 мс
-        assert bonus_service.BONUS_DAYS_MS == expected_ms
-
-    async def test_notify_referred_bonus_days(self, bonus_service):
-        """Тест уведомления рефералу о бонусных днях."""
-        from unittest.mock import patch
-        with patch.object(bonus_service, '_notify_referred_bonus_days') as mock_notify:
-            await bonus_service._notify_referred_bonus_days(200)
-            mock_notify.assert_awaited_once()
