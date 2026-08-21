@@ -10,6 +10,53 @@ class _TelegramBot:
     def __init__(self, token: str):
         self._token = token
         self._base_url = f"https://api.telegram.org/bot{token}"
+        self._username_cache: str | None = None
+
+    async def get_me(self) -> dict | None:
+        """Bot API getMe — идентичность бота, реально стоящего за BOT_TOKEN.
+
+        Возвращает result-объект (с полем ``username``) при ``{ok:true}``,
+        иначе None (пустой токен / сетевая ошибка / not-ok).
+        """
+        if not self._token:
+            logger.warning("bot_token not configured, skipping get_me")
+            return None
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(f"{self._base_url}/getMe")
+                if resp.status_code != 200:
+                    logger.warning(
+                        f"Telegram getMe failed: status={resp.status_code} body={resp.text[:300]}"
+                    )
+                    return None
+                data = resp.json()
+                if not data.get("ok"):
+                    logger.warning(f"Telegram getMe not ok: {data.get('description')}")
+                    return None
+                return data.get("result")
+        except Exception as e:
+            logger.error("Telegram getMe error", extra={"error": str(e)})
+            return None
+
+    async def get_username(self, fallback: str = "") -> str:
+        """Username реально работающего бота (без @), с in-process кешем —
+        username бота не меняется в рантайме, поэтому кешируем на весь процесс.
+
+        Единственный источник правды для ссылок вида t.me/<username>: сам
+        BOT_TOKEN через getMe, а НЕ отдельно прописанный BOT_NAME/
+        TELEGRAM_BOT_USERNAME в .env, который может рассинхронизироваться
+        с реально задеплоенным токеном (see: platform vs landing-pilot bot
+        token mismatch investigated 2026-08-18).
+        """
+        if self._username_cache:
+            return self._username_cache
+        result = await self.get_me()
+        username = (result or {}).get("username")
+        if username:
+            self._username_cache = username
+            return username
+        logger.warning("Telegram getMe вернул пустой username, использую fallback", fallback=fallback)
+        return fallback
 
     async def send_message(self, chat_id: int, text: str, **kwargs) -> None:
         if not self._token:

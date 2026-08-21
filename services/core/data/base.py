@@ -212,7 +212,12 @@ class BaseData(Generic[T]):
         logger.debug(f"Сохранение {self.model_name} в БД", identifier=value, data_dict=data.to_dict())
 
         try:
-            await self.service.create(conn, **data.to_dict())
+            created = await self.service.create(conn, **data.to_dict())
+            # Если БД сгенерировала PK (SERIAL id), create() возвращает его —
+            # записываем обратно в объект перед кешированием, иначе в кеше
+            # навсегда останется id=None (см. историю бага с referral_link_id=NULL).
+            if isinstance(created, int) and hasattr(data, "id"):
+                data.id = created
             logger.debug(f"{self.model_name} успешно сохранен в БД", identifier=value)
         except Exception as e:
             logger.error(f"Ошибка при сохранении {self.model_name} в БД", identifier=value, error=str(e))

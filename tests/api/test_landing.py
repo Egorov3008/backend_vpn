@@ -108,12 +108,16 @@ async def test_state_active_with_valid_cookie(api_client, mock_service_data):
 
 
 @pytest.mark.asyncio
-async def test_build_deep_links_happ_vless_plain():
+async def test_build_deep_links_happ_vless_plain(monkeypatch):
     """Happ deep-link для одиночного vless://-конфига → happ://add/<plain>."""
     from api.v1.landing import _build_deep_links
+    from bot_project import bot as telegram_bot
+
+    # Не бьём в реальный Telegram getMe — username закеширован заранее.
+    monkeypatch.setattr(telegram_bot, "_username_cache", "test_bot")
 
     vless_url = "vless://uuid@example.com:443?encryption=none&security=tls"
-    deep_link_happ, deep_link_bot = _build_deep_links(vless_url, "uid123")
+    deep_link_happ, deep_link_bot = await _build_deep_links(vless_url, "uid123")
 
     assert deep_link_happ == f"happ://add/{vless_url}"
     assert deep_link_happ.startswith("happ://add/vless://")
@@ -122,12 +126,15 @@ async def test_build_deep_links_happ_vless_plain():
 
 
 @pytest.mark.asyncio
-async def test_build_deep_links_happ_subscription_url():
+async def test_build_deep_links_happ_subscription_url(monkeypatch):
     """Subscription URL отдаём в happ://add/ как есть, без кодирования."""
     from api.v1.landing import _build_deep_links
+    from bot_project import bot as telegram_bot
+
+    monkeypatch.setattr(telegram_bot, "_username_cache", "test_bot")
 
     subscription_url = "https://tds-pro.space:2096/TolkoDlyaSv0ih_Bot/token123"
-    deep_link_happ, _ = _build_deep_links(subscription_url, "uid123")
+    deep_link_happ, _ = await _build_deep_links(subscription_url, "uid123")
 
     assert deep_link_happ == f"happ://add/{subscription_url}"
 
@@ -770,7 +777,7 @@ async def test_attach_referral_merges_users_referral_id(api_client, mock_service
     cookie = _sign_ref_cookie(ref_token)
     result = await _attach_referral_if_any(pool, mock_service_data, cache, cookie, referred_tg_id)
 
-    assert result is True
+    assert result == referrer_tg_id
     assert user.referral_id == referrer_tg_id
     # #8: atomic UPDATE через conn.fetchrow; users.update больше не зовётся.
     conn.fetchrow.assert_awaited_once()
@@ -798,7 +805,7 @@ async def test_attach_referral_self_referral_blocked(api_client, mock_service_da
     cookie = _sign_ref_cookie(ref_token)
     result = await _attach_referral_if_any(pool, mock_service_data, cache, cookie, same_id)
 
-    assert result is False
+    assert result is None
     # self-referral guard отсекает до UPDATE — fetchrow не зовётся.
     conn.fetchrow.assert_not_awaited()
     mock_service_data.users.update.assert_not_awaited()
@@ -828,7 +835,7 @@ async def test_attach_referral_does_not_overwrite_existing(api_client, mock_serv
     cookie = _sign_ref_cookie(ref_token)
     result = await _attach_referral_if_any(pool, mock_service_data, cache, cookie, 999)
 
-    assert result is False
+    assert result is None
     assert user.referral_id == existing_referrer  # не изменился
     conn.fetchrow.assert_awaited_once()  # UPDATE шёл, но 0 строк
     mock_service_data.users.update.assert_not_awaited()
@@ -845,15 +852,15 @@ async def test_attach_referral_invalid_cookie_no_op(api_client, mock_service_dat
     pool = AsyncMock()
 
     # Пустая кука
-    assert await _attach_referral_if_any(pool, mock_service_data, cache, None, 999) is False
-    assert await _attach_referral_if_any(pool, mock_service_data, cache, "", 999) is False
+    assert await _attach_referral_if_any(pool, mock_service_data, cache, None, 999) is None
+    assert await _attach_referral_if_any(pool, mock_service_data, cache, "", 999) is None
     # Мусор
-    assert await _attach_referral_if_any(pool, mock_service_data, cache, "garbage", 999) is False
-    assert await _attach_referral_if_any(pool, mock_service_data, cache, "foo.bar", 999) is False
+    assert await _attach_referral_if_any(pool, mock_service_data, cache, "garbage", 999) is None
+    assert await _attach_referral_if_any(pool, mock_service_data, cache, "foo.bar", 999) is None
     # Подделанная подпись
     assert await _attach_referral_if_any(
         pool, mock_service_data, cache, "eyJhY2I.signature_bad", 999
-    ) is False
+    ) is None
 
     mock_service_data.users.update.assert_not_awaited()
     mock_service_data.referral_links.get_by.assert_not_awaited()
@@ -871,7 +878,7 @@ async def test_attach_referral_token_not_in_db(api_client, mock_service_data):
     cookie = _sign_ref_cookie("ref_unknown0000")
     result = await _attach_referral_if_any(pool, mock_service_data, cache, cookie, 999)
 
-    assert result is False
+    assert result is None
     mock_service_data.users.update.assert_not_awaited()
     mock_service_data.data_service.referral_redemptions.create.assert_not_awaited()
 
@@ -900,7 +907,7 @@ async def test_attach_referral_unique_violation_idempotent(api_client, mock_serv
     result = await _attach_referral_if_any(pool, mock_service_data, cache, cookie, 999)
 
     # Merge всё равно засчитан (referral_id записан, redemption idempotent)
-    assert result is True
+    assert result == 100
     assert user.referral_id == 100
     # #8: referral_id пишется atomic UPDATE, не users.update.
     mock_service_data.users.update.assert_not_awaited()

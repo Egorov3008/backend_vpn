@@ -74,7 +74,6 @@ class Settings(BaseSettings):
     bot_token: str = ""
     bot_name: str = "VPNBot"
     support_chat_url: str = ""
-    url_bot: str = ""
 
     # Bot behaviour
     admin_id_raw: str = "[0]"
@@ -127,7 +126,6 @@ DISABLE_WEBHOOK_IP_CHECK: bool = settings.disable_webhook_ip_check
 BOT_TOKEN: str = settings.bot_token
 BOT_NAME: str = settings.bot_name
 SUPPORT_CHAT_URL: str = settings.support_chat_url
-URL_BOT: str = settings.url_bot
 DEFAULT_PRICING_PLAN: str = settings.default_pricing_plan
 TRIAL_TIME: int = settings.trial_time
 DISCOUNTS: int = settings.discounts

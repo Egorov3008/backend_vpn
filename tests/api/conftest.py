@@ -50,7 +50,10 @@ def mock_service_data():
 @pytest.fixture
 async def api_client(mock_service_data, monkeypatch):
     from config import settings
+    from bot_project import bot as telegram_bot
     monkeypatch.setattr(settings, "disable_webhook_ip_check", True)
+    # Не бьём в реальный Telegram getMe в тестах — username закеширован заранее.
+    monkeypatch.setattr(telegram_bot, "_username_cache", "test_bot")
 
     app.dependency_overrides[get_service_data] = lambda: mock_service_data
     app.dependency_overrides[get_pool] = lambda: AsyncMock()

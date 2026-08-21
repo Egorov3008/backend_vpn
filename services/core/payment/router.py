@@ -196,17 +196,25 @@ class PaymentRouter:
         # Начисляем реферальный бонус после успешной оплаты
         if self.bonus_service:
             try:
-                await self.bonus_service.process_referral_bonus(
+                bonus_awarded = await self.bonus_service.process_referral_bonus(
                     conn=self.processor._conn,
                     referred_tg_id=self.processor.tg_id,
                     payment_amount=self.processor.amount,
                 )
-                logger.info(
-                    "Реферальный бонус начислен",
-                    payment_id=payment_id,
-                    referred_tg_id=self.processor.tg_id,
-                    payment_amount=self.processor.amount,
-                )
+                if bonus_awarded:
+                    logger.info(
+                        "Реферальный бонус начислен",
+                        payment_id=payment_id,
+                        referred_tg_id=self.processor.tg_id,
+                        payment_amount=self.processor.amount,
+                    )
+                else:
+                    logger.debug(
+                        "Реферальный бонус не начислен (нет реферера, уже начислен или ошибка — см. лог bonus_service)",
+                        payment_id=payment_id,
+                        referred_tg_id=self.processor.tg_id,
+                        payment_amount=self.processor.amount,
+                    )
             except Exception as e:
                 logger.warning(
                     "Ошибка при начислении реферального бонуса",

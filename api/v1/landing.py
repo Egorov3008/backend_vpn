@@ -33,6 +33,7 @@ from pydantic import BaseModel
 from app.auth import verify_bot_secret
 from app.dependencies import get_cache, get_pool, get_service_data
 from app.factories import build_key_services
+from bot_project import bot as telegram_bot
 from client import XUISession
 from config import DEFAULT_PRICING_PLAN, settings
 from database.service import DataService
@@ -82,6 +83,7 @@ class QuickKeyResponse(BaseModel):
     remaining_seconds: int
     deep_link_happ: str
     deep_link_bot: str
+    bot_url: str
     state: str  # "active"
     landing_uid: Optional[str] = None  # для JS-склейки deeplink (landing_<uid>_ref_<token>)
 
@@ -231,7 +233,7 @@ async def _attach_referral_if_any(
     tg_ref: Optional[str],
     referred_tg_id: int,
     raw_ref_token: Optional[str] = None,
-) -> bool:
+) -> Optional[int]:
     """Слить реферера в ``users.referral_id`` и создать ``ReferralRedemption``.
 
     Вызывается из ``claim_landing_key`` (новый юзер) и ``mark_converted``
@@ -248,7 +250,7 @@ async def _attach_referral_if_any(
       - дубликат ``referral_redemptions`` (UNIQUE по referred_tg_id) — игнорируется;
       - невалидная/просроченная/чужая кука или токен — молча возвращаемся.
 
-    Возвращает True, если merge выполнен (для логов).
+    Возвращает ``referrer_tg_id``, если merge выполнен (для уведомлений/логов), иначе None.
     """
     ref_token: Optional[str] = None
     if tg_ref:
@@ -256,11 +258,11 @@ async def _attach_referral_if_any(
     if not ref_token and raw_ref_token:
         ref_token = _normalize_ref_token(raw_ref_token)
     if not ref_token or not _is_valid_ref_format(ref_token):
-        return False
+        return None
 
     link = await service_data.referral_links.get_by(token=ref_token)
     if not link:
-        return False
+        return None
 
     referrer_tg_id = link.referrer_tg_id
     if referrer_tg_id == referred_tg_id:
@@ -268,7 +270,7 @@ async def _attach_referral_if_any(
             "Self-referral attempt via landing cookie, skipping",
             referred=referred_tg_id,
         )
-        return False
+        return None
 
     # Атомарно записываем referral_id только если он ещё NULL.
     # Раньше был read-check-write (get_data → if referral_id is None → update) —
@@ -292,7 +294,7 @@ async def _attach_referral_if_any(
             referred=referred_tg_id,
             attempted=referrer_tg_id,
         )
-        return False
+        return None
 
     # Синхронизируем кэш: обновляем закешированного пользователя (DB уже записал).
     user = await service_data.users.get_data(referred_tg_id, conn=pool)
@@ -327,7 +329,7 @@ async def _attach_referral_if_any(
             error=str(e),
         )
 
-    return True
+    return referrer_tg_id
 
 
 # =============================================================================
@@ -425,7 +427,20 @@ def _extract_vless_url(subscription_url: str) -> Optional[str]:
     return result
 
 
-def _build_deep_links(key_value: str, landing_uid: str) -> tuple[str, str]:
+async def _bot_url() -> str:
+    """URL Telegram-бота, отдаваемый фронту лендинга — единственный источник
+    правды. Username берётся у самого Telegram (Bot API getMe по BOT_TOKEN,
+    закешировано в bot_project._TelegramBot), а не из settings.bot_name —
+    тот может рассинхронизироваться с реально задеплоенным токеном (settings.bot_name
+    используется только как fallback, если getMe недоступен). Фронт использует
+    этот URL вместо статически зашитого в HTML значения, так что смена бота
+    требует только смены BOT_TOKEN на backend.
+    """
+    username = await telegram_bot.get_username(fallback=settings.bot_name or "TolkoDlyaSv0ih_Bot")
+    return f"{LANDING_BOT_LINK_PREFIX}{username}"
+
+
+async def _build_deep_links(key_value: str, landing_uid: str) -> tuple[str, str]:
     """Формирует deep-link в Happ (открыть и импортировать) и в Telegram-бота.
 
     Happ-клиент принимает subscription URL через `happ://add/<url>` **без**
@@ -439,8 +454,7 @@ def _build_deep_links(key_value: str, landing_uid: str) -> tuple[str, str]:
     deep_link_happ = f"happ://add/{key_value}"
 
     # Telegram-бот: /start landing_<uid> — бот подхватит и привяжет/выдаст trial
-    bot_name = settings.bot_name or "TolkoDlyaSv0ih_Bot"
-    deep_link_bot = f"{LANDING_BOT_LINK_PREFIX}{bot_name}?start=landing_{landing_uid}"
+    deep_link_bot = f"{await _bot_url()}?start=landing_{landing_uid}"
 
     return deep_link_happ, deep_link_bot
 
@@ -634,7 +648,8 @@ async def create_quick_key(
 
     # 6. Формируем ответ и подписываем куку
     remaining = max(0, (new_expiry_ms - int(time.time() * 1000)) // 1000)
-    deep_link_happ, deep_link_bot = _build_deep_links(key_obj.key, landing_uid)
+    deep_link_happ, deep_link_bot = await _build_deep_links(key_obj.key, landing_uid)
+    bot_url = await _bot_url()
 
     response.set_cookie(
         key="tg_landing_id",
@@ -660,6 +675,7 @@ async def create_quick_key(
         remaining_seconds=remaining,
         deep_link_happ=deep_link_happ,
         deep_link_bot=deep_link_bot,
+        bot_url=bot_url,
         state="active",
         landing_uid=landing_uid,
     )
@@ -683,35 +699,40 @@ async def get_state(
       - expired   — ключ истёк
       - converted — ключ привязан к tg_id (юзер дошёл до бота)
     """
+    # bot_url отдаём на любом состоянии — фронт использует его для ВСЕХ ссылок
+    # на бота (футер, "уже зарегистрированы", CTA на expired/converted), а не
+    # только на активном экране. Username берётся у самого Telegram (getMe по
+    # BOT_TOKEN), так что он не может разъехаться с реально задеплоенным ботом.
+    bot_url = await _bot_url()
+
     if not tg_landing_id:
-        return LandingStateResponse(state="new")
+        return LandingStateResponse(state="new", bot_url=bot_url)
 
     landing_uid = _verify_cookie(tg_landing_id)
     if not landing_uid:
-        return LandingStateResponse(state="new")
+        return LandingStateResponse(state="new", bot_url=bot_url)
 
     key_obj = await _get_key_by_landing_uid(service_data, pool, landing_uid)
     if not key_obj:
-        return LandingStateResponse(state="expired")
+        return LandingStateResponse(state="expired", bot_url=bot_url)
 
     # Ключ уже привязан к реальному tg_id (claim выполнен) → юзер дошёл до бота
     # и забрал ключ. mark-converted (существующий юзер) НЕ переносит tg_id, поэтому
     # для него ключ остаётся на псевдо-tg_id (<0) и лендинг продолжает показывать
     # активный 24ч ключ — как и требуется («ключ не отключается до истечения 24ч»).
     if key_obj.converted_tg_id is not None and key_obj.tg_id and key_obj.tg_id > 0:
-        return LandingStateResponse(state="converted")
+        return LandingStateResponse(state="converted", bot_url=bot_url)
 
     now_ms = int(time.time() * 1000)
     expiry_ms = int(key_obj.expiry_time or 0)
 
     # Определяем состояние
     if expiry_ms <= now_ms:
-        return LandingStateResponse(state="expired")
+        return LandingStateResponse(state="expired", bot_url=bot_url)
 
     remaining_seconds = (expiry_ms - now_ms) // 1000
 
-    deep_link_happ, deep_link_bot = _build_deep_links(key_obj.key, landing_uid)
-    bot_url = f"{LANDING_BOT_LINK_PREFIX}{settings.bot_name or 'TolkoDlyaSv0ih_Bot'}"
+    deep_link_happ, deep_link_bot = await _build_deep_links(key_obj.key, landing_uid)
 
     state = "expiring" if remaining_seconds < EXPIRING_THRESHOLD_HOURS * 3600 else "active"
 
@@ -764,8 +785,8 @@ async def mark_converted(
     if key_obj.converted_tg_id == body.tg_id:
         # Попробуем merge referral (если ещё не было) — может быть повторный
         # клик с уже-выставленным converted_tg_id, но referral_id не успел записаться.
-        await _attach_referral_if_any(pool, service_data, cache, tg_ref, body.tg_id, raw_ref_token=body.ref_token)
-        return {"ok": True, "already": True, "email": key_obj.email}
+        referrer_tg_id = await _attach_referral_if_any(pool, service_data, cache, tg_ref, body.tg_id, raw_ref_token=body.ref_token)
+        return {"ok": True, "already": True, "email": key_obj.email, "referrer_tg_id": referrer_tg_id}
 
     # Ключ уже привязан к другому аккаунту — НЕ перезаписываем (защита от гонок и
     # повторного использования одной ссылки разными юзерами).
@@ -784,7 +805,7 @@ async def mark_converted(
     await cache.keys.set(CacheKeyManager.key(key_obj.email), key_obj)
 
     # Merge referral из tg_ref куки или ref_token в теле (бот пробрасывает из deeplink).
-    await _attach_referral_if_any(pool, service_data, cache, tg_ref, body.tg_id, raw_ref_token=body.ref_token)
+    referrer_tg_id = await _attach_referral_if_any(pool, service_data, cache, tg_ref, body.tg_id, raw_ref_token=body.ref_token)
 
     logger.info(
         "Landing key помечен как converted",
@@ -793,7 +814,7 @@ async def mark_converted(
         email=key_obj.email,
     )
 
-    return {"ok": True, "email": key_obj.email}
+    return {"ok": True, "email": key_obj.email, "referrer_tg_id": referrer_tg_id}
 
 
 # =============================================================================
@@ -834,12 +855,13 @@ async def claim_key(
     if key_obj.converted_tg_id == body.tg_id:
         # Повторный клик с уже-выставленным converted_tg_id: попробуем merge
         # referral, если ещё не было (tg_ref мог быть поставлен после первого claim).
-        await _attach_referral_if_any(pool, service_data, cache, tg_ref, body.tg_id, raw_ref_token=body.ref_token)
+        referrer_tg_id = await _attach_referral_if_any(pool, service_data, cache, tg_ref, body.tg_id, raw_ref_token=body.ref_token)
         return {
             "status": "already_claimed",
             "email": key_obj.email,
             "key_value": key_obj.key,
             "expires_at_ms": int(key_obj.expiry_time or 0),
+            "referrer_tg_id": referrer_tg_id,
         }
 
     # Ключ уже привязан к другому аккаунту — не отдаём
@@ -900,7 +922,7 @@ async def claim_key(
     # Merge referral из tg_ref куки или ref_token в теле (бот пробрасывает из deeplink).
     # Делаем ПОСЛЕ installation_trial, чтобы в логах redemption шёл после trial=1.
     # Ошибка merge НЕ откатывает claim (бонус-движок защищён check_referral=FALSE).
-    await _attach_referral_if_any(pool, service_data, cache, tg_ref, body.tg_id, raw_ref_token=body.ref_token)
+    referrer_tg_id = await _attach_referral_if_any(pool, service_data, cache, tg_ref, body.tg_id, raw_ref_token=body.ref_token)
 
     logger.info(
         "Landing key привязан к юзеру и апгрейдирован (trial)",
@@ -913,4 +935,5 @@ async def claim_key(
         "email": upgraded.email,
         "key_value": upgraded.key,
         "expires_at_ms": int(upgraded.expiry_time or 0),
+        "referrer_tg_id": referrer_tg_id,
     }

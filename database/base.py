@@ -165,12 +165,22 @@ class BaseRepository(Generic[T]):
 
         columns = ", ".join(kwargs.keys())
         placeholders_str = ", ".join(placeholders)
+
+        # Если у модели есть SERIAL PK `id`, который не передан в kwargs (генерируется БД),
+        # читаем его обратно через RETURNING id — иначе объект, закешированный сразу после
+        # save_data(), навсегда остаётся с id=None (до полной перезагрузки кеша из БД).
+        known_fields = self._known_fields(self.model)
+        has_generated_id = known_fields is not None and "id" in known_fields and "id" not in kwargs
+
+        returning_clause = "RETURNING id" if has_generated_id else "RETURNING 1"
         query = f"""
             INSERT INTO {self.table_name} ({columns})
             VALUES ({placeholders_str})
-            RETURNING 1
+            {returning_clause}
         """
         async with await self._acquire(pool) as conn:
+            if has_generated_id:
+                return await conn.fetchval(query, *typed_values)
             result = await conn.execute(query, *typed_values)
             return "INSERT 1" == result
 

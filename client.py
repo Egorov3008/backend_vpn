@@ -1161,6 +1161,41 @@ class XUISession:
 
         return unique_items
 
+    async def get_almost_expired_clients(
+        self,
+        within_seconds: int,
+        page_size: int = 100,
+    ) -> list[PanelClient]:
+        """Возвращает клиентов панели, у которых expiry_time попадает в
+        ближайшие within_seconds секунд от текущего момента.
+
+        Raw-доступ к данным панели "как есть" (аналогично list_clients_paged) —
+        не источник истины для бизнес-логики статусов ключей, см.
+        KeySegmentationService/KeySegmenter, которые работают над БД/кэшем.
+        Полезен для диагностики и сверки панели с БД. Клиенты с expiry_time
+        равным 0 (бессрочные) и уже истёкшие исключаются. Панель не имеет
+        отдельного API для фильтрации по expiry, поэтому фильтрация
+        выполняется на стороне клиента поверх list_clients_all().
+        """
+        t0 = time.monotonic()
+        xui_api_calls_total.labels(method="get_almost_expired_clients").inc()
+        try:
+            raw_clients = await self.list_clients_all(page_size=page_size)
+            now_ms = time.time() * 1000
+            threshold_ms = now_ms + within_seconds * 1000
+            clients = [_panel_client_from_raw(raw) for raw in raw_clients]
+            almost_expired = [
+                client
+                for client in clients
+                if now_ms < client.expiry_time <= threshold_ms
+            ]
+            almost_expired.sort(key=lambda client: client.expiry_time)
+            return almost_expired
+        finally:
+            xui_api_duration.labels(method="get_almost_expired_clients").observe(
+                time.monotonic() - t0
+            )
+
     @retry(
         stop=stop.stop_after_attempt(3),
         wait=wait.wait_fixed(2),

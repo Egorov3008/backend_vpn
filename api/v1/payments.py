@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from app.auth import verify_bot_secret
 from app.dependencies import get_service_data, get_pool, get_cache
 from app.factories import build_payment_router
+from bot_project import bot as telegram_bot
 from app.schemas.payments import (
     PaymentWebhookBody,
     PaymentCreateRequest,
@@ -407,6 +408,11 @@ async def create_payment(
     idempotency_key = str(uuid.uuid4())
     logger.debug("Отправка запроса в YooKassa", extra={"idempotency_key": idempotency_key, "amount": final_amount, "payment_type": payment_type})
 
+    # Username реального бота за BOT_TOKEN (getMe, закешировано) — не
+    # settings.bot_name, который может разъехаться с фактически задеплоенным
+    # токеном (see: platform/.env bot mismatch investigated 2026-08-18).
+    return_url_username = await telegram_bot.get_username(fallback=settings.bot_name)
+
     try:
         # Формируем полный webhook URL для YooKassa
         webhook_url = f"{settings.webhook_base_url.rstrip('/')}{settings.webhook_path}"
@@ -428,7 +434,7 @@ async def create_payment(
                             "amount": {"value": f"{final_amount:.2f}", "currency": "RUB"},
                             "confirmation": {
                                 "type": "redirect",
-                                "return_url": f"https://t.me/{settings.url_bot}",
+                                "return_url": f"https://t.me/{return_url_username}",
                             },
                             "capture": True,
                             "description": f"Помощь в ИТ {body.tg_id} {tariff.name_tariff} x{body.number_of_months}",

@@ -248,6 +248,17 @@ class ReferralBonusService:
 
         referrer_tg_id = row["referral_id"]
 
+        # check_referral выставлен сырым UPDATE выше — синхронизируем кеш
+        # реферала сразу (независимо от исхода шага 2), иначе он продолжит
+        # получать реферальную скидку на всех последующих платежах из
+        # устаревшего закешированного User (check_referral=False).
+        if self._cache is not None:
+            referred = await self._users.service.get(conn, tg_id=referred_tg_id)
+            if referred:
+                await self._cache.users.set(
+                    CacheKeyManager.user(referred_tg_id), referred
+                )
+
         # Шаг 2: одна транзакция для INSERT reward + UPDATE referrer.balance.
         # Если что-то упадёт — check_referral уже выставлен, но это безопасно:
         # повторный вызов завершится на row = None (step 1) и не продублирует бонус.
@@ -301,6 +312,19 @@ class ReferralBonusService:
             referred_tg_id=referred_tg_id,
             reward_value=reward_value,
         )
+
+        # Синхронизируем кэш реферера: balance выше обновлён сырым UPDATE в
+        # обход self._users.update(), поэтому кеш сам не инвалидируется — до
+        # следующего cache-sync (каждые 3ч) calculate_payment продолжал бы
+        # отдавать balance_discount=0 из устаревшего закешированного User.
+        # Читаем строку напрямую из БД (get_data вернул бы тот же устаревший
+        # кеш), чтобы не полагаться на то, был ли объект уже закеширован.
+        if self._cache is not None:
+            referrer = await self._users.service.get(conn, tg_id=referrer_tg_id)
+            if referrer:
+                await self._cache.users.set(
+                    CacheKeyManager.user(referrer_tg_id), referrer
+                )
 
         # Начисляем бонус рефералу: +3 дня к подписке
         await self._grant_referred_bonus_days(conn, referred_tg_id)

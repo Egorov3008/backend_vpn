@@ -51,7 +51,7 @@ async def test_first_call_wins_and_merges():
         raw_ref_token="ref_abc123def456",
     )
 
-    assert ok is True
+    assert ok == 100
     # атомарный UPDATE выполнен
     conn.fetchrow.assert_awaited_once()
     query = conn.fetchrow.await_args.args[0]
@@ -78,7 +78,7 @@ async def test_second_concurrent_call_loses_no_overwrite():
         raw_ref_token="ref_abc123def456",
     )
 
-    assert ok is False
+    assert ok is None
     # кэш не трогаем, redemption не создаём
     cache.users.set.assert_not_awaited()
     sd.data_service.referral_redemptions.create.assert_not_awaited()
@@ -98,7 +98,7 @@ async def test_self_referral_skipped_before_update():
         raw_ref_token="ref_abc123def456",
     )
 
-    assert ok is False
+    assert ok is None
     conn.fetchrow.assert_not_awaited()  # UPDATE не выполнялся
     sd.data_service.referral_redemptions.create.assert_not_awaited()
 
@@ -115,7 +115,7 @@ async def test_unknown_ref_token_returns_false():
         raw_ref_token="ref_abc123def456",
     )
 
-    assert ok is False
+    assert ok is None
     conn.fetchrow.assert_not_awaited()
 
 
@@ -136,7 +136,7 @@ async def test_duplicate_redemption_is_idempotent():
         raw_ref_token="ref_abc123def456",
     )
 
-    assert ok is True
+    assert ok == 100
     cache.users.set.assert_awaited_once()  # referral_id записан
 
 
@@ -156,7 +156,7 @@ async def test_cookie_path_takes_precedence_over_body_token():
         raw_ref_token="ref_deadbeef0000",  # другой токен в теле — должен проиграть
     )
 
-    assert ok is True
+    assert ok == 100
     # lookup шёл по токену из куки, не из тела
     sd.referral_links.get_by.assert_awaited_once()
     token_used = sd.referral_links.get_by.await_args.kwargs["token"]
