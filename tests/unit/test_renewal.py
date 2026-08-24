@@ -53,16 +53,17 @@ async def test_active_renewal_extends_key():
 
 
 @pytest.mark.asyncio
-async def test_expired_renewal_raises():
+async def test_expired_renewal_extends_key():
+    """Просроченный ключ продлевается так же, как активный — не должен блокироваться."""
     kr, xui, md, refresh, resetter = _renewal()
-    k = _key(expiry=2000)
+    k = _key(expiry=2000)  # в прошлом
     tariff = MagicMock(id=5, period=30, amount=100.0, name_tariff="m", limit_ip=3)
-    with pytest.raises(ValueError, match="истёк"):
-        await kr.extension_key(k, conn=MagicMock(), server=MagicMock(), tariff=tariff, number_of_months=1)
-    # EXPIRED branch returns early — no panel/DB side effects.
-    xui.extend_client_key.assert_not_awaited()
-    xui.set_inbounds.assert_not_awaited()
-    md.keys.update.assert_not_awaited()
+    refresh.refresh_key = MagicMock(side_effect=lambda key, *a, **kw: setattr(key, "expiry_time", 5000) or key)
+    out = await kr.extension_key(k, conn=MagicMock(), server=MagicMock(), tariff=tariff, number_of_months=1)
+    assert out.expiry_time == 5000
+    xui.extend_client_key.assert_awaited_once_with(out)
+    md.keys.update.assert_awaited_once()
+    resetter.reset_key_after_renewal.assert_awaited_once()
 
 
 @pytest.mark.asyncio

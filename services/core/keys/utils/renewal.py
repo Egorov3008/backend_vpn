@@ -7,7 +7,6 @@ from models import Tariff, Server, Key
 from services.core.data.service import ServiceDataModel
 
 from services.core.keys.utils.reset import KeyResetter
-from services.core.keys.utils.status import KeyStatus
 from services.core.keys.utils.updating import KeyUpdater
 from services.system.maintenance import PanelMaintenanceError, maintenance_mode
 
@@ -37,23 +36,17 @@ class KeyRenewal:
     ):
         """Продлевает ключ и сбрасывает флаги уведомлений.
 
-        Ветвление по статусу ключа:
-          - EXPIRED → raises ValueError (нужен новый ключ) — панель уже сама
-                      отключила доступ по expiryTime;
-          - ACTIVE  → обычное продление, expiry_time пишется в панель напрямую.
+        Работает как для активного, так и для просроченного ключа: панель
+        сама отключает доступ клиента по expiryTime, но не удаляет его —
+        ``ExpiryCalculator.key_duration`` отсчитывает новый срок от
+        ``max(now, expiry)``, а ``extend_client_key`` всегда выставляет
+        ``enable=True``, так что просроченный ключ корректно реактивируется.
         """
         if await maintenance_mode.is_enabled(conn):
             raise PanelMaintenanceError(
                 "Панель 3x-ui на профилактике — продление ключей временно недоступно"
             )
 
-        status = KeyStatus.of(key)
-        if status == KeyStatus.EXPIRED:
-            raise ValueError(
-                "Ключ истёк — продление невозможно, нужен новый ключ"
-            )
-
-        # active path
         refresh_key = self.refresh.refresh_key(key, tariff, server, number_of_months)
         await self.xui_session.extend_client_key(refresh_key)
         await self.key_data.update(conn, key, search_data={"email": key.email})
