@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test_user -d test_db"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Lint
+        run: make lint
+
+      - name: Test
+        env:
+          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_db
+        run: make test
+
+  # TODO: deploy job — deployment mechanism for the standalone backend
+  # (own docker-compose.yml, zero-copy Postgres volume reuse) is not
+  # defined yet; wire this up once a target host/registry is chosen.

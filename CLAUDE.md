@@ -2,6 +2,33 @@
 
 FastAPI backend serving as the source of truth for VPN service business logic.
 
+## Standalone deployment (extracted from the platform monorepo)
+
+This repository was extracted from the `platform/` monorepo (which still hosts `bot/`
+and `web/`) via `git filter-repo`, keeping full commit history. It is a fully
+independent service: own Dockerfile, own `docker-compose.yml`/`docker-compose.dev.yml`,
+own CI (`.github/workflows/ci.yml`), own Postgres.
+
+- **Networking:** `docker-compose.yml` attaches `backend` to two networks — an internal
+  `db_net` (backend ↔ its own `postgres`) and the platform's existing external network
+  `platform_net` (real name: `platform_default`). The external network is what lets
+  `bot`/`web`/`nginx` in `platform/` keep resolving `backend:8000` by service name,
+  unchanged, even though it's now a different compose project.
+- **Database:** Postgres moved into this repository — it's the only service that talks
+  to the DB directly (bot/web only ever go through this API). Production data was moved
+  via zero-copy Docker volume reuse (`platform_postgres_data`, declared `external: true`
+  in `docker-compose.yml`), not a dump/restore copy. Schema DDL lives at
+  `db/schema_fixed.sql` (only used to init a genuinely empty volume — a no-op against the
+  reused production volume). DB backup/restore/migration tooling lives in `tools/db/`.
+- **`shared/`:** this repo has its own copy of `shared/` (was a bind-mount in the
+  monorepo). `platform/bot/` keeps its own separate copy. **There is no automated sync**
+  — when `shared/config/core.py` changes in one place, mirror it manually:
+  `rsync -a --delete platform/shared/ platform-backend/shared/`, review the diff, run
+  tests before committing on both sides.
+- **Secrets:** `BOT_SECRET_KEY` and `ADMIN_API_KEY` must match the values in
+  `platform/.env` (read by `bot`/`web`) — no automated sync, rotate by hand in both
+  places. `DATABASE_URL`/`DB_*` are no longer shared with the platform monorepo.
+
 ## Commands
 
 ```bash

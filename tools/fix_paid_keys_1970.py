@@ -46,9 +46,6 @@ def _load_env() -> None:
     env_path = Path(__file__).parent.parent / ".env"
     if env_path.exists():
         load_dotenv(env_path, override=True)
-    root_env = Path(__file__).parent.parent.parent / ".env"
-    if root_env.exists():
-        load_dotenv(root_env, override=False)
 
 
 def _resolve_local_db_url(dsn: str) -> str:

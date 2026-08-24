@@ -30,7 +30,7 @@ from pathlib import Path
 import aiohttp
 
 # Добавляем корень проекта в sys.path для импорта config
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 

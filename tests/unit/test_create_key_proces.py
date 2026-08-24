@@ -80,10 +80,13 @@ async def test_proces_saves_and_returns_link_when_add_client_succeeds():
 
 
 @pytest.mark.asyncio
-async def test_proces_passes_external_sub_url_as_subscription_link_to_add_client():
+async def test_proces_passes_external_sub_url_as_subscription_link_to_add_client(monkeypatch):
     """add_client должен получать subscription_link, равный EXTERNAL_SUB_URL
     как есть (панельная externalLinks-ссылка), а НЕ key.key (это отдельная,
     рабочая ссылка подписки на XUI_SUB, отдаётся юзеру отдельно)."""
+    # Тест не должен зависеть от того, задан ли EXTERNAL_SUB_URL в реальном
+    # .env окружения, где выполняются тесты — фиксируем непустое значение.
+    monkeypatch.setattr(settings, "external_subscription_url", "https://sub.example.com/external-test")
     create_key, model_data, xui_session = _make_create_key(add_client_return=True)
     tariff = MagicMock(id=1, amount=100, limit_ip=1, period=1)
 

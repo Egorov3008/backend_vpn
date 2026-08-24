@@ -1,0 +1,63 @@
+# ===================================================================
+# DEV environment — fully isolated, own Postgres volume (not shared
+# with prod's platform_postgres_data).
+#
+# Usage:
+#   docker compose -f docker-compose.dev.yml up -d --build
+#   docker compose -f docker-compose.dev.yml down
+#
+# All services read .env.dev, never .env (prod).
+# ===================================================================
+
+name: backend_dev
+
+services:
+  postgres_dev:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+      - ./db/schema_fixed.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    ports:
+      - "127.0.0.1:5434:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - dev
+
+  backend_dev:
+    build: .
+    restart: unless-stopped
+    env_file: .env.dev
+    environment:
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres_dev:5432/${DB_NAME}
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./.env.dev:/app/.env:ro
+      - .:/app
+    depends_on:
+      postgres_dev:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - dev
+
+volumes:
+  postgres_dev_data:
+
+networks:
+  dev:
+    driver: bridge

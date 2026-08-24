@@ -13,11 +13,17 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_extend_client_key_does_not_call_reset_traffic():
+async def test_extend_client_key_does_not_call_reset_traffic(monkeypatch):
     """extend_client_key должен обновлять клиента, но НЕ вызывать reset_traffic."""
     from client import XUISession, PanelClient
+    from config import settings
     from models import Key
     from services.core.data.service import ServiceDataModel
+
+    # Тест проверяет, что EXTERNAL_SUB_URL из настроек прокидывается в
+    # external_links как есть — не должен зависеть от того, задан ли он в
+    # реальном .env окружения, где выполняются тесты.
+    monkeypatch.setattr(settings, "external_subscription_url", "https://sub.example.com/external-test")
 
     # Создаём моки
     model_service = MagicMock(spec=ServiceDataModel)
@@ -97,8 +103,6 @@ async def test_extend_client_key_does_not_call_reset_traffic():
     # Внешняя подписка прописывается EXTERNAL_SUB_URL как есть, НЕ key.key
     # (key.key — рабочая ссылка подписки на XUI_SUB, отдаётся юзеру отдельно;
     # externalLinks в панели — decorative-ссылка на EXTERNAL_SUB_URL).
-    from config import settings
-
     standalone.external_links.assert_awaited_once_with(
         "test@example.com",
         [{
