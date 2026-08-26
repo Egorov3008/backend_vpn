@@ -1,32 +1,16 @@
 # ===================================================================
 # Standalone backend deployment.
 #
-# postgres+backend live on their own internal network (db_net); backend
-# is additionally attached to the platform's existing network (platform_net,
-# external — real name: platform_default) so bot/web/nginx in the platform
-# monorepo keep resolving it as `backend:8000`, unchanged.
+# backend has NO postgres service of its own — it connects over the
+# network to the platform monorepo's `postgres` container (service name
+# `postgres` in platform/docker-compose.yml, resolvable as `postgres` on
+# platform_net) via DATABASE_URL in .env. Running a second postgres
+# process against the same data volume caused WAL corruption on
+# 2026-08-26 (both processes writing to platform_postgres_data
+# concurrently) — do NOT reintroduce a local postgres service here.
 # ===================================================================
 
 services:
-  postgres:
-    image: postgres:16
-    container_name: backend-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${DB_USER}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
-      POSTGRES_DB: ${DB_NAME}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./db/schema_fixed.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    networks:
-      - db_net
-
   backend:
     build: .
     container_name: backend
@@ -34,9 +18,6 @@ services:
     env_file: .env
     expose:
       - "8000"
-    depends_on:
-      postgres:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s
@@ -44,16 +25,9 @@ services:
       retries: 5
       start_period: 15s
     networks:
-      - db_net
       - platform_net
 
 networks:
-  db_net: {}
   platform_net:
     external: true
     name: platform_default
-
-volumes:
-  postgres_data:
-    external: true
-    name: platform_postgres_data
