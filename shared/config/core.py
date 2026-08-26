@@ -9,8 +9,29 @@ from functools import lru_cache
 from pathlib import Path
 from typing import List
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+# Known placeholder values from .env.example / .env.dev.example — never valid
+# in a running deployment. Catches the case where .env was copied from the
+# example without generating real secrets.
+INSECURE_SECRET_DEFAULTS = {
+    "changeme",
+    "changeme_captcha",
+    "generate-a-strong-secret-32-chars",
+    "test-secret-key-that-is-long-enough",
+    "web_invite_2026",
+}
+
+
+def reject_insecure_secret(name: str, value: str) -> str:
+    if not value or value in INSECURE_SECRET_DEFAULTS:
+        raise ValueError(
+            f"{name} is missing or set to a known placeholder value — "
+            "generate a real secret and set it in .env"
+        )
+    return value
 
 
 # Referral bonus percentages: level → percentage
@@ -78,6 +99,11 @@ class CoreSettings(BaseSettings):
     # ── Admin config ──
     admin_tg_ids_raw: str = Field(default="[]", alias="ADMIN_TG_IDS")
     admin_api_key: str = Field(default="changeme", alias="ADMIN_API_KEY")
+
+    @field_validator("bot_secret_key", "invite_token", "admin_api_key")
+    @classmethod
+    def _validate_secret(cls, value: str, info) -> str:
+        return reject_insecure_secret(info.field_name.upper(), value)
 
     # ── Monitoring ──
     metrics_port: int = Field(default=9101, alias="METRICS_PORT")

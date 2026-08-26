@@ -50,7 +50,7 @@ async def register_from_invite(
 
     # Validate invite token
     if request.invite_token != settings.invite_token:
-        logger.warning(f"Invalid invite token attempt: {request.invite_token}")
+        logger.warning("Invalid invite token attempt")
         raise ValueError("Invalid invite token")
 
     # Generate code params

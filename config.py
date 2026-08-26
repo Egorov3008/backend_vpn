@@ -4,10 +4,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from shared.config import core_settings, REFERRAL_BONUS_PERCENTAGES  # noqa: F401
+from shared.config.core import reject_insecure_secret
 
 
 def _parse_list(raw: str | None, default: list | None = None) -> list:
@@ -49,6 +50,11 @@ class Settings(BaseSettings):
     # MVP shared-config endpoint
     mvp_app_secret: str = Field(default="changeme", alias="MVP_APP_SECRET")
     mvp_shared_key_email: str = Field(default="", alias="MVP_SHARED_KEY_EMAIL")
+
+    @field_validator("bot_secret_key", "invite_token", "admin_api_key", "mvp_app_secret")
+    @classmethod
+    def _validate_secret(cls, value: str, info) -> str:
+        return reject_insecure_secret(info.field_name.upper(), value)
 
     # Landing page
     # Separate 3x-UI inbound for anonymous 24h keys. Landing-only — NOT part
