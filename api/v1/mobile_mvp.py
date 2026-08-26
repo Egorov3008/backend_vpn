@@ -20,9 +20,11 @@ import urllib.request
 from typing import Optional
 
 import asyncpg
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Security
+from fastapi.security import APIKeyHeader
 
 from app.dependencies import get_pool, get_service_data
+from app.rate_limit import rate_limit
 from config import settings
 from logger import logger
 from services.cache.key_manager import CacheKeyManager
@@ -123,7 +125,15 @@ def _download_and_extract_vless(subscription_url: str) -> Optional[str]:
     return result
 
 
-async def verify_app_secret(x_app_secret: Optional[str] = Header(None)) -> None:
+app_secret_scheme = APIKeyHeader(
+    name="X-App-Secret",
+    scheme_name="XAppSecret",
+    auto_error=False,
+    description="Static shared secret for the MVP Android app",
+)
+
+
+async def verify_app_secret(x_app_secret: Optional[str] = Security(app_secret_scheme)) -> None:
     """Статический header-secret для мобильного MVP-эндпоинта.
 
     Паттерн зеркалит ``app/auth.py::verify_bot_secret``.
@@ -132,7 +142,13 @@ async def verify_app_secret(x_app_secret: Optional[str] = Header(None)) -> None:
         raise HTTPException(status_code=401, detail="Invalid app secret")
 
 
-@router.get("/shared-config", dependencies=[Depends(verify_app_secret)])
+@router.get(
+    "/shared-config",
+    dependencies=[
+        Depends(verify_app_secret),
+        Depends(rate_limit("mobile-shared-config", times=30, seconds=60)),
+    ],
+)
 async def get_shared_config(
     service_data: ServiceDataModel = Depends(get_service_data),
     pool: asyncpg.Pool = Depends(get_pool),

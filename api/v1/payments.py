@@ -6,8 +6,10 @@ from ipaddress import ip_address, ip_network
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.auth import verify_bot_secret
+from app.client_ip import extract_client_ip
 from app.dependencies import get_service_data, get_pool, get_cache
 from app.factories import build_payment_router
+from app.rate_limit import rate_limit
 from bot_project import bot as telegram_bot
 from app.schemas.payments import (
     PaymentWebhookBody,
@@ -151,25 +153,6 @@ def _calculate_payment_amount(
     }
 
 
-def _extract_client_ip(request: Request) -> str | None:
-    """Извлекает реальный IP клиента с учётом прокси-заголовков."""
-    # Сначала проверяем X-Forwarded-For (может содержать цепочку: client, proxy1, proxy2)
-    forwarded_for = request.headers.get("x-forwarded-for")
-    if forwarded_for:
-        # Берём первый IP — это реальный клиент
-        client_ip_str = forwarded_for.split(",")[0].strip()
-        if client_ip_str:
-            return client_ip_str
-
-    # Затем X-Real-IP
-    real_ip = request.headers.get("x-real-ip")
-    if real_ip:
-        return real_ip
-
-    # Fallback на прямой client.host
-    return request.client.host if request.client else None
-
-
 def _check_webhook_ip(request: Request) -> bool:
     """Проверяет, что webhook приходит с одного из разрешённых IP YooKassa."""
     if settings.disable_webhook_ip_check:
@@ -188,7 +171,7 @@ def _check_webhook_ip(request: Request) -> bool:
         ip_network("2a02:5180::/32"),
     ]
 
-    client_ip_str = _extract_client_ip(request)
+    client_ip_str = extract_client_ip(request)
     if not client_ip_str:
         logger.warning("Webhook: не удалось определить IP клиента")
         return False
@@ -207,7 +190,7 @@ def _check_webhook_ip(request: Request) -> bool:
         return False
 
 
-@router.post("/webhook")
+@router.post("/webhook", dependencies=[Depends(rate_limit("payments-webhook", times=30, seconds=60))])
 async def payment_webhook(
     request: Request,
     body: PaymentWebhookBody,
@@ -230,6 +213,32 @@ async def payment_webhook(
     if not payment_id:
         logger.warning("Webhook без payment_id")
         raise HTTPException(status_code=400, detail="Missing payment id in webhook body")
+
+    # YooKassa не подписывает тело webhook (нет HMAC в notification API) —
+    # единственная защита в транспорте это IP-whitelist выше. Дублируем
+    # подтверждение статуса прямым authenticated-запросом к YooKassa API:
+    # тело webhook само по себе не может инициировать выдачу ключа, только
+    # реально подтверждённый на стороне YooKassa "succeeded"-статус.
+    try:
+        import yookassa
+        yookassa.Configuration.account_id = settings.yookassa_shop_id
+        yookassa.Configuration.secret_key = settings.yookassa_secret_key
+
+        yk_payment = await asyncio.wait_for(
+            asyncio.to_thread(yookassa.Payment.find_one, payment_id),
+            timeout=15.0,
+        )
+    except Exception as e:
+        logger.error("Не удалось подтвердить платёж через YooKassa API", extra={"payment_id": payment_id, "error": str(e)})
+        raise HTTPException(status_code=502, detail="Failed to confirm payment with YooKassa") from e
+
+    yk_status = getattr(yk_payment, "status", None)
+    if yk_status != "succeeded":
+        logger.warning(
+            "Webhook заявляет payment.succeeded, но YooKassa API сообщает иной статус — игнорируем",
+            extra={"payment_id": payment_id, "yookassa_status": yk_status},
+        )
+        raise HTTPException(status_code=409, detail="Payment status not confirmed by YooKassa")
 
     logger.debug("Начало обработки webhook платежа", extra={"payment_id": payment_id})
 

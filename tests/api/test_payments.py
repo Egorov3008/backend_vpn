@@ -19,7 +19,8 @@ async def test_webhook_non_payment_event_returns_ok(api_client):
 
 @pytest.mark.asyncio
 async def test_webhook_payment_succeeded_calls_router(api_client, mock_service_data):
-    with patch("api.v1.payments.build_payment_router") as mock_factory:
+    with patch("api.v1.payments.build_payment_router") as mock_factory, \
+         patch("yookassa.Payment.find_one", return_value=MagicMock(status="succeeded")):
         mock_router = MagicMock()
         mock_router.route = AsyncMock(return_value=None)
         mock_factory.return_value = mock_router
@@ -36,10 +37,31 @@ async def test_webhook_payment_succeeded_calls_router(api_client, mock_service_d
 
 
 @pytest.mark.asyncio
+async def test_webhook_not_confirmed_by_yookassa_returns_409(api_client, mock_service_data):
+    """Webhook claims payment.succeeded, but a direct check against the
+    YooKassa API disagrees — must not process the (possibly forged) webhook."""
+    with patch("api.v1.payments.build_payment_router") as mock_factory, \
+         patch("yookassa.Payment.find_one", return_value=MagicMock(status="pending")):
+        mock_router = MagicMock()
+        mock_router.route = AsyncMock(return_value=None)
+        mock_factory.return_value = mock_router
+
+        response = await api_client.post("/api/v1/payments/webhook", json={
+            "type": "notification",
+            "event": "payment.succeeded",
+            "object": {"id": "pay_abc123"},
+        })
+
+    assert response.status_code == 409
+    mock_router.route.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_webhook_passes_notifier_to_router(api_client, mock_service_data):
     """Regression: webhook must pass a TelegramBotNotifier so the user
     actually receives a Telegram message after the key is created."""
-    with patch("api.v1.payments.build_payment_router") as mock_factory:
+    with patch("api.v1.payments.build_payment_router") as mock_factory, \
+         patch("yookassa.Payment.find_one", return_value=MagicMock(status="succeeded")):
         mock_router = MagicMock()
         mock_router.route = AsyncMock(return_value=None)
         mock_factory.return_value = mock_router

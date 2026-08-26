@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from api.v1 import admin, auth, keys, landing, mobile_mvp, payments, tariffs, users
+from api.v1 import admin, auth, keys, landing, mobile_mvp, payments, public, tariffs, users
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth.router)
@@ -12,3 +12,4 @@ api_router.include_router(admin.router)
 api_router.include_router(admin.destructive_router)
 api_router.include_router(landing.router)
 api_router.include_router(mobile_mvp.router)
+api_router.include_router(public.router)

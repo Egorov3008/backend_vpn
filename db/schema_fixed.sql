@@ -191,6 +191,25 @@ CREATE INDEX IF NOT EXISTS idx_admin_audit_log_occurred_at
 CREATE INDEX IF NOT EXISTS idx_admin_audit_log_action
     ON admin_audit_log(action);
 
+-- ============================================================================
+-- 5d. API clients — внешние потребители публичного REST API (Этап 4)
+-- ============================================================================
+-- См. миграцию 020. Хранится только hash ключа, не сырой ключ.
+CREATE TABLE IF NOT EXISTS api_clients
+(
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    key_prefix TEXT NOT NULL,
+    key_hash TEXT NOT NULL UNIQUE,
+    scopes TEXT[] NOT NULL DEFAULT '{}',
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    last_used_at TIMESTAMPTZ,
+    revoked_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_api_clients_key_hash ON api_clients(key_hash);
+
 -- Ensure total_gb default matches model default (migration 008)
 DO $$
 BEGIN

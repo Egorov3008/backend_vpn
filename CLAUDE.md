@@ -166,6 +166,8 @@ PostgreSQL + 3x-UI Panel
 
 **No user authentication** — backend trusts the `tg_id` parameter from the calling service (bot or web). The calling service is responsible for JWT validation.
 
+**External API clients (public-api tag):** Unlike bot/web/mobile-mvp above, these don't use a static env-secret — `Authorization: Bearer <key>` against per-client keys stored (hashed) in the `api_clients` table, checked by `verify_api_client(required_scopes=[...])` (`app/auth.py`, `services/api_clients/service.py`). Keys are issued/listed/revoked/rotated via admin-only `POST/GET /admin/api-clients*` (`X-API-Key` + `X-Admin-Tg-Id`, same as other destructive admin ops). The raw key is only ever shown once, in the create/rotate response. Pilot endpoint: `GET /api/v1/public/tariffs` (scope `tariffs:read`). The platform monorepo's `nginx/default.conf.template` proxies `/api/v1/public/` straight to `backend` (not through `web`), rate-limited both at nginx (`limit_req zone=public_api`) and in-app (`app/rate_limit.py`).
+
 ### Database
 
 **Connection Pool:** asyncpg (`app/core/database.py`). Injected per-endpoint via `Depends(get_pool)`.

@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 import asyncpg
@@ -15,11 +15,39 @@ from app.schemas.admin import (
     AdminChangeTariffRequest,
     AdminMaintenanceModeRequest,
     AdminUpdatePanelMetaRequest,
+    AdminStatsResponse,
+    AdminGraceBonusStatsResponse,
+    AdminSchedulerStatusResponse,
+    MaintenanceStatusResponse,
+    AdminUserStockResponse,
+    AdminInactiveUsersResponse,
+    AdminDeleteCountResponse,
+    AdminGenerateKeyResponse,
+    AdminMassRenewResponse,
+    AdminChangeDateResponse,
+    AdminChangeTariffResponse,
+    AdminPanelMetaResponse,
+    AdminGiftResponse,
+    AdminGiftsListResponse,
+    AdminTariffDetailResponse,
+    AdminTariffItem,
+    AdminTariffsListResponse,
+    AdminReferralLinkResponse,
+    AdminReferralLinkDetailResponse,
+    AdminReferralStatsResponse,
+    AdminKeyItem,
+    AdminKeysListResponse,
+    AdminPaymentItem,
+    AdminPaymentsListResponse,
+    AdminDeleteUserResponse,
+    AdminSyncStartedResponse,
+    AdminSyncStatusResponse,
 )
 from models.stocks.stock import Stock
 from database.service import DataService
 from logger import logger
 from models import User
+from services.api_clients.service import ApiClientService
 from services.cache.key_manager import CacheKeyManager
 from services.cache.service import CacheService
 from services.core.data.service import ServiceDataModel
@@ -27,6 +55,12 @@ from services.core.keys.admin_report import KeyAdminReport
 from services.core.keys.utils.reset import KeyResetter
 from services.core.keys.utils.inbounds import paid_inbound_ids
 from services.system.maintenance import maintenance_mode
+from app.schemas.api_clients import (
+    ApiClientCreateRequest,
+    ApiClientCreatedResponse,
+    ApiClientResponse,
+    ApiClientsListResponse,
+)
 
 router = APIRouter(
     prefix="/admin",
@@ -48,7 +82,7 @@ destructive_router = APIRouter(
 )
 
 
-@router.get("/stats")
+@router.get("/stats", response_model=AdminStatsResponse)
 async def get_stats(
     service_data: ServiceDataModel = Depends(get_service_data),
 ):
@@ -58,7 +92,7 @@ async def get_stats(
     return {"total_users": len(users), **stats}
 
 
-@router.get("/grace-bonus-stats")
+@router.get("/grace-bonus-stats", response_model=AdminGraceBonusStatsResponse)
 async def get_grace_bonus_stats(
     pool: asyncpg.Pool = Depends(get_pool),
 ):
@@ -67,7 +101,7 @@ async def get_grace_bonus_stats(
     return await GraceBonusStatsService(pool).get()
 
 
-@router.get("/scheduler/status")
+@router.get("/scheduler/status", response_model=AdminSchedulerStatusResponse)
 async def admin_scheduler_status(
     service_data: ServiceDataModel = Depends(get_service_data),
 ):
@@ -91,7 +125,7 @@ async def admin_scheduler_status(
     }
 
 
-@router.get("/maintenance-mode")
+@router.get("/maintenance-mode", response_model=MaintenanceStatusResponse)
 async def get_maintenance_mode(
     pool: asyncpg.Pool = Depends(get_pool),
 ):
@@ -99,7 +133,7 @@ async def get_maintenance_mode(
     return await maintenance_mode.get_status(pool)
 
 
-@destructive_router.post("/maintenance-mode")
+@destructive_router.post("/maintenance-mode", response_model=MaintenanceStatusResponse)
 async def set_maintenance_mode(
     body: AdminMaintenanceModeRequest,
     principal: AdminPrincipal = Depends(verify_admin_actor),
@@ -123,9 +157,15 @@ async def set_maintenance_mode(
 
 @router.get("/users", response_model=List[UserResponse])
 async def list_users(
+    response: Response,
+    limit: Optional[int] = Query(None, ge=1, le=1000, description="Page size; omit for full list (legacy behaviour)"),
+    offset: int = Query(0, ge=0),
     service_data: ServiceDataModel = Depends(get_service_data),
 ) -> List[UserResponse]:
     users = await service_data.users.get_all()
+    response.headers["X-Total-Count"] = str(len(users))
+    if limit is not None:
+        users = users[offset:offset + limit]
     return [UserResponse.from_user(u) for u in users]
 
 
@@ -140,7 +180,7 @@ async def admin_get_user(
     return UserResponse.from_user(user)
 
 
-@router.get("/users/{tg_id}/stock")
+@router.get("/users/{tg_id}/stock", response_model=AdminUserStockResponse)
 async def admin_get_user_stock(
     tg_id: int,
     service_data: ServiceDataModel = Depends(get_service_data),
@@ -250,9 +290,8 @@ async def admin_delete_key(
     try:
         deleted = await xui.delete_client(email, key.inbound_id, key.client_id)
     except Exception as e:
-        raise HTTPException(
-            status_code=409, detail=f"Failed to delete key from panel: {e}"
-        )
+        logger.error("Failed to delete key from panel", email=email, error=str(e))
+        raise HTTPException(status_code=409, detail="Failed to delete key from panel")
 
     if not deleted:
         raise HTTPException(status_code=409, detail="Failed to delete key from panel")
@@ -266,7 +305,7 @@ async def admin_delete_key(
     return Response(status_code=204)
 
 
-@router.get("/users/inactive")
+@router.get("/users/inactive", response_model=AdminInactiveUsersResponse)
 async def list_inactive_users(
     service_data: ServiceDataModel = Depends(get_service_data),
     pool=Depends(get_pool),
@@ -287,7 +326,7 @@ async def list_inactive_users(
     return {"count": len(inactive), "users": [UserResponse.from_user(u) for u in inactive]}
 
 
-@destructive_router.post("/users/inactive/delete")
+@destructive_router.post("/users/inactive/delete", response_model=AdminDeleteCountResponse)
 async def delete_inactive_users(
     principal: AdminPrincipal = Depends(verify_admin_actor),
     service_data: ServiceDataModel = Depends(get_service_data),
@@ -315,7 +354,7 @@ async def delete_inactive_users(
     return {"deleted": deleted}
 
 
-@destructive_router.post("/keys/generate")
+@destructive_router.post("/keys/generate", response_model=AdminGenerateKeyResponse)
 async def admin_generate_key(
     body: AdminGenerateKeyRequest,
     principal: AdminPrincipal = Depends(verify_admin_actor),
@@ -358,7 +397,7 @@ async def admin_generate_key(
     return result
 
 
-@destructive_router.post("/keys/mass-renew")
+@destructive_router.post("/keys/mass-renew", response_model=AdminMassRenewResponse)
 async def admin_mass_renew(
     body: AdminMassRenewRequest,
     principal: AdminPrincipal = Depends(verify_admin_actor),
@@ -414,7 +453,7 @@ async def admin_mass_renew(
     return {"total": len(body.emails), "success": success_count, "failed": len(body.emails) - success_count, "results": results}
 
 
-@destructive_router.post("/keys/{email}/change-date")
+@destructive_router.post("/keys/{email}/change-date", response_model=AdminChangeDateResponse)
 async def admin_change_key_date(
     email: str,
     body: AdminChangeDateRequest,
@@ -457,7 +496,7 @@ async def admin_change_key_date(
     return {"email": email, "expiry_time": body.expiry_time}
 
 
-@destructive_router.post("/keys/{email}/change-tariff")
+@destructive_router.post("/keys/{email}/change-tariff", response_model=AdminChangeTariffResponse)
 async def admin_change_key_tariff(
     email: str,
     body: AdminChangeTariffRequest,
@@ -507,7 +546,11 @@ async def admin_change_key_tariff(
     return {"email": email, "tariff_id": tariff.id}
 
 
-@destructive_router.post("/keys/{email}/panel-meta")
+@destructive_router.post(
+    "/keys/{email}/panel-meta",
+    response_model=AdminPanelMetaResponse,
+    response_model_exclude_none=True,
+)
 async def admin_update_key_panel_meta(
     email: str,
     body: AdminUpdatePanelMetaRequest,
@@ -550,7 +593,7 @@ async def admin_update_key_panel_meta(
     return {"email": email, **overrides}
 
 
-@router.get("/gifts/{token}")
+@router.get("/gifts/{token}", response_model=AdminGiftResponse)
 async def admin_get_gift(
     token: str,
     service_data: ServiceDataModel = Depends(get_service_data),
@@ -574,7 +617,7 @@ async def admin_get_gift(
     }
 
 
-@router.get("/gifts")
+@router.get("/gifts", response_model=AdminGiftsListResponse)
 async def admin_list_gifts(
     sender_tg_id: int = Query(None, description="Filter by sender Telegram ID"),
     service_data: ServiceDataModel = Depends(get_service_data),
@@ -601,7 +644,7 @@ async def admin_list_gifts(
     }
 
 
-@router.get("/tariffs/{tariff_id}")
+@router.get("/tariffs/{tariff_id}", response_model=AdminTariffDetailResponse)
 async def admin_get_tariff(
     tariff_id: int,
     pool=Depends(get_pool),
@@ -620,7 +663,7 @@ async def admin_get_tariff(
     }
 
 
-@router.get("/referrals/links/{tg_id}")
+@router.get("/referrals/links/{tg_id}", response_model=AdminReferralLinkResponse)
 async def admin_get_referral_link(
     tg_id: int,
     service_data: ServiceDataModel = Depends(get_service_data),
@@ -632,7 +675,7 @@ async def admin_get_referral_link(
     return {"token": None, "referrer_tg_id": tg_id}
 
 
-@router.post("/referrals/links")
+@router.post("/referrals/links", response_model=AdminReferralLinkResponse)
 async def admin_create_referral_link(
     tg_id: int = Query(..., description="Referrer Telegram ID"),
     pool=Depends(get_pool),
@@ -650,7 +693,7 @@ async def admin_create_referral_link(
     return {"token": link.token, "referrer_tg_id": link.referrer_tg_id}
 
 
-@router.get("/referrals/links/by-token/{token}")
+@router.get("/referrals/links/by-token/{token}", response_model=AdminReferralLinkDetailResponse)
 async def admin_get_referral_link_by_token(
     token: str,
     service_data: ServiceDataModel = Depends(get_service_data),
@@ -667,7 +710,7 @@ async def admin_get_referral_link_by_token(
     }
 
 
-@router.get("/referrals/stats/{tg_id}")
+@router.get("/referrals/stats/{tg_id}", response_model=AdminReferralStatsResponse)
 async def admin_get_referral_stats(
     tg_id: int,
     pool=Depends(get_pool),
@@ -695,17 +738,17 @@ async def admin_get_referral_stats(
     }
 
 
-@router.get("/tariffs")
+@router.get("/tariffs", response_model=AdminTariffsListResponse)
 async def admin_list_tariffs(
     pool=Depends(get_pool),
     service_data: ServiceDataModel = Depends(get_service_data),
 ):
     """Admin: list all tariffs."""
     tariffs = await service_data.tariffs.get_all(conn=pool)
-    return {"tariffs": tariffs}
+    return {"tariffs": [AdminTariffItem.from_tariff(t) for t in tariffs]}
 
 
-@destructive_router.post("/users/{tg_id}/delete")
+@destructive_router.post("/users/{tg_id}/delete", response_model=AdminDeleteUserResponse)
 async def admin_delete_user(
     tg_id: int,
     principal: AdminPrincipal = Depends(verify_admin_actor),
@@ -765,22 +808,34 @@ async def admin_delete_user(
     return {"deleted_user": True, "keys_deleted": keys_deleted, "keys_failed": keys_failed}
 
 
-@router.get("/keys")
+@router.get("/keys", response_model=AdminKeysListResponse)
 async def admin_list_keys(
+    response: Response,
+    limit: Optional[int] = Query(None, ge=1, le=1000, description="Page size; omit for full list (legacy behaviour)"),
+    offset: int = Query(0, ge=0),
     service_data: ServiceDataModel = Depends(get_service_data),
 ):
     """Admin: list all keys."""
     keys = await service_data.keys.get_all()
-    return {"keys": keys}
+    response.headers["X-Total-Count"] = str(len(keys))
+    if limit is not None:
+        keys = keys[offset:offset + limit]
+    return {"keys": [AdminKeyItem.from_key(k) for k in keys]}
 
 
-@router.get("/payments")
+@router.get("/payments", response_model=AdminPaymentsListResponse)
 async def admin_list_payments(
+    response: Response,
+    limit: Optional[int] = Query(None, ge=1, le=1000, description="Page size; omit for full list (legacy behaviour)"),
+    offset: int = Query(0, ge=0),
     service_data: ServiceDataModel = Depends(get_service_data),
 ):
     """Admin: list all payments."""
     payments = await service_data.payments.get_all()
-    return {"payments": payments}
+    response.headers["X-Total-Count"] = str(len(payments))
+    if limit is not None:
+        payments = payments[offset:offset + limit]
+    return {"payments": [AdminPaymentItem.from_payment(p) for p in payments]}
 
 
 def _get_sync_scheduler():
@@ -793,7 +848,7 @@ def _get_sync_scheduler():
     return getattr(app.state, "sync_scheduler", None)
 
 
-@destructive_router.post("/sync")
+@destructive_router.post("/sync", response_model=AdminSyncStartedResponse, status_code=202)
 async def admin_sync(
     principal: AdminPrincipal = Depends(verify_admin_actor),
     pool: asyncpg.Pool = Depends(get_pool),
@@ -824,7 +879,7 @@ async def admin_sync(
     )
 
 
-@destructive_router.get("/sync/{job_id}")
+@destructive_router.get("/sync/{job_id}", response_model=AdminSyncStatusResponse)
 async def admin_sync_status(
     job_id: str,
     principal: AdminPrincipal = Depends(verify_admin_actor),
@@ -838,4 +893,57 @@ async def admin_sync_status(
     if js is None:
         raise HTTPException(status_code=404, detail="Job not found")
     return {"status": js.status, "result": js.result, "error": js.error}
+
+
+# --- Управление API-ключами внешних клиентов (Этап 4) -------------------
+
+@destructive_router.post("/api-clients", response_model=ApiClientCreatedResponse)
+async def create_api_client(
+    body: ApiClientCreateRequest,
+    pool: asyncpg.Pool = Depends(get_pool),
+    principal: AdminPrincipal = Depends(verify_admin_actor),
+):
+    """Создаёт нового внешнего API-клиента. Возвращает сырой ключ
+    (`api_key`) один раз — дальше он нигде не восстанавливается."""
+    client, raw_key = await ApiClientService(pool).create(body.name, body.scopes)
+    await AuditLogger(pool).record(principal.admin_tg_id, "create_api_client", body.name)
+    return ApiClientCreatedResponse(**ApiClientResponse.from_client(client).model_dump(), api_key=raw_key)
+
+
+@destructive_router.get("/api-clients", response_model=ApiClientsListResponse)
+async def list_api_clients(
+    pool: asyncpg.Pool = Depends(get_pool),
+    principal: AdminPrincipal = Depends(verify_admin_actor),
+):
+    clients = await ApiClientService(pool).list_all()
+    return {"clients": [ApiClientResponse.from_client(c) for c in clients]}
+
+
+@destructive_router.post("/api-clients/{client_id}/revoke", response_model=ApiClientResponse)
+async def revoke_api_client(
+    client_id: int,
+    pool: asyncpg.Pool = Depends(get_pool),
+    principal: AdminPrincipal = Depends(verify_admin_actor),
+):
+    client = await ApiClientService(pool).revoke(client_id)
+    if not client:
+        raise HTTPException(status_code=404, detail="API client not found")
+    await AuditLogger(pool).record(principal.admin_tg_id, "revoke_api_client", str(client_id))
+    return ApiClientResponse.from_client(client)
+
+
+@destructive_router.post("/api-clients/{client_id}/rotate", response_model=ApiClientCreatedResponse)
+async def rotate_api_client(
+    client_id: int,
+    pool: asyncpg.Pool = Depends(get_pool),
+    principal: AdminPrincipal = Depends(verify_admin_actor),
+):
+    """Выпускает новый ключ для существующего клиента; старый ключ
+    перестаёт работать немедленно (и реактивирует клиента, если был revoked)."""
+    result = await ApiClientService(pool).rotate(client_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="API client not found")
+    client, raw_key = result
+    await AuditLogger(pool).record(principal.admin_tg_id, "rotate_api_client", str(client_id))
+    return ApiClientCreatedResponse(**ApiClientResponse.from_client(client).model_dump(), api_key=raw_key)
 

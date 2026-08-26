@@ -1,7 +1,9 @@
+import time
 from contextlib import asynccontextmanager
 
 import asyncpg
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from api.v1.router import api_router
@@ -9,7 +11,7 @@ from background.scheduler import create_scheduler
 from config import settings  # noqa: F401
 from database.base import create_db_pool
 from database.service import DataService
-from logger import generate_trace_id, get_trace_id, reset_trace_id, set_trace_id, setup_logging
+from logger import generate_trace_id, logger, reset_trace_id, set_trace_id, setup_logging
 from services.cache.loader import LoadingService
 from services.cache.service import CacheService
 from services.cache.storage import CacheStorage
@@ -65,21 +67,139 @@ async def lifespan(app: FastAPI):
     await pool.close()
 
 
-app = FastAPI(title="VPN Platform Backend", lifespan=lifespan)
+OPENAPI_TAGS = [
+    {
+        "name": "auth",
+        "description": "Регистрация по инвайт-токену и вход через Telegram Login Widget (web-кабинет).",
+    },
+    {
+        "name": "users",
+        "description": "Учётные записи пользователей платформы (bot/web → backend).",
+    },
+    {
+        "name": "keys",
+        "description": "VPN-ключи: создание, продление, удаление, триал, канальный бонус.",
+    },
+    {
+        "name": "payments",
+        "description": "Платежи YooKassa: создание счёта, история, webhook.",
+    },
+    {
+        "name": "tariffs",
+        "description": "Тарифные планы.",
+    },
+    {
+        "name": "landing",
+        "description": "Анонимный поток лендинга (24h-ключи без регистрации, реферальные cookie).",
+    },
+    {
+        "name": "admin",
+        "description": "Административные операции (X-API-Key и/или X-Bot-Secret). "
+        "Деструктивные операции (удаление, mass-renew и т.п.) требуют X-API-Key.",
+    },
+    {
+        "name": "mobile-mvp",
+        "description": "Единый shared-конфиг для MVP-версии Android-приложения (X-App-Secret).",
+    },
+    {
+        "name": "public-api",
+        "description": "Публичный REST API для внешних клиентов (не bot/web/mobile-mvp). "
+        "Аутентификация — персональный API-ключ с scopes: `Authorization: Bearer <key>`. "
+        "Ключи выдаются/отзываются через /admin/api-clients (X-API-Key).",
+    },
+]
+
+app = FastAPI(
+    title="VPN Platform Backend",
+    description=(
+        "Внутренний REST API платформы VPN-сервиса. Источник истины для бизнес-логики "
+        "ключей, платежей и тарифов; клиенты — Telegram-бот, web-кабинет и MVP-приложение. "
+        "Аутентификация — общие секреты в заголовках (см. security schemes ниже), "
+        "не OAuth/per-client API-ключи."
+    ),
+    version="1.0.0",
+    openapi_tags=OPENAPI_TAGS,
+    lifespan=lifespan,
+)
 app.include_router(api_router)
 
 
 @app.middleware("http")
 async def trace_id_middleware(request: Request, call_next):
-    """Генерирует trace_id для каждого HTTP-запроса."""
+    """Генерирует trace_id для каждого HTTP-запроса и пишет access-log
+    (метод/путь/статус/латентность/trace_id)."""
     trace_id = generate_trace_id()
+    # Дублируем в request.state: catch-all Exception handler ниже обслуживается
+    # ServerErrorMiddleware (снаружи этого middleware) и вызывается уже ПОСЛЕ
+    # срабатывания finally/reset_trace_id() здесь — к этому моменту contextvar
+    # уже сброшен, а request.state — нет.
+    request.state.trace_id = trace_id
     set_trace_id(trace_id)
+    start = time.monotonic()
     try:
         response = await call_next(request)
         response.headers["X-Trace-Id"] = trace_id
+        logger.info(
+            "HTTP request",
+            method=request.method,
+            path=request.url.path,
+            status_code=response.status_code,
+            duration_ms=round((time.monotonic() - start) * 1000, 1),
+        )
         return response
+    except Exception:
+        # Тело ошибки формирует unhandled_exception_handler ниже (всегда 500);
+        # здесь — только access-log-строка для этого запроса.
+        logger.error(
+            "HTTP request failed",
+            method=request.method,
+            path=request.url.path,
+            status_code=500,
+            duration_ms=round((time.monotonic() - start) * 1000, 1),
+        )
+        raise
     finally:
         reset_trace_id()
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Единый формат для всех HTTPException — сохраняет `detail` как есть
+    (строка или dict, см. admin.py sync-conflict) для обратной совместимости
+    с тестами, добавляет `trace_id` рядом."""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail, "trace_id": getattr(request.state, "trace_id", "")},
+        headers={**(exc.headers or {}), "X-Trace-Id": getattr(request.state, "trace_id", "")},
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors(), "trace_id": getattr(request.state, "trace_id", "")},
+        headers={"X-Trace-Id": getattr(request.state, "trace_id", "")},
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """Ловит всё, что не поймано роутером — не даёт утечь трейсбеку/деталям
+    исключения наружу; полная информация уходит только в лог."""
+    trace_id = getattr(request.state, "trace_id", "")
+    logger.error(
+        "Unhandled exception",
+        path=request.url.path,
+        method=request.method,
+        error=str(exc),
+        exc_info=True,
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error", "trace_id": trace_id},
+        headers={"X-Trace-Id": trace_id},
+    )
 
 
 @app.get("/health")
