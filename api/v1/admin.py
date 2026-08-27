@@ -183,6 +183,27 @@ async def list_users(
     return [UserResponse.from_user(u) for u in users]
 
 
+@router.get("/users/inactive", response_model=AdminInactiveUsersResponse)
+async def list_inactive_users(
+    service_data: ServiceDataModel = Depends(get_service_data),
+    pool=Depends(get_pool),
+):
+    """Users with is_blocked=True and no keys."""
+    users = await service_data.data_service.users.get_all(pool)
+    keys = await service_data.data_service.keys.get_all(pool)
+    if not isinstance(users, list):
+        users = [users] if users else []
+    if not isinstance(keys, list):
+        keys = [keys] if keys else []
+
+    users_with_keys = {k.tg_id for k in keys}
+    inactive = [
+        u for u in users
+        if u.is_blocked and u.tg_id not in users_with_keys
+    ]
+    return {"count": len(inactive), "users": [UserResponse.from_user(u) for u in inactive]}
+
+
 @router.get("/users/{tg_id}", response_model=UserResponse)
 async def admin_get_user(
     tg_id: int,
@@ -317,27 +338,6 @@ async def admin_delete_key(
     await service_data.data_service.keys.delete(pool, email=email)
     await service_data.cache_service.keys.delete(CacheKeyManager.key(email))
     return Response(status_code=204)
-
-
-@router.get("/users/inactive", response_model=AdminInactiveUsersResponse)
-async def list_inactive_users(
-    service_data: ServiceDataModel = Depends(get_service_data),
-    pool=Depends(get_pool),
-):
-    """Users with is_blocked=True and no keys."""
-    users = await service_data.data_service.users.get_all(pool)
-    keys = await service_data.data_service.keys.get_all(pool)
-    if not isinstance(users, list):
-        users = [users] if users else []
-    if not isinstance(keys, list):
-        keys = [keys] if keys else []
-
-    users_with_keys = {k.tg_id for k in keys}
-    inactive = [
-        u for u in users
-        if u.is_blocked and u.tg_id not in users_with_keys
-    ]
-    return {"count": len(inactive), "users": [UserResponse.from_user(u) for u in inactive]}
 
 
 @destructive_router.post("/users/inactive/delete", response_model=AdminDeleteCountResponse)
