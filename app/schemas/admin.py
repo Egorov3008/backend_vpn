@@ -53,6 +53,48 @@ class AdminStatsResponse(BaseModel):
     other: int
 
 
+class AdminFunnelMetric(BaseModel):
+    date: str
+    new_users: int
+    users_with_keys: int
+    paying_users: int
+
+
+class AdminKeyExpiryMetric(BaseModel):
+    expiry_range: str
+    keys_count: int
+
+
+class AdminPaymentStatusMetric(BaseModel):
+    status: str
+    count: int
+    total_amount: float
+
+
+class AdminDashboardMetricsResponse(BaseModel):
+    mrr_current_month: float
+    mrr_previous_month: float
+    mrr_growth: float
+    paying_users_current: int
+    arpu_current: float
+
+    funnel: List[AdminFunnelMetric]
+    total_new_users_30d: int
+    total_users_with_keys_30d: int
+    total_paying_users_30d: int
+    conversion_to_keys_pct: float
+    conversion_to_paid_pct: float
+
+    expiring_keys: List[AdminKeyExpiryMetric]
+    total_expiring_72h: int
+
+    payment_statuses: List[AdminPaymentStatusMetric]
+    total_succeeded: int
+    total_pending: int
+    total_canceled: int
+    succeeded_pct: float
+
+
 class ChannelBonusStats(BaseModel):
     cumulative: int
     today: int

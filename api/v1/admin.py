@@ -16,6 +16,7 @@ from app.schemas.admin import (
     AdminMaintenanceModeRequest,
     AdminUpdatePanelMetaRequest,
     AdminStatsResponse,
+    AdminDashboardMetricsResponse,
     AdminGraceBonusStatsResponse,
     AdminSchedulerStatusResponse,
     MaintenanceStatusResponse,
@@ -90,6 +91,19 @@ async def get_stats(
     users = await service_data.users.get_all()
     stats = await KeyAdminReport().get_summary_stats(keys)
     return {"total_users": len(users), **stats}
+
+
+@router.get("/dashboard-metrics", response_model=AdminDashboardMetricsResponse)
+async def get_dashboard_metrics(
+    pool: asyncpg.Pool = Depends(get_pool),
+):
+    """MRR, воронка, истекающие ключи, статусы платежей — для web-дашборда.
+
+    Раньше web считал это прямым SQL к общей Postgres; теперь backend —
+    единственный владелец БД, web получает те же данные отсюда.
+    """
+    from services.admin_dashboard_metrics import DashboardMetricsService
+    return await DashboardMetricsService(pool).get_all_dashboard_metrics()
 
 
 @router.get("/grace-bonus-stats", response_model=AdminGraceBonusStatsResponse)
