@@ -38,10 +38,9 @@ it depends on `platform/`'s Postgres and docker network being reachable, and onl
   — when `shared/config/core.py` changes in one place, mirror it manually:
   `rsync -a --delete platform/shared/ platform-backend/shared/`, review the diff, run
   tests before committing on both sides.
-- **Secrets:** `BOT_SECRET_KEY` and `ADMIN_API_KEY` must match the values in
-  `platform/.env` (read by `bot`/`web`) — no automated sync, rotate by hand in both
-  places. `.env.example`'s comment claiming `DATABASE_URL`/`DB_*` are "not shared with
-  the platform monorepo anymore" is stale — see Database above.
+- **Secrets:** `BOT_SECRET_KEY`, `ADMIN_API_KEY`, and `DB_NAME`/`DB_USER`/`DB_PASSWORD`/
+  `DATABASE_URL` must match the values in `platform/.env` (read by `bot`/`web`/its
+  `postgres`) — no automated sync, rotate by hand in both places.
 
 ## Commands
 
