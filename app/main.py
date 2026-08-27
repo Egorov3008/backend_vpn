@@ -1,10 +1,12 @@
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import asyncpg
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from api.v1.router import api_router
 from background.scheduler import create_scheduler
@@ -122,6 +124,14 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.include_router(api_router)
+
+# Vanilla-JS admin panel (admin_panel/) — separate from /api/v1/admin/* (the API
+# it consumes). No CORS needed: same origin as the API.
+app.mount(
+    "/admin-panel",
+    StaticFiles(directory=Path(__file__).parent.parent / "admin_panel", html=True),
+    name="admin_panel",
+)
 
 
 @app.middleware("http")
