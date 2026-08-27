@@ -41,6 +41,18 @@ it depends on `platform/`'s Postgres and docker network being reachable, and onl
 - **Secrets:** `BOT_SECRET_KEY`, `ADMIN_API_KEY`, and `DB_NAME`/`DB_USER`/`DB_PASSWORD`/
   `DATABASE_URL` must match the values in `platform/.env` (read by `bot`/`web`/its
   `postgres`) — no automated sync, rotate by hand in both places.
+- **Public HTTPS (test/dev box only):** `docker-compose.yml` also runs a `caddy`
+  service that publishes `backend` to the internet directly — automatic Let's Encrypt
+  TLS for `BACKEND_DOMAIN` (`Caddyfile`, reverse-proxying to `backend:8000`), host
+  ports via `CADDY_HTTP_PORT`/`CADDY_HTTPS_PORT` (default 80/443 — required for the
+  ACME HTTP-01 challenge unless you switch to DNS-01). All three vars live in `.env`,
+  read by `docker-compose.yml` for variable substitution (not by the `backend` app).
+  This is deliberately **not** the `platform/`-nginx-as-single-edge pattern used
+  elsewhere in this doc (see External API clients below) — it's the first piece of a
+  target architecture where `backend` + the 3x-ui panel are a self-contained unit on
+  one server, and bot/web/other API clients live on different servers entirely, so
+  `backend` needs its own public ingress rather than depending on `platform/` being
+  co-located.
 
 ## Commands
 
