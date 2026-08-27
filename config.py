@@ -78,7 +78,7 @@ class Settings(BaseSettings):
     support_chat_url: str = ""
 
     # Bot behaviour
-    admin_id_raw: str = "[0]"
+    admin_id_raw: str = Field(default="[0]", alias="ADMIN_ID")
     available_rates_raw: str = Field(default="[9, 8, 7]", alias="AVAILABLE_RATES")
     available_connections_raw: str = Field(default="[11, 12]", alias="AVAILABLE_CONNECTIONS")
     default_pricing_plan: str = "10"
