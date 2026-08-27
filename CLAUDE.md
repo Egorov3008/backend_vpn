@@ -9,21 +9,30 @@ FastAPI backend serving as the source of truth for VPN service business logic.
 ## Standalone deployment (extracted from the platform monorepo)
 
 This repository was extracted from the `platform/` monorepo (which still hosts `bot/`
-and `web/`) via `git filter-repo`, keeping full commit history. It is a fully
-independent service: own Dockerfile, own `docker-compose.yml`/`docker-compose.dev.yml`,
-own CI (`.github/workflows/ci.yml`), own Postgres.
+and `web/`) via `git filter-repo`, keeping full commit history. It has its own
+Dockerfile, `docker-compose.yml`/`docker-compose.dev.yml`, and CI
+(`.github/workflows/ci.yml`) — but for **production it is not network-independent**:
+it depends on `platform/`'s Postgres and docker network being reachable, and only
+`docker-compose.dev.yml` (its own throwaway `postgres_dev`) is truly standalone.
 
-- **Networking:** `docker-compose.yml` attaches `backend` to two networks — an internal
-  `db_net` (backend ↔ its own `postgres`) and the platform's existing external network
-  `platform_net` (real name: `platform_default`). The external network is what lets
-  `bot`/`web`/`nginx` in `platform/` keep resolving `backend:8000` by service name,
-  unchanged, even though it's now a different compose project.
-- **Database:** Postgres moved into this repository — it's the only service that talks
-  to the DB directly (bot/web only ever go through this API). Production data was moved
-  via zero-copy Docker volume reuse (`platform_postgres_data`, declared `external: true`
-  in `docker-compose.yml`), not a dump/restore copy. Schema DDL lives at
-  `db/schema_fixed.sql` (only used to init a genuinely empty volume — a no-op against the
-  reused production volume). DB backup/restore/migration tooling lives in `tools/db/`.
+- **Networking:** `docker-compose.yml` attaches `backend` to a single network — the
+  platform's existing external network `platform_net` (real name: `platform_default`,
+  created by `platform/docker-compose.yml`). This is what lets `bot`/`web`/`nginx` in
+  `platform/` keep resolving `backend:8000` by service name, and what lets `backend`
+  resolve `postgres:5432` (below) — both only work because `backend` and `platform/`
+  run on the **same host**, attached to the same local docker network. There is no
+  overlay/cross-host networking set up; moving `platform/` to a different server while
+  leaving `backend` on this one would break both directions of that name resolution.
+- **Database:** `backend` has **no Postgres of its own** in production — `DATABASE_URL`
+  points at `postgres:5432`, the platform monorepo's own Postgres container, resolved
+  by service name over `platform_net`. (An earlier revision gave `backend` its own
+  `postgres` service on a zero-copy-reused `platform_postgres_data` volume; that ran
+  *two* Postgres processes against the same data directory concurrently and corrupted
+  the WAL — reverted in `f1ec094`, do not reintroduce a local `postgres` service in
+  `docker-compose.yml`.) `DB_USER`/`DB_PASSWORD`/`DB_NAME` in `.env` must match the
+  platform monorepo's Postgres credentials. Schema DDL (`db/schema_fixed.sql`) and the
+  `tools/db/` backup/restore/migration tooling are still relevant for the dev compose's
+  isolated `postgres_dev`, not for prod.
 - **`shared/`:** this repo has its own copy of `shared/` (was a bind-mount in the
   monorepo). `platform/bot/` keeps its own separate copy. **There is no automated sync**
   — when `shared/config/core.py` changes in one place, mirror it manually:
@@ -31,7 +40,8 @@ own CI (`.github/workflows/ci.yml`), own Postgres.
   tests before committing on both sides.
 - **Secrets:** `BOT_SECRET_KEY` and `ADMIN_API_KEY` must match the values in
   `platform/.env` (read by `bot`/`web`) — no automated sync, rotate by hand in both
-  places. `DATABASE_URL`/`DB_*` are no longer shared with the platform monorepo.
+  places. `.env.example`'s comment claiming `DATABASE_URL`/`DB_*` are "not shared with
+  the platform monorepo anymore" is stale — see Database above.
 
 ## Commands
 
@@ -185,6 +195,8 @@ Grep `api/v1/admin.py` for the current full route list rather than trusting a ma
 **External API clients (public-api tag):** Unlike bot/web/mobile-mvp above, these don't use a static env-secret — `Authorization: Bearer <key>` against per-client keys stored (hashed) in the `api_clients` table, checked by `verify_api_client(required_scopes=[...])` (`app/auth.py`, `services/api_clients/service.py`). Keys are issued/listed/revoked/rotated via admin-only `POST/GET /admin/api-clients*` (`X-API-Key` + `X-Admin-Tg-Id`, same as other destructive admin ops). The raw key is only ever shown once, in the create/rotate response. Pilot endpoint: `GET /api/v1/public/tariffs` (scope `tariffs:read`). The platform monorepo's `nginx/default.conf.template` proxies `/api/v1/public/` straight to `backend` (not through `web`), rate-limited both at nginx (`limit_req zone=public_api`) and in-app (`app/rate_limit.py`).
 
 ### Database
+
+**Ownership:** in production, `backend` connects to the platform monorepo's Postgres container (not one of its own) — see the Database bullet under Standalone deployment above for why, and for the host/network coupling that implies.
 
 **Connection Pool:** asyncpg, created once at startup by `create_db_pool()` (`database/base.py`) and stored on `app.state.pool`. Injected per-endpoint via `Depends(get_pool)` (`app/dependencies.py`; also `get_cache` and `get_service_data` for the other two `app.state` singletons set up in `app/main.py`'s lifespan).
 
