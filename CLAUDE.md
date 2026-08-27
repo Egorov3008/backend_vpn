@@ -1,3 +1,7 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # Backend API
 
 FastAPI backend serving as the source of truth for VPN service business logic.
@@ -46,6 +50,15 @@ pytest tests/api/test_keys.py
 
 # Run a single test
 pytest tests/api/test_keys.py::test_list_keys
+
+# Fail-fast / coverage / one module (Makefile wrappers around pytest)
+make test-fast
+make test-cov            # HTML report at htmlcov/index.html
+make test-module MODULE=api
+
+# Lint (ruff check) / auto-fix + format
+make lint
+make formatting
 ```
 
 ## Architecture Overview
@@ -137,6 +150,15 @@ PostgreSQL + 3x-UI Panel
 - **GET `/{tg_id}`** — Get user info (server_id, ref_count, etc.)
 - **POST `/`** — Register new user (auto-called by bot or web on first key creation)
 
+#### Auth (`/api/v1/auth`)
+
+- **POST `/register-from-invite`** — one-time invite-token registration for the web form (`INVITE_TOKEN` env var).
+- **POST `/telegram-login`** — verifies a Telegram Login Widget payload (`app/core/telegram.py::verify_telegram_hash`) and issues/looks up the corresponding user.
+
+#### Landing (`/api/v1/landing`)
+
+Anonymous, cookie-based flow for the marketing landing page (separate from the bot/web `tg_id`-trusting flow above): `POST /set-ref-cookie`, `POST /quick-key` (mints a short-lived key on `XUI_INBOUND_ID_LANDING`), `GET /state`, `POST /mark-converted/{landing_uid}`, `POST /claim/{landing_uid}`. Signed cookies use `LANDING_COOKIE_SECRET` (falls back to `BOT_SECRET_KEY`).
+
 #### Mobile MVP (`/api/v1/mobile`)
 
 - **GET `/shared-config`** — One shared VPN config for the MVP Android app; no per-user auth, no accounts, no per-user state.
@@ -145,20 +167,14 @@ PostgreSQL + 3x-UI Panel
   - Fails: 500 if the shared key isn't configured/found (deploy/provisioning error); 502 if the upstream subscription download/parse fails.
   - Provisioning (one-time, manual): create a free tariff with `amount=0` and `limit_ip=0` (ideally a long `period`), call `POST /keys/create` once against it to mint the shared key, then paste that key's `email` into `MVP_SHARED_KEY_EMAIL`.
 
-#### Admin (`/api/v1/admin`)
+#### Admin (`/api/v1/admin`, `api/v1/admin.py`)
 
-- **GET `/health`** — System health check
-- **POST `/rebuild-cache`** — Force cache refresh from database
-- **GET `/stats`** — Dashboard stats (total users, key stats)
-- **GET `/users`** — List all users
-- **GET `/users/{tg_id}`** — Get user details
-- **GET `/users/{tg_id}/stock`** — Get active discount/stock for user
-- **POST `/users/register`** — Register new user (called by bot)
-- **POST `/users/{tg_id}/keys/generate`** — Admin generate key for user
-- **POST `/users/{tg_id}/keys/mass-renew`** — Mass renewal for user's keys
-- **POST `/keys/{email}/change-date`** — Change key expiry date
-- **POST `/keys/{email}/change-tariff`** — Change key tariff
-- **POST `/keys/{email}/reset-traffic`** — Reset key traffic counters
+Split into two routers with different auth (see Authentication below):
+
+- **`router`** (read-only + `verify_admin_or_bot`, i.e. bot secret also accepted): stats, scheduler status, maintenance-mode status, user/key/payment listings, gift/tariff/referral lookups.
+- **`destructive_router`** (`verify_admin_actor` only — `X-API-Key` + `X-Admin-Tg-Id`): mutating ops — set maintenance mode, delete user/key, generate key, mass-renew, change key date/tariff, delete inactive users, start/poll a panel `sync` job, and `api-clients` create/list/revoke/rotate.
+
+Grep `api/v1/admin.py` for the current full route list rather than trusting a manually maintained enumeration here — it grows frequently (referrals, gift codes, promotions, and sync jobs were all added after this section was first written).
 
 ### Authentication
 
@@ -170,7 +186,9 @@ PostgreSQL + 3x-UI Panel
 
 ### Database
 
-**Connection Pool:** asyncpg (`app/core/database.py`). Injected per-endpoint via `Depends(get_pool)`.
+**Connection Pool:** asyncpg, created once at startup by `create_db_pool()` (`database/base.py`) and stored on `app.state.pool`. Injected per-endpoint via `Depends(get_pool)` (`app/dependencies.py`; also `get_cache` and `get_service_data` for the other two `app.state` singletons set up in `app/main.py`'s lifespan).
+
+**`DataService`** (`database/service.py`) is the raw asyncpg query layer per entity; `LoadingService` (`services/cache/loader.py`) uses it to hydrate `CacheService` at startup and on periodic/manual sync. `ServiceDataModel` (`services/core/data/service.py`) is the higher-level façade combining cache + data service that endpoints and factories actually depend on.
 
 **Tables:**
 - `users` (tg_id, server_id, created_at, ref_count, is_admin)
@@ -179,7 +197,8 @@ PostgreSQL + 3x-UI Panel
 - `payments` (payment_id, tg_id, amount, status, payment_type, created_at, updated_at)
 - `servers` (id, url, api_url, availability)
 - `stocks` (id, name, amount, description, created_at)
-- (and others — see `models.py`)
+- `api_clients` (public-API keys — see External API clients below)
+- (and others — see the `models/` package, one subpackage per entity, e.g. `models/gifts`, `models/referrals`)
 
 ### 3x-UI Integration
 
@@ -241,16 +260,17 @@ PostgreSQL + 3x-UI Panel
 
 ### Logging
 
-Structured logging via `app/core/logging.py`. Use `get_logger(__name__)` in every module.
+Structured logging via `logger.py` (repo root) — a loguru-backed `StructuredLogger` singleton, initialized once in `app/main.py` via `setup_logging(...)`. Import the shared singleton rather than creating a per-module logger:
 
 ```python
-from app.core.logging import get_logger
-logger = get_logger(__name__)
+from logger import logger
 
 logger.info("Key created", email="user@example.com", tg_id=123)
 logger.warning("3x-UI unavailable", error=str(e))
 logger.error("Payment webhook verification failed", reason="IP mismatch")
 ```
+
+`logger.py` also masks sensitive kwargs (`_mask_sensitive`) and binds a per-request `trace_id` (`generate_trace_id`/`set_trace_id`, wired in `app/main.py`'s request middleware). A handful of modules instead use stdlib `logging.getLogger(__name__)` — prefer the shared `logger` singleton for new code.
 
 Configurable via env vars:
 - `LOG_LEVEL` — DEBUG, INFO, WARNING, ERROR (default: INFO)
@@ -316,18 +336,18 @@ async def test_create_key_free_tariff(client, mock_service_data, mock_pool):
 
 ## Environment Variables
 
-Required in `.env`:
+All settings are defined in `config.py` (`Settings`, pydantic-settings, loads `.env` at repo root) — that file is the source of truth for names/defaults/aliases; a snapshot with dummy values is at `.env.example`. Highlights:
 - `DATABASE_URL` — asyncpg DSN
-- `BOT_SECRET_KEY` — shared secret with bot/web clients
-- `TELEGRAM_BOT_TOKEN` — for sending user notifications
+- `BOT_SECRET_KEY` / `ADMIN_API_KEY` / `INVITE_TOKEN` / `MVP_APP_SECRET` — all rejected at startup if left at insecure/placeholder defaults (`shared.config.core.reject_insecure_secret`)
 - `XUI_API_URL` / `XUI_LOGIN` / `XUI_PASSWORD` — 3x-UI panel credentials
 - `AVAILABLE_CONNECTIONS` — JSON/list of panel inbound IDs allowed for new keys (used by `FormConnectionData`; panel inbounds are filtered by this)
-- `XUI_INBOUND_ID_LANDING` — fixed panel inbound ID for landing keys (Telegram-only baseline). Paid keys are created on `[XUI_INBOUND_ID_LANDING] + AVAILABLE_CONNECTIONS` and stay there for the life of the key — the 3x-ui panel cuts VPN access on its own once the client's `expiryTime` passes, no code-driven inbound detach. The panel client is **not** deleted automatically — physical deletion from the panel is admin-only (`admin_delete_key` / bulk "delete expired keys" in the bot admin panel).
+- `XUI_INBOUND_ID_LANDING` — fixed panel inbound ID for landing keys (Telegram-only baseline) and for the separate anonymous landing-page flow (`/api/v1/landing`). Paid keys are created on `[XUI_INBOUND_ID_LANDING] + AVAILABLE_CONNECTIONS` and stay there for the life of the key — the 3x-ui panel cuts VPN access on its own once the client's `expiryTime` passes, no code-driven inbound detach. The panel client is **not** deleted automatically — physical deletion from the panel is admin-only (`admin_delete_key` / bulk "delete expired keys" in the bot admin panel).
 - `DEFAULT_PRICING_PLAN` — default tariff ID for trial keys
-- `YOOKASSA_SHOP_ID` / `YOOKASSA_SECRET_KEY` — payment processing
+- `YOOKASSA_SHOP_ID` / `YOOKASSA_SECRET_KEY` — payment processing. `DISABLE_WEBHOOK_IP_CHECK` bypasses the YooKassa IP allowlist for local/dev — the allowlist itself is hardcoded in `api/v1/payments.py::_check_webhook_ip`, not env-configurable.
 - `WEBHOOK_BASE_URL` — public URL for YooKassa callbacks (e.g., https://api.example.com)
-- `WEBHOOK_ALLOWED_IPS` — comma-separated IPs (YooKassa: 185.71.76.0/27,185.109.44.0/27)
-- `ADMIN_TG_IDS` — JSON array of admin Telegram IDs
-- `LOG_LEVEL` — logging level (default: INFO)
-- `MVP_APP_SECRET` — static shared secret for the MVP Android app's `X-App-Secret` header (see Mobile MVP endpoint above)
-- `MVP_SHARED_KEY_EMAIL` — email of the pre-provisioned shared key served by `/api/v1/mobile/shared-config` (empty by default; endpoint returns 500 until set)
+- `ADMIN_ID` — JSON array of admin Telegram IDs
+- `BOT_TOKEN` — for sending user notifications and (via `services/core/referral`) channel-subscription checks against `CANALL_URL`
+- `LOG_LEVEL` / `LOG_FILE` / `LOG_FORMAT` — see Logging below
+- `MVP_APP_SECRET` / `MVP_SHARED_KEY_EMAIL` — see Mobile MVP endpoint above (empty `MVP_SHARED_KEY_EMAIL` by default; endpoint returns 500 until set)
+- `LANDING_COOKIE_SECRET` / `LANDING_PUBLIC_URL` / `CHANNEL_BONUS_DAYS` — landing-page and channel-subscription-bonus flow
+- `PAYMENT_SWEEP_MAX_AGE_MINUTES` / `PAYMENT_SWEEP_EXCLUDE_IDS` — safety-net poller for missed YooKassa webhooks (see `background/scheduler.py`)
