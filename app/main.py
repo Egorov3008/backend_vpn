@@ -109,6 +109,11 @@ OPENAPI_TAGS = [
         "Аутентификация — персональный API-ключ с scopes: `Authorization: Bearer <key>`. "
         "Ключи выдаются/отзываются через /admin/api-clients (X-API-Key).",
     },
+    {
+        "name": "app-distribution",
+        "description": "Раздача Android-приложения (APK) по стабильной публичной ссылке. "
+        "Без авторизации — предназначено для прямого шаринга (лендинг, QR, чат).",
+    },
 ]
 
 app = FastAPI(
@@ -131,6 +136,15 @@ app.mount(
     "/admin-panel",
     StaticFiles(directory=Path(__file__).parent.parent / "admin_panel", html=True),
     name="admin_panel",
+)
+
+# Android APK, manually placed on the server at deploy time (see CLAUDE.md) —
+# /api/v1/public/app/android redirects here so the public link stays stable
+# across file/version changes.
+app.mount(
+    "/static/downloads",
+    StaticFiles(directory=Path(__file__).parent.parent / "static" / "downloads"),
+    name="downloads",
 )
 
 

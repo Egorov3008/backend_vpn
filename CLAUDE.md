@@ -176,6 +176,11 @@ Anonymous, cookie-based flow for the marketing landing page (separate from the b
   - Fails: 500 if the shared key isn't configured/found (deploy/provisioning error); 502 if the upstream subscription download/parse fails.
   - Provisioning (one-time, manual): create a free tariff with `amount=0` and `limit_ip=0` (ideally a long `period`), call `POST /keys/create` once against it to mint the shared key, then paste that key's `email` into `MVP_SHARED_KEY_EMAIL`.
 
+#### App distribution (`/api/v1/public/app`, `api/v1/app_distribution.py`)
+
+- **GET `/android`** — redirects (302) to the current Android APK (`dlay.svoih`, `../android_app`) at a stable public URL — no auth (meant to be shared directly via landing/QR/chat), only per-IP rate limiting (`app/rate_limit.py`).
+- The APK itself is **not** built or uploaded by this backend — it's placed manually on the host at `static/downloads/dlay-svoih.apk` (bind-mounted into the container via `docker-compose.yml`, so a new release only needs the file replaced on the host, not an image rebuild) after running `./gradlew assembleRelease` in `android_app/`. Overwriting that file is the entire "release" process; there is no versioning/history — the redirect always points at whatever file is currently there.
+
 #### Admin (`/api/v1/admin`, `api/v1/admin.py`)
 
 Split into two routers with different auth (see Authentication below):
@@ -184,6 +189,8 @@ Split into two routers with different auth (see Authentication below):
 - **`destructive_router`** (`verify_admin_actor` only — `X-API-Key` + `X-Admin-Tg-Id`): mutating ops — set maintenance mode, delete user/key, generate key, mass-renew, change key date/tariff, delete inactive users, start/poll a panel `sync` job, and `api-clients` create/list/revoke/rotate.
 
 Grep `api/v1/admin.py` for the current full route list rather than trusting a manually maintained enumeration here — it grows frequently (referrals, gift codes, promotions, and sync jobs were all added after this section was first written).
+
+**Admin panel (`admin_panel/`):** vanilla-JS SPA (no build step) consuming `/api/v1/admin/*`, served by FastAPI itself via `StaticFiles` mounted at `/admin-panel` (`app/main.py`). Hash-based routing (`#/users`, `#/keys`, …) since `StaticFiles` doesn't rewrite sub-paths to `index.html`. Auth is the `ADMIN_API_KEY` + Telegram ID entered at `#/login`, stored client-side and sent as `X-API-Key`/`X-Admin-Tg-Id`. `pytest` only checks the static mount doesn't break other routes — it can't verify client-side behavior, so any change here must also be driven through a real browser (see `admin_panel/README.md` for the manual checklist: bad-key error, login redirect, paginated `#/users`, one destructive round-trip via maintenance-mode toggle, corrupted-key auto-logout, no console errors). Mass mailing/broadcast (present in the bot's own admin panel) has no backend endpoint and is intentionally out of scope — the nav shows a disabled entry pointing back to the bot.
 
 ### Authentication
 

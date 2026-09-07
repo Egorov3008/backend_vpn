@@ -1,6 +1,17 @@
 from fastapi import APIRouter
 
-from api.v1 import admin, auth, keys, landing, mobile_mvp, payments, public, tariffs, users
+from api.v1 import (
+    admin,
+    app_distribution,
+    auth,
+    keys,
+    landing,
+    mobile_mvp,
+    payments,
+    public,
+    tariffs,
+    users,
+)
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth.router)
@@ -13,3 +24,4 @@ api_router.include_router(admin.destructive_router)
 api_router.include_router(landing.router)
 api_router.include_router(mobile_mvp.router)
 api_router.include_router(public.router)
+api_router.include_router(app_distribution.router)
