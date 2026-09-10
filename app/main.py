@@ -105,8 +105,10 @@ OPENAPI_TAGS = [
     },
     {
         "name": "public-api",
-        "description": "Публичный REST API для внешних клиентов (не bot/web/mobile-mvp). "
-        "Аутентификация — персональный API-ключ с scopes: `Authorization: Bearer <key>`. "
+        "description": "Публичный REST API для внешних клиентов (не bot/web/mobile-mvp): "
+        "тарифы, ключи, платежи, пользователи, регистрация/логин. "
+        "Аутентификация — персональный API-ключ с scopes: `Authorization: Bearer <key>`, "
+        "опционально привязанный к одному домену (Origin/Referer). "
         "Ключи выдаются/отзываются через /admin/api-clients (X-API-Key).",
     },
     {
@@ -146,6 +148,33 @@ app.mount(
     StaticFiles(directory=Path(__file__).parent.parent / "static" / "downloads"),
     name="downloads",
 )
+
+
+PUBLIC_API_PREFIX = "/api/v1/public"
+
+
+@app.middleware("http")
+async def public_api_cors_middleware(request: Request, call_next):
+    """CORS только для /api/v1/public/* — единственная зона, куда обращаются
+    внешние (в т.ч. браузерные) клиенты по domain-bound ключам из api_clients
+    (см. app/auth.py::verify_api_client). Реальная привязка к домену
+    проверяется там по Origin/Referer против allowed_domain клиента; здесь
+    только заголовки, разрешающие браузеру сам запрос — без них preflight
+    отклонит вызов ещё до того, как ключ будет проверен."""
+    origin = request.headers.get("origin")
+    if not request.url.path.startswith(PUBLIC_API_PREFIX) or not origin:
+        return await call_next(request)
+
+    if request.method == "OPTIONS":
+        response = JSONResponse(content={})
+    else:
+        response = await call_next(request)
+
+    response.headers["Access-Control-Allow-Origin"] = origin
+    response.headers["Vary"] = "Origin"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, DELETE, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
+    return response
 
 
 @app.middleware("http")

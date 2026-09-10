@@ -7,6 +7,11 @@ from pydantic import BaseModel, Field
 class ApiClientCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     scopes: List[str] = Field(default_factory=list)
+    allowed_domain: Optional[str] = Field(
+        None,
+        description="Хост (без схемы/порта), с которого разрешено использовать ключ, "
+        "проверяется по Origin/Referer запроса. Пусто — ключ не привязан к домену.",
+    )
 
 
 class ApiClientResponse(BaseModel):
@@ -14,6 +19,7 @@ class ApiClientResponse(BaseModel):
     name: str
     key_prefix: str
     scopes: List[str]
+    allowed_domain: Optional[str] = None
     is_active: bool
     created_at: Optional[datetime] = None
     last_used_at: Optional[datetime] = None
@@ -26,6 +32,7 @@ class ApiClientResponse(BaseModel):
             name=c.name,
             key_prefix=c.key_prefix,
             scopes=c.scopes,
+            allowed_domain=c.allowed_domain,
             is_active=c.is_active,
             created_at=c.created_at,
             last_used_at=c.last_used_at,

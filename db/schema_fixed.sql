@@ -210,6 +210,18 @@ CREATE TABLE IF NOT EXISTS api_clients
 
 CREATE INDEX IF NOT EXISTS idx_api_clients_key_hash ON api_clients(key_hash);
 
+-- Bind an api_clients key to a single origin domain (publish-all-endpoints
+-- effort): NULL means unrestricted (existing keys, server-to-server use).
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'api_clients' AND column_name = 'allowed_domain'
+    ) THEN
+        ALTER TABLE api_clients ADD COLUMN allowed_domain TEXT;
+    END IF;
+END $$;
+
 -- Ensure total_gb default matches model default (migration 008)
 DO $$
 BEGIN

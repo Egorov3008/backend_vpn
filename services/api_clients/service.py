@@ -32,26 +32,29 @@ class ApiClientService:
     def __init__(self, pool: asyncpg.Pool):
         self._pool = pool
 
-    async def create(self, name: str, scopes: List[str]) -> tuple[ApiClient, str]:
+    async def create(
+        self, name: str, scopes: List[str], allowed_domain: Optional[str] = None
+    ) -> tuple[ApiClient, str]:
         raw_key = _generate_raw_key()
         row = await self._pool.fetchrow(
             """
-            INSERT INTO api_clients (name, key_prefix, key_hash, scopes)
-            VALUES ($1, $2, $3, $4)
-            RETURNING id, name, key_prefix, key_hash, scopes, is_active,
+            INSERT INTO api_clients (name, key_prefix, key_hash, scopes, allowed_domain)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id, name, key_prefix, key_hash, scopes, allowed_domain, is_active,
                       created_at, last_used_at, revoked_at
             """,
             name,
             _display_prefix(raw_key),
             _hash_key(raw_key),
             scopes,
+            allowed_domain,
         )
         return ApiClient(**dict(row)), raw_key
 
     async def list_all(self) -> List[ApiClient]:
         rows = await self._pool.fetch(
             """
-            SELECT id, name, key_prefix, key_hash, scopes, is_active,
+            SELECT id, name, key_prefix, key_hash, scopes, allowed_domain, is_active,
                    created_at, last_used_at, revoked_at
             FROM api_clients
             ORDER BY id
@@ -65,7 +68,7 @@ class ApiClientService:
             UPDATE api_clients
             SET is_active = FALSE, revoked_at = NOW()
             WHERE id = $1
-            RETURNING id, name, key_prefix, key_hash, scopes, is_active,
+            RETURNING id, name, key_prefix, key_hash, scopes, allowed_domain, is_active,
                       created_at, last_used_at, revoked_at
             """,
             client_id,
@@ -75,14 +78,14 @@ class ApiClientService:
     async def rotate(self, client_id: int) -> Optional[tuple[ApiClient, str]]:
         """Выпускает новый ключ для существующего client_id, реактивирует
         клиента (если был revoked) и обнуляет старый ключ — старый перестаёт
-        работать немедленно."""
+        работать немедленно. allowed_domain не меняется."""
         raw_key = _generate_raw_key()
         row = await self._pool.fetchrow(
             """
             UPDATE api_clients
             SET key_prefix = $2, key_hash = $3, is_active = TRUE, revoked_at = NULL
             WHERE id = $1
-            RETURNING id, name, key_prefix, key_hash, scopes, is_active,
+            RETURNING id, name, key_prefix, key_hash, scopes, allowed_domain, is_active,
                       created_at, last_used_at, revoked_at
             """,
             client_id,
@@ -97,7 +100,7 @@ class ApiClientService:
         key_hash = _hash_key(raw_key)
         row = await self._pool.fetchrow(
             """
-            SELECT id, name, key_prefix, key_hash, scopes, is_active,
+            SELECT id, name, key_prefix, key_hash, scopes, allowed_domain, is_active,
                    created_at, last_used_at, revoked_at
             FROM api_clients
             WHERE key_hash = $1 AND is_active = TRUE

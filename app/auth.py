@@ -1,7 +1,8 @@
 from dataclasses import dataclass
 from typing import List, Optional
+from urllib.parse import urlparse
 
-from fastapi import Depends, Header, HTTPException, Security
+from fastapi import Depends, Header, HTTPException, Request, Security
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 
 from app.dependencies import get_pool
@@ -85,11 +86,24 @@ api_client_bearer_scheme = HTTPBearer(
 )
 
 
+def _request_domain(request: Request) -> Optional[str]:
+    """Хост запроса из Origin, а если его нет (не-браузерный клиент,
+    server-to-server) — из Referer. Порт/схема отбрасываются: домен
+    привязки сравнивается по хосту."""
+    origin = request.headers.get("origin") or request.headers.get("referer")
+    if not origin:
+        return None
+    host = urlparse(origin).hostname
+    return host.lower() if host else None
+
+
 def verify_api_client(required_scopes: Optional[List[str]] = None):
-    """Возвращает FastAPI-зависимость, проверяющую Bearer-ключ клиента и
-    (если указаны) наличие всех `required_scopes` среди scopes клиента."""
+    """Возвращает FastAPI-зависимость, проверяющую Bearer-ключ клиента,
+    (если указаны) наличие всех `required_scopes` среди scopes клиента, и
+    (если у клиента задан `allowed_domain`) что запрос пришёл с этого домена."""
 
     async def _dependency(
+        request: Request,
         credentials: Optional[HTTPAuthorizationCredentials] = Security(api_client_bearer_scheme),
         pool=Depends(get_pool),
     ) -> ApiClient:
@@ -106,6 +120,15 @@ def verify_api_client(required_scopes: Optional[List[str]] = None):
                 status_code=403,
                 detail=f"Missing required scope(s): {', '.join(sorted(missing))}",
             )
+
+        if client.allowed_domain:
+            request_domain = _request_domain(request)
+            if request_domain != client.allowed_domain.lower():
+                raise HTTPException(
+                    status_code=403,
+                    detail="This API key is not allowed to be used from this domain",
+                )
+
         return client
 
     return _dependency

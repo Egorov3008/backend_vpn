@@ -17,13 +17,14 @@ class FakeApiClientsPool:
     async def fetchrow(self, query, *args):
         q = " ".join(query.split())
         if q.startswith("INSERT INTO api_clients"):
-            name, key_prefix, key_hash, scopes = args
+            name, key_prefix, key_hash, scopes, allowed_domain = args
             row = {
                 "id": self._next_id,
                 "name": name,
                 "key_prefix": key_prefix,
                 "key_hash": key_hash,
                 "scopes": scopes,
+                "allowed_domain": allowed_domain,
                 "is_active": True,
                 "created_at": None,
                 "last_used_at": None,

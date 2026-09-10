@@ -919,7 +919,9 @@ async def create_api_client(
 ):
     """Создаёт нового внешнего API-клиента. Возвращает сырой ключ
     (`api_key`) один раз — дальше он нигде не восстанавливается."""
-    client, raw_key = await ApiClientService(pool).create(body.name, body.scopes)
+    client, raw_key = await ApiClientService(pool).create(
+        body.name, body.scopes, allowed_domain=body.allowed_domain
+    )
     await AuditLogger(pool).record(principal.admin_tg_id, "create_api_client", body.name)
     return ApiClientCreatedResponse(**ApiClientResponse.from_client(client).model_dump(), api_key=raw_key)
 

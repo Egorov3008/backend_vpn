@@ -19,6 +19,7 @@ class ApiClient:
     key_prefix: str
     key_hash: str
     scopes: List[str]
+    allowed_domain: Optional[str] = None
     is_active: bool = True
     created_at: Optional[datetime] = None
     last_used_at: Optional[datetime] = None

@@ -252,12 +252,15 @@ async def payment_webhook(
     return {"ok": True}
 
 
-@router.post("/calculate", response_model=PaymentCalculateResponse)
+@router.post(
+    "/calculate",
+    response_model=PaymentCalculateResponse,
+    dependencies=[Depends(verify_bot_secret)],
+)
 async def calculate_payment(
     body: PaymentCalculateRequest,
     pool=Depends(get_pool),
     service_data: ServiceDataModel = Depends(get_service_data),
-    _=Depends(verify_bot_secret),
 ):
     """Расчёт стоимости платежа без создания платежа.
 
@@ -324,13 +327,16 @@ async def calculate_payment(
     )
 
 
-@router.post("/create", response_model=PaymentCreateResponse)
+@router.post(
+    "/create",
+    response_model=PaymentCreateResponse,
+    dependencies=[Depends(verify_bot_secret)],
+)
 async def create_payment(
     body: PaymentCreateRequest,
     pool=Depends(get_pool),
     service_data: ServiceDataModel = Depends(get_service_data),
     cache: CacheService = Depends(get_cache),
-    _=Depends(verify_bot_secret),
 ):
     logger.debug("Запрос create_payment", extra={"tg_id": body.tg_id, "tariff_id": body.tariff_id, "months": body.number_of_months, "operation": body.operation})
 
@@ -520,11 +526,14 @@ async def create_payment(
     )
 
 
-@router.get("/", response_model=List[PaymentHistoryItem])
+@router.get(
+    "/",
+    response_model=List[PaymentHistoryItem],
+    dependencies=[Depends(verify_bot_secret)],
+)
 async def get_payment_history(
     tg_id: int = Query(..., description="Telegram user ID"),
     service_data: ServiceDataModel = Depends(get_service_data),
-    _=Depends(verify_bot_secret),
 ) -> List[PaymentHistoryItem]:
     """Get payment history for a user"""
     logger.debug(f"Запрос истории платежей", extra={"tg_id": tg_id})
@@ -546,14 +555,17 @@ async def get_payment_history(
     ]
 
 
-@router.get("/{payment_id}/status", response_model=PaymentStatusResponse)
+@router.get(
+    "/{payment_id}/status",
+    response_model=PaymentStatusResponse,
+    dependencies=[Depends(verify_bot_secret)],
+)
 async def get_payment_status(
     payment_id: str,
     tg_id: int = Query(..., description="Telegram user ID"),
     service_data: ServiceDataModel = Depends(get_service_data),
     pool=Depends(get_pool),
     cache: CacheService = Depends(get_cache),
-    _=Depends(verify_bot_secret),
 ) -> PaymentStatusResponse:
     """Get status of a specific payment"""
     logger.debug("Запрос статуса платежа", extra={"payment_id": payment_id, "tg_id": tg_id})
