@@ -42,7 +42,7 @@ async def test_mass_renew_rejects_bot_secret(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
             resp = await client.post(
-                "/api/v1/admin/keys/mass-renew",
+                "/api/v1/admin/keys/renewals",
                 json={"emails": ["a@b.com"], "days": 30},
                 headers={"X-Bot-Secret": "bot-secret-only"},
             )
@@ -66,7 +66,7 @@ async def test_mass_renew_accepts_api_key(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
             resp = await client.post(
-                "/api/v1/admin/keys/mass-renew",
+                "/api/v1/admin/keys/renewals",
                 json={"emails": ["a@b.com"], "days": 30},
                 headers={"X-API-Key": "admin-key", "X-Admin-Tg-Id": "7"},
             )
@@ -91,8 +91,8 @@ async def test_delete_key_rejects_bot_secret_via_subrouter(
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
-            resp = await client.post(
-                "/api/v1/admin/keys/a@b.com/delete",
+            resp = await client.delete(
+                "/api/v1/admin/keys/a@b.com",
                 headers={"X-Bot-Secret": "bot-secret-only"},
             )
         assert resp.status_code == 401

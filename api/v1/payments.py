@@ -3,7 +3,7 @@ import uuid
 from typing import List, Optional
 from ipaddress import ip_address, ip_network
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from app.auth import verify_bot_secret
 from app.client_ip import extract_client_ip
@@ -253,7 +253,7 @@ async def payment_webhook(
 
 
 @router.post(
-    "/calculate",
+    "/quotes",
     response_model=PaymentCalculateResponse,
     dependencies=[Depends(verify_bot_secret)],
 )
@@ -311,20 +311,7 @@ async def calculate_payment(
         "balance_discount": result["balance_discount_amount"],
     })
 
-    total_discount = round(
-        result["stock_discount_amount"]
-        + result["volume_discount_amount"]
-        + result["referral_discount_amount"]
-        + result["balance_discount_amount"],
-        2,
-    )
-    # amount/discount — компактные агрегаты для обратной совместимости;
-    # бот использует final_amount и полную разбивку выше.
-    return PaymentCalculateResponse(
-        amount=result["final_amount"],
-        discount=total_discount,
-        **result,
-    )
+    return PaymentCalculateResponse(**result)
 
 
 @router.post(
@@ -532,13 +519,18 @@ async def create_payment(
     dependencies=[Depends(verify_bot_secret)],
 )
 async def get_payment_history(
+    response: Response,
     tg_id: int = Query(..., description="Telegram user ID"),
+    limit: Optional[int] = Query(None, ge=1, le=1000, description="Page size; omit for full list"),
+    offset: int = Query(0, ge=0),
     service_data: ServiceDataModel = Depends(get_service_data),
 ) -> List[PaymentHistoryItem]:
     """Get payment history for a user"""
     logger.debug(f"Запрос истории платежей", extra={"tg_id": tg_id})
     result = await service_data.payments.get_by(tg_id=tg_id)
     payments = _normalize_get_by(result)
+    response.headers["X-Total-Count"] = str(len(payments))
+    payments = payments[offset:offset + limit] if limit is not None else payments[offset:]
     logger.debug(f"Загружено платежей", extra={"tg_id": tg_id, "count": len(payments)})
     if payments:
         logger.debug(f"IDs платежей", extra={"payment_ids": [p.payment_id for p in payments]})

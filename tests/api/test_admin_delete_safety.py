@@ -45,7 +45,7 @@ async def test_delete_key_xui_fail_keeps_row(api_client, mock_service_data):
 
     _override_principal(AdminPrincipal(admin_tg_id=1))
     with patch("api.v1.admin.build_key_services", return_value=(None, None, xui)):
-        resp = await api_client.post("/api/v1/admin/keys/a@b.com/delete")
+        resp = await api_client.delete("/api/v1/admin/keys/a@b.com")
 
     assert resp.status_code == 409
     assert "panel" in resp.json()["detail"].lower()
@@ -67,7 +67,7 @@ async def test_delete_key_xui_success_deletes_row(api_client, mock_service_data)
 
     _override_principal(AdminPrincipal(admin_tg_id=1))
     with patch("api.v1.admin.build_key_services", return_value=(None, None, xui)):
-        resp = await api_client.post("/api/v1/admin/keys/ok@b.com/delete")
+        resp = await api_client.delete("/api/v1/admin/keys/ok@b.com")
 
     assert resp.status_code == 204
     mock_service_data.data_service.keys.delete.assert_called_once()
@@ -100,7 +100,7 @@ async def test_delete_user_partial_keeps_failed_key(api_client, mock_service_dat
 
     _override_principal(AdminPrincipal(admin_tg_id=1))
     with patch("api.v1.admin.build_key_services", return_value=(None, None, xui)):
-        resp = await api_client.post("/api/v1/admin/users/123/delete")
+        resp = await api_client.delete("/api/v1/admin/users/123")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -134,7 +134,7 @@ async def test_delete_key_audits_before_db_cleanup(api_client, mock_service_data
     with patch("api.v1.admin.build_key_services", return_value=(None, None, xui)), \
          patch("api.v1.admin.AuditLogger", return_value=mock_audit):
         with pytest.raises(RuntimeError):
-            await api_client.post("/api/v1/admin/keys/ok@b.com/delete")
+            await api_client.delete("/api/v1/admin/keys/ok@b.com")
 
     # DB cleanup raised, but audit was recorded BEFORE the raise — the
     # destructive panel op is captured in the journal regardless.
@@ -164,7 +164,7 @@ async def test_delete_user_audits_before_user_row_delete(api_client, mock_servic
     with patch("api.v1.admin.build_key_services", return_value=(None, None, xui)), \
          patch("api.v1.admin.AuditLogger", return_value=mock_audit):
         with pytest.raises(RuntimeError):
-            await api_client.post("/api/v1/admin/users/123/delete")
+            await api_client.delete("/api/v1/admin/users/123")
 
     # users.delete raised, but audit was recorded BEFORE the raise — the
     # destructive per-key XUI ops are captured in the journal regardless.
@@ -185,7 +185,7 @@ async def test_delete_user_no_keys(api_client, mock_service_data):
 
     _override_principal(AdminPrincipal(admin_tg_id=1))
     with patch("api.v1.admin.build_key_services", return_value=(None, None, xui)):
-        resp = await api_client.post("/api/v1/admin/users/123/delete")
+        resp = await api_client.delete("/api/v1/admin/users/123")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -217,8 +217,8 @@ async def test_change_key_date_audits_before_resetter(api_client, mock_service_d
             side_effect=RuntimeError("resetter boom")
         )
         with pytest.raises(RuntimeError):
-            await api_client.post(
-                "/api/v1/admin/keys/ok@b.com/change-date",
+            await api_client.patch(
+                "/api/v1/admin/keys/ok@b.com/expiry",
                 json={"expiry_time": 1234},
             )
 
@@ -251,8 +251,8 @@ async def test_change_key_tariff_audits_before_resetter(api_client, mock_service
             side_effect=RuntimeError("resetter boom")
         )
         with pytest.raises(RuntimeError):
-            await api_client.post(
-                "/api/v1/admin/keys/ok@b.com/change-tariff",
+            await api_client.patch(
+                "/api/v1/admin/keys/ok@b.com/tariff",
                 json={"tariff_id": 5},
             )
 

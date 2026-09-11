@@ -88,7 +88,7 @@ export const api = {
   maintenanceMode: {
     get: () => request("/admin/maintenance-mode"),
     set: (enabled, reason) =>
-      request("/admin/maintenance-mode", { method: "POST", body: { enabled, reason }, destructive: true }),
+      request("/admin/maintenance-mode", { method: "PUT", body: { enabled, reason }, destructive: true }),
   },
 
   users: {
@@ -99,11 +99,11 @@ export const api = {
     update: (tgId, body) =>
       request(`/admin/users/${tgId}`, { method: "PATCH", body, destructive: true }),
     delete: (tgId) =>
-      request(`/admin/users/${tgId}/delete`, { method: "POST", destructive: true }),
+      request(`/admin/users/${tgId}`, { method: "DELETE", destructive: true }),
     inactive: {
       list: () => request("/admin/users/inactive"),
       deleteAll: () =>
-        request("/admin/users/inactive/delete", { method: "POST", destructive: true }),
+        request("/admin/users/inactive", { method: "DELETE", destructive: true }),
     },
   },
 
@@ -111,26 +111,26 @@ export const api = {
     list: ({ limit = PAGE_SIZE, offset = 0 } = {}) =>
       request("/admin/keys", { query: { limit, offset } }),
     delete: (email) =>
-      request(`/admin/keys/${encodeURIComponent(email)}/delete`, { method: "POST", destructive: true }),
+      request(`/admin/keys/${encodeURIComponent(email)}`, { method: "DELETE", destructive: true }),
     generate: (body) =>
-      request("/admin/keys/generate", { method: "POST", body, destructive: true }),
+      request("/admin/keys", { method: "POST", body, destructive: true }),
     massRenew: (body) =>
-      request("/admin/keys/mass-renew", { method: "POST", body, destructive: true }),
+      request("/admin/keys/renewals", { method: "POST", body, destructive: true }),
     changeDate: (email, expiryTime) =>
-      request(`/admin/keys/${encodeURIComponent(email)}/change-date`, {
-        method: "POST",
+      request(`/admin/keys/${encodeURIComponent(email)}/expiry`, {
+        method: "PATCH",
         body: { expiry_time: expiryTime },
         destructive: true,
       }),
     changeTariff: (email, tariffId) =>
-      request(`/admin/keys/${encodeURIComponent(email)}/change-tariff`, {
-        method: "POST",
+      request(`/admin/keys/${encodeURIComponent(email)}/tariff`, {
+        method: "PATCH",
         body: { tariff_id: tariffId },
         destructive: true,
       }),
     panelMeta: (email, body) =>
       request(`/admin/keys/${encodeURIComponent(email)}/panel-meta`, {
-        method: "POST",
+        method: "PATCH",
         body,
         destructive: true,
       }),
@@ -159,15 +159,15 @@ export const api = {
   },
 
   sync: {
-    start: () => request("/admin/sync", { method: "POST", destructive: true }),
-    status: (jobId) => request(`/admin/sync/${encodeURIComponent(jobId)}`, { destructive: true }),
+    start: () => request("/admin/sync-jobs", { method: "POST", destructive: true }),
+    status: (jobId) => request(`/admin/sync-jobs/${encodeURIComponent(jobId)}`, { destructive: true }),
   },
 
   apiClients: {
     list: () => request("/admin/api-clients", { destructive: true }),
     create: (name, scopes) =>
       request("/admin/api-clients", { method: "POST", body: { name, scopes }, destructive: true }),
-    revoke: (id) => request(`/admin/api-clients/${id}/revoke`, { method: "POST", destructive: true }),
-    rotate: (id) => request(`/admin/api-clients/${id}/rotate`, { method: "POST", destructive: true }),
+    revoke: (id) => request(`/admin/api-clients/${id}`, { method: "DELETE", destructive: true }),
+    rotate: (id) => request(`/admin/api-clients/${id}/keys`, { method: "POST", destructive: true }),
   },
 };

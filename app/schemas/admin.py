@@ -179,10 +179,7 @@ class AdminGiftResponse(BaseModel):
     sender_tg_id: int
     tariff_id: int
     created_at: Optional[str] = None
-    # `used_at` — момент активации подарка; `redeemed_at` — то же значение под
-    # именем, которое исторически ожидает часть клиентов (см. admin.py).
     redeemed_at: Optional[str] = None
-    used_at: Optional[str] = None
     recipient_tg_id: Optional[int] = None
     recipient_email: Optional[str] = None
 

@@ -36,7 +36,7 @@ _write_deps = [
 ]
 
 router.add_api_route(
-    "/calculate",
+    "/quotes",
     calculate_payment,
     methods=["POST"],
     response_model=PaymentCalculateResponse,

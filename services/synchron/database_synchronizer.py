@@ -163,7 +163,7 @@ class DatabaseSynchronizer:
             stats["orphaned_keys"] = len(orphaned_keys)
             stats["deleted_orphaned"] = cleanup_stats["deleted"]
 
-            # Поля, которые ожидает бот в /admin/sync отчёте.
+            # Поля, которые ожидает бот в /admin/sync-jobs отчёте.
             # Алиасы + недостающие счётчики (db_keys_before/after, synced).
             # Считаем ПОСЛЕ _cleanup_orphaned_keys, чтобы cache отражал
             # итоговое состояние БД после удаления orphaned.

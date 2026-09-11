@@ -57,7 +57,7 @@ def fake_scheduler(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_sync_returns_202_with_job_id(api_client, fake_scheduler):
-    r = await api_client.post("/api/v1/admin/sync")
+    r = await api_client.post("/api/v1/admin/sync-jobs")
     assert r.status_code == 202
     body = r.json()
     assert "job_id" in body
@@ -67,11 +67,11 @@ async def test_sync_returns_202_with_job_id(api_client, fake_scheduler):
 
 @pytest.mark.asyncio
 async def test_sync_409_when_already_running(api_client, fake_scheduler):
-    first = await api_client.post("/api/v1/admin/sync")
+    first = await api_client.post("/api/v1/admin/sync-jobs")
     assert first.status_code == 202
     existing_id = first.json()["job_id"]
 
-    second = await api_client.post("/api/v1/admin/sync")
+    second = await api_client.post("/api/v1/admin/sync-jobs")
     assert second.status_code == 409
     body = second.json()
     # HTTPException detail оборачивается в {"detail": ...}.
@@ -81,23 +81,23 @@ async def test_sync_409_when_already_running(api_client, fake_scheduler):
 
 @pytest.mark.asyncio
 async def test_sync_status_unknown_job_404(api_client, fake_scheduler):
-    r = await api_client.get("/api/v1/admin/sync/nonexistent-job")
+    r = await api_client.get("/api/v1/admin/sync-jobs/nonexistent-job")
     assert r.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_sync_status_running_then_done(api_client, fake_scheduler):
-    start = await api_client.post("/api/v1/admin/sync")
+    start = await api_client.post("/api/v1/admin/sync-jobs")
     job_id = start.json()["job_id"]
 
     # Пока running — 200 со статусом running.
-    r1 = await api_client.get(f"/api/v1/admin/sync/{job_id}")
+    r1 = await api_client.get(f"/api/v1/admin/sync-jobs/{job_id}")
     assert r1.status_code == 200
     assert r1.json()["status"] == "running"
 
     # Эмулируем завершение джобы.
     fake_scheduler.mark_done(job_id, status="done", result={"status": "success"})
-    r2 = await api_client.get(f"/api/v1/admin/sync/{job_id}")
+    r2 = await api_client.get(f"/api/v1/admin/sync-jobs/{job_id}")
     assert r2.status_code == 200
     body = r2.json()
     assert body["status"] == "done"
@@ -107,10 +107,10 @@ async def test_sync_status_running_then_done(api_client, fake_scheduler):
 
 @pytest.mark.asyncio
 async def test_sync_status_error_propagates(api_client, fake_scheduler):
-    start = await api_client.post("/api/v1/admin/sync")
+    start = await api_client.post("/api/v1/admin/sync-jobs")
     job_id = start.json()["job_id"]
     fake_scheduler.mark_done(job_id, status="error", error="boom")
-    r = await api_client.get(f"/api/v1/admin/sync/{job_id}")
+    r = await api_client.get(f"/api/v1/admin/sync-jobs/{job_id}")
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "error"
@@ -149,7 +149,7 @@ async def test_start_job_second_call_returns_existing_while_running():
 async def test_scheduled_sync_visible_to_start_job_with_real_job_id():
     """P1-3: пока бежит scheduled sync, start_job отдаёт настоящий job_id
     зарегистрированной джобы (не 'unknown'). Раньше scheduled sync_cache бежал
-    без JobState → 409 с job_id='unknown' → GET /admin/sync/unknown → 404."""
+    без JobState → 409 с job_id='unknown' → GET /admin/sync-jobs/unknown → 404."""
     sched = SyncScheduler(MagicMock(), MagicMock())
     started = asyncio.Event()
     release = asyncio.Event()

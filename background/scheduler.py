@@ -40,7 +40,7 @@ class SyncScheduler:
         self._sync_count = 0
         self._sweep_lock = asyncio.Lock()
         self._sweep_in_progress = False
-        # In-memory реестр запусков admin/sync: job_id -> JobState.
+        # In-memory реестр запусков admin/sync-jobs: job_id -> JobState.
         self._jobs: Dict[str, "JobState"] = {}
         self._jobs_lock = asyncio.Lock()
 
@@ -194,7 +194,7 @@ class SyncScheduler:
         Проверка ОБОИХ закрывает race: два одновременных start_job сериализуются
         lock'ом, второй видит running JobState первого → 409, а не второй 202.
         А проверка JobState (а не только флага) делает scheduled-запуски видимыми
-        admin/sync с их настоящим job_id (см. run_scheduled_sync).
+        admin/sync-jobs с их настоящим job_id (см. run_scheduled_sync).
         """
         async with self._sync_lock:
             running = next(
@@ -214,7 +214,7 @@ class SyncScheduler:
 
         Без этого scheduled sync_cache бежит без JobState → в окне scheduled-запуска
         ``start_job`` не находил running-джобу и отдавал ``"unknown"`` → admin не
-        мог опросить статус (GET /admin/sync/unknown → 404). Регистрируем running
+        мог опросить статус (GET /admin/sync-jobs/unknown → 404). Регистрируем running
         JobState тем же паттерном, что ``start_job``, затем запускаем sync_cache
         через ``run_sync_job``. Дублирующий scheduled запуск (если coalesce
         пропустил) пропускается.
@@ -406,7 +406,7 @@ def create_scheduler(
     # Кэш загружается при старте приложения (в lifespan)
     # Планировщик только обновляет его каждые 3 часа.
     # Через run_scheduled_sync (а не sync_cache напрямую), чтобы scheduled-запуск
-    # регистрировал JobState — тогда admin/sync в окне scheduled-запуска отдаёт
+    # регистрировал JobState — тогда admin/sync-jobs в окне scheduled-запуска отдаёт
     # настоящий job_id для опроса статуса, а не "unknown".
     scheduler.add_job(
         sync_scheduler.run_scheduled_sync,

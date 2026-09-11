@@ -13,7 +13,7 @@ A client-facing profile page where the logged-in Telegram/web user can manage VP
 | `tg_id`, `username`, `first_name`, `is_admin`, `is_blocked`, `created_at` | `UserResponse` | `GET /api/v1/users/{tg_id}` (`backend/app/schemas/users.py`) |
 | VPN keys list | `KeyDTO` / `KeyDetailResponse` | `GET /api/v1/keys/?tg_id={tg_id}` (`backend/api/v1/keys.py`) |
 | referral link | `ReferralLinkDTO` | `GET /api/v1/admin/referrals/links/{tg_id}` (`bot/api/backend_client.py`) |
-| extend/delete key | key actions | `POST /api/v1/keys/{email}/renew` / `DELETE /api/v1/keys/{email}` (to be implemented) |
+| extend/delete key | key actions | `PATCH /api/v1/keys/{email}` / `DELETE /api/v1/keys/{email}` (to be implemented) |
 
 ## Layout
 

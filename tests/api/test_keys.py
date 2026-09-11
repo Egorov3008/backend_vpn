@@ -47,6 +47,63 @@ async def test_list_keys_multiple(api_client, mock_service_data):
 
 
 @pytest.mark.asyncio
+async def test_list_keys_total_count_header_without_pagination(api_client, mock_service_data):
+    mock_service_data.data_service.keys.filter = AsyncMock(return_value=[
+        make_key("key1@vpn.ru"),
+        make_key("key2@vpn.ru"),
+        make_key("key3@vpn.ru"),
+    ])
+    response = await api_client.get("/api/v1/keys/?tg_id=123")
+    assert response.status_code == 200
+    assert response.headers["X-Total-Count"] == "3"
+    assert len(response.json()) == 3
+
+
+@pytest.mark.asyncio
+async def test_list_keys_limit_applies_page_size(api_client, mock_service_data):
+    mock_service_data.data_service.keys.filter = AsyncMock(return_value=[
+        make_key("key1@vpn.ru"),
+        make_key("key2@vpn.ru"),
+        make_key("key3@vpn.ru"),
+    ])
+    response = await api_client.get("/api/v1/keys/?tg_id=123&limit=2")
+    assert response.status_code == 200
+    assert response.headers["X-Total-Count"] == "3"
+    data = response.json()
+    assert len(data) == 2
+    assert [k["email"] for k in data] == ["key1@vpn.ru", "key2@vpn.ru"]
+
+
+@pytest.mark.asyncio
+async def test_list_keys_offset_applies_without_limit(api_client, mock_service_data):
+    """offset без limit не должен молча игнорироваться — иначе клиент,
+    листающий только по offset, получит дубли (см. code review)."""
+    mock_service_data.data_service.keys.filter = AsyncMock(return_value=[
+        make_key("key1@vpn.ru"),
+        make_key("key2@vpn.ru"),
+        make_key("key3@vpn.ru"),
+    ])
+    response = await api_client.get("/api/v1/keys/?tg_id=123&offset=1")
+    assert response.status_code == 200
+    assert response.headers["X-Total-Count"] == "3"
+    data = response.json()
+    assert [k["email"] for k in data] == ["key2@vpn.ru", "key3@vpn.ru"]
+
+
+@pytest.mark.asyncio
+async def test_list_keys_limit_and_offset_combine(api_client, mock_service_data):
+    mock_service_data.data_service.keys.filter = AsyncMock(return_value=[
+        make_key("key1@vpn.ru"),
+        make_key("key2@vpn.ru"),
+        make_key("key3@vpn.ru"),
+    ])
+    response = await api_client.get("/api/v1/keys/?tg_id=123&limit=1&offset=1")
+    assert response.status_code == 200
+    data = response.json()
+    assert [k["email"] for k in data] == ["key2@vpn.ru"]
+
+
+@pytest.mark.asyncio
 async def test_get_key_not_found(api_client, mock_service_data):
     mock_service_data.keys.get_data = AsyncMock(return_value=None)
     response = await api_client.get("/api/v1/keys/notexist@vpn.ru")

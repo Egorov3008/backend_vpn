@@ -50,7 +50,7 @@ async def test_revoke_api_client(api_client, fake_pool):
         "/api/v1/admin/api-clients", json={"name": "Partner A", "scopes": []}
     )).json()
 
-    response = await api_client.post(f"/api/v1/admin/api-clients/{created['id']}/revoke")
+    response = await api_client.delete(f"/api/v1/admin/api-clients/{created['id']}")
     assert response.status_code == 200
     assert response.json()["is_active"] is False
 
@@ -60,7 +60,7 @@ async def test_revoke_unknown_api_client_returns_404(api_client, fake_pool):
     from app.main import app
     app.dependency_overrides[get_pool] = lambda: fake_pool
 
-    response = await api_client.post("/api/v1/admin/api-clients/999/revoke")
+    response = await api_client.delete("/api/v1/admin/api-clients/999")
     assert response.status_code == 404
 
 
@@ -73,7 +73,7 @@ async def test_rotate_api_client_issues_new_key(api_client, fake_pool):
         "/api/v1/admin/api-clients", json={"name": "Partner A", "scopes": ["tariffs:read"]}
     )).json()
 
-    response = await api_client.post(f"/api/v1/admin/api-clients/{created['id']}/rotate")
+    response = await api_client.post(f"/api/v1/admin/api-clients/{created['id']}/keys")
     assert response.status_code == 200
     body = response.json()
     assert body["api_key"].startswith("pub_")

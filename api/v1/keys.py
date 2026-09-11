@@ -1,6 +1,6 @@
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 import asyncpg
 
 from app.auth import verify_bot_secret
@@ -42,13 +42,18 @@ def _normalize_get_by(result) -> list:
 
 @router.get("/", response_model=List[KeyResponse])
 async def list_keys(
+    response: Response,
     tg_id: int = Query(..., description="Telegram user ID"),
+    limit: Optional[int] = Query(None, ge=1, le=1000, description="Page size; omit for full list"),
+    offset: int = Query(0, ge=0),
     service_data: ServiceDataModel = Depends(get_service_data),
     pool: asyncpg.Pool = Depends(get_pool),
 ) -> List[KeyResponse]:
     # Always read from DB — cache can be stale when key was created outside the
     # backend request cycle (e.g., via the bot's own YooKassa webhook handler).
     keys = await service_data.data_service.keys.filter(pool, tg_id=tg_id)
+    response.headers["X-Total-Count"] = str(len(keys))
+    keys = keys[offset:offset + limit] if limit is not None else keys[offset:]
     for k in keys:
         # Populate tariff name from tariffs cache
         if k.tariff_id:
@@ -103,7 +108,7 @@ async def get_key(
     )
 
 
-@router.post("/create", response_model=KeyResponse)
+@router.post("/", response_model=KeyResponse)
 async def create_key(
     body: KeyCreateRequest,
     pool: asyncpg.Pool = Depends(get_pool),
@@ -243,7 +248,7 @@ async def delete_key(
     return None
 
 
-@router.post("/{email}/renew", response_model=KeyResponse)
+@router.patch("/{email}", response_model=KeyResponse)
 async def renew_key(
     email: str,
     body: KeyRenewRequest,

@@ -55,8 +55,6 @@ class PaymentCalculateRequest(BaseModel):
 
 
 class PaymentCalculateResponse(BaseModel):
-    amount: float = 0.0
-    discount: float = 0.0
     final_amount: float
     # Полная разбивка скидок — бот рендерит окно оплаты по этим полям
     # (источник истины — backend, см. _calculate_payment_amount).

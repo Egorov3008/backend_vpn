@@ -66,7 +66,7 @@ async def test_create_key_free_tariff(api_client, mock_service_data):
         })
         mock_build.return_value = (mock_create_key_svc, MagicMock(), MagicMock())
 
-        response = await api_client.post("/api/v1/keys/create", json={
+        response = await api_client.post("/api/v1/keys/", json={
             "tg_id": 123,
             "tariff_id": 1,
         })
@@ -88,7 +88,7 @@ async def test_create_key_paid_tariff(api_client, mock_service_data):
     mock_service_data.tariffs.get_data = AsyncMock(return_value=tariff)
     mock_service_data.users.get_data = AsyncMock(return_value=user)
 
-    response = await api_client.post("/api/v1/keys/create", json={
+    response = await api_client.post("/api/v1/keys/", json={
         "tg_id": 123,
         "tariff_id": 2,
     })
@@ -105,7 +105,7 @@ async def test_create_key_user_not_found(api_client, mock_service_data):
     mock_service_data.tariffs.get_data = AsyncMock(return_value=tariff)
     mock_service_data.users.get_data = AsyncMock(return_value=None)
 
-    response = await api_client.post("/api/v1/keys/create", json={
+    response = await api_client.post("/api/v1/keys/", json={
         "tg_id": 999,
         "tariff_id": 1,
     })
@@ -119,7 +119,7 @@ async def test_create_key_tariff_not_found(api_client, mock_service_data):
     """Test creating a key with non-existent tariff fails"""
     mock_service_data.tariffs.get_data = AsyncMock(return_value=None)
 
-    response = await api_client.post("/api/v1/keys/create", json={
+    response = await api_client.post("/api/v1/keys/", json={
         "tg_id": 123,
         "tariff_id": 999,
     })
@@ -190,7 +190,7 @@ async def test_renew_key_free(api_client, mock_service_data):
         # Mock the second get_data call (after renewal)
         mock_service_data.keys.get_data = AsyncMock(side_effect=[key, renewed_key])
 
-        response = await api_client.post("/api/v1/keys/test@vpn.ru/renew", json={
+        response = await api_client.patch("/api/v1/keys/test@vpn.ru", json={
             "tg_id": 123,
             "tariff_id": 1,
             "number_of_months": 3,
@@ -212,7 +212,7 @@ async def test_renew_key_paid(api_client, mock_service_data):
     mock_service_data.keys.get_data = AsyncMock(return_value=key)
     mock_service_data.tariffs.get_data = AsyncMock(return_value=tariff)
 
-    response = await api_client.post("/api/v1/keys/test@vpn.ru/renew", json={
+    response = await api_client.patch("/api/v1/keys/test@vpn.ru", json={
         "tg_id": 123,
         "tariff_id": 2,
         "number_of_months": 3,
@@ -227,7 +227,7 @@ async def test_renew_key_not_found(api_client, mock_service_data):
     """Test renewing a non-existent key fails"""
     mock_service_data.keys.get_data = AsyncMock(return_value=None)
 
-    response = await api_client.post("/api/v1/keys/notexist@vpn.ru/renew", json={
+    response = await api_client.patch("/api/v1/keys/notexist@vpn.ru", json={
         "tg_id": 123,
         "tariff_id": 1,
         "number_of_months": 3,
@@ -243,7 +243,7 @@ async def test_renew_key_wrong_user(api_client, mock_service_data):
     key = make_key(tg_id=456)  # Different user
     mock_service_data.keys.get_data = AsyncMock(return_value=key)
 
-    response = await api_client.post("/api/v1/keys/test@vpn.ru/renew", json={
+    response = await api_client.patch("/api/v1/keys/test@vpn.ru", json={
         "tg_id": 123,
         "tariff_id": 1,
         "number_of_months": 3,

@@ -36,13 +36,13 @@ router.add_api_route("/", list_keys, methods=["GET"], response_model=List[KeyRes
 router.add_api_route(
     "/{email:path}", get_key, methods=["GET"], response_model=KeyDetailResponse, dependencies=_read_deps
 )
-router.add_api_route("/create", create_key, methods=["POST"], response_model=KeyResponse, dependencies=_write_deps)
+router.add_api_route("/", create_key, methods=["POST"], response_model=KeyResponse, dependencies=_write_deps)
 router.add_api_route(
     "/trial", create_trial_key, methods=["POST"], response_model=KeyResponse, dependencies=_write_deps
 )
 router.add_api_route("/{email}", delete_key, methods=["DELETE"], status_code=204, dependencies=_write_deps)
 router.add_api_route(
-    "/{email}/renew", renew_key, methods=["POST"], response_model=KeyResponse, dependencies=_write_deps
+    "/{email}", renew_key, methods=["PATCH"], response_model=KeyResponse, dependencies=_write_deps
 )
 router.add_api_route(
     "/channel-bonus",

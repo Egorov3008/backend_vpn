@@ -101,7 +101,7 @@ PostgreSQL + 3x-UI Panel
 **`KeyCreation` (`services/core/payment/creation_service.py`):**
 - Called when payment succeeds (webhook)
 - Creates VPN key in 3x-UI, saves to DB, updates cache
-- Only for paid tariffs (free keys created directly via `/keys/create` endpoint)
+- Only for paid tariffs (free keys created directly via `POST /keys` endpoint)
 
 **`PaymentProcessor` (`services/core/payment/processor.py`):**
 - Validates YooKassa webhooks
@@ -111,7 +111,7 @@ PostgreSQL + 3x-UI Panel
 **`KeyRenewal` (`services/core/keys/utils/renewal.py`):**
 - Extends key expiry in 3x-UI and database
 - Resets notification flags and traffic counters
-- Callable from `/keys/{email}/renew` endpoint or payment flow
+- Callable from `PATCH /keys/{email}` endpoint or payment flow
 
 **`CacheService` (`services/cache/service.py`):**
 - In-memory cache with TTL (loaded at startup)
@@ -122,16 +122,16 @@ PostgreSQL + 3x-UI Panel
 
 #### Keys (`/api/v1/keys`)
 
-- **GET `/?tg_id=...`** — List user's keys (paginated)
+- **GET `/?tg_id=...`** — List user's keys (`limit`/`offset` optional, total count in `X-Total-Count` header)
 - **GET `/{email}`** — Get key details (includes client_id, key config, expiry, trial status)
-- **POST `/create`** — Create new key (free tariffs only)
+- **POST `/`** — Create new key (free tariffs only). Trailing slash is mandatory — `POST /api/v1/keys` (no slash) 307-redirects to `POST /api/v1/keys/`, and `httpx`/most HTTP clients don't follow redirects on POST by default.
   - Requires: `tg_id`, `tariff_id`
   - Fails: 402 if tariff is paid (use payments flow instead)
 - **POST `/trial`** — Create a free trial key (sets `user.trial = 1`)
   - Requires: `tg_id` (query param)
   - Optional: `gift_token` (query param) — applies gift if provided
   - Fails: 403 if trial already used
-- **POST `/{email}/renew`** — Renew key expiry
+- **PATCH `/{email}`** — Renew key expiry
   - Requires: `tg_id`, `tariff_id`, `number_of_months`
   - Fails: 402 if tariff is paid
 - **DELETE `/{email}`** — Delete key (from 3x-UI and DB)
@@ -139,9 +139,10 @@ PostgreSQL + 3x-UI Panel
 
 #### Payments (`/api/v1/payments`)
 
-- **GET `/?tg_id=...`** — Payment history
+- **GET `/?tg_id=...`** — Payment history (`limit`/`offset` optional, total count in `X-Total-Count` header)
 - **GET `/{payment_id}/status`** — Check payment status
   - Requires: `tg_id` (ownership check)
+- **POST `/quotes`** — Calculate payment amount (discounts breakdown) without creating a payment
 - **POST `/create`** — Initiate payment
   - Creates YooKassa invoice
   - Sets payment_type to encode operation (create_key|renew_key)
@@ -174,7 +175,7 @@ Anonymous, cookie-based flow for the marketing landing page (separate from the b
   - Auth: `X-App-Secret: <MVP_APP_SECRET>` header (checked by `verify_app_secret()`, **not** `verify_bot_secret()` — see Authentication exception below).
   - Resolves the single key at `MVP_SHARED_KEY_EMAIL`, downloads/parses its subscription URL (with an in-memory 5-minute TTL cache, since every caller gets the identical response), and returns `{vless_uri, expiry_time}`.
   - Fails: 500 if the shared key isn't configured/found (deploy/provisioning error); 502 if the upstream subscription download/parse fails.
-  - Provisioning (one-time, manual): create a free tariff with `amount=0` and `limit_ip=0` (ideally a long `period`), call `POST /keys/create` once against it to mint the shared key, then paste that key's `email` into `MVP_SHARED_KEY_EMAIL`.
+  - Provisioning (one-time, manual): create a free tariff with `amount=0` and `limit_ip=0` (ideally a long `period`), call `POST /keys` once against it to mint the shared key, then paste that key's `email` into `MVP_SHARED_KEY_EMAIL`.
 
 #### App distribution (`/api/v1/public/app`, `api/v1/app_distribution.py`)
 
@@ -186,7 +187,7 @@ Anonymous, cookie-based flow for the marketing landing page (separate from the b
 Split into two routers with different auth (see Authentication below):
 
 - **`router`** (read-only + `verify_admin_or_bot`, i.e. bot secret also accepted): stats, scheduler status, maintenance-mode status, user/key/payment listings, gift/tariff/referral lookups.
-- **`destructive_router`** (`verify_admin_actor` only — `X-API-Key` + `X-Admin-Tg-Id`): mutating ops — set maintenance mode, delete user/key, generate key, mass-renew, change key date/tariff, delete inactive users, start/poll a panel `sync` job, and `api-clients` create/list/revoke/rotate.
+- **`destructive_router`** (`verify_admin_actor` only — `X-API-Key` + `X-Admin-Tg-Id`): mutating ops — `PUT maintenance-mode`, `DELETE users/{tg_id}`, `POST keys` (generate), `POST keys/renewals` (mass-renew), `PATCH keys/{email}/expiry`, `PATCH keys/{email}/tariff`, `DELETE users/inactive`, `POST sync-jobs` + `GET sync-jobs/{job_id}`, and `api-clients` create/list/`DELETE {id}` (revoke)/`POST {id}/keys` (rotate).
 
 Grep `api/v1/admin.py` for the current full route list rather than trusting a manually maintained enumeration here — it grows frequently (referrals, gift codes, promotions, and sync jobs were all added after this section was first written).
 
@@ -198,7 +199,7 @@ Grep `api/v1/admin.py` for the current full route list rather than trusting a ma
 
 **No user authentication** — backend trusts the `tg_id` parameter from the calling service (bot or web). The calling service is responsible for JWT validation.
 
-**External API clients (public-api tag):** Unlike bot/web/mobile-mvp above, these don't use a static env-secret — `Authorization: Bearer <key>` against per-client keys stored (hashed) in the `api_clients` table, checked by `verify_api_client(required_scopes=[...])` (`app/auth.py`, `services/api_clients/service.py`). Keys are issued/listed/revoked/rotated via admin-only `POST/GET /admin/api-clients*` (`X-API-Key` + `X-Admin-Tg-Id`, same as other destructive admin ops), optionally passing `allowed_domain` at creation — if set, `verify_api_client` rejects requests whose `Origin`/`Referer` host doesn't match it (unset = unrestricted, e.g. existing/server-to-server keys). The raw key is only ever shown once, in the create/rotate response.
+**External API clients (public-api tag):** Unlike bot/web/mobile-mvp above, these don't use a static env-secret — `Authorization: Bearer <key>` against per-client keys stored (hashed) in the `api_clients` table, checked by `verify_api_client(required_scopes=[...])` (`app/auth.py`, `services/api_clients/service.py`). Keys are issued/listed via admin-only `POST/GET /admin/api-clients`, revoked via `DELETE /admin/api-clients/{id}`, and rotated via `POST /admin/api-clients/{id}/keys` (`X-API-Key` + `X-Admin-Tg-Id`, same as other destructive admin ops), optionally passing `allowed_domain` at creation — if set, `verify_api_client` rejects requests whose `Origin`/`Referer` host doesn't match it (unset = unrestricted, e.g. existing/server-to-server keys). The raw key is only ever shown once, in the create/rotate response.
 
 All public endpoints live under `api/v1/public/` (a package: `tariffs.py`, `keys.py`, `payments.py`, `users.py`, `auth.py`), one file per internal resource — each re-registers the *same* handler functions from the corresponding internal `api/v1/*.py` router via `router.add_api_route(...)`, just with `verify_api_client(required_scopes=[...])` instead of `verify_bot_secret`, so business logic isn't duplicated. Scopes are per-resource, split read/write (`tariffs:read`, `keys:read`/`keys:write`, `payments:read`/`payments:write`, `users:read`/`users:write`, `auth:register`). `payments.py`'s webhook is deliberately excluded — it stays YooKassa-only (IP allowlist), never gets a public counterpart. `app/main.py`'s `public_api_cors_middleware` adds CORS headers (reflecting `Origin`) only for paths under `/api/v1/public/`, so browser-based callers can complete preflight — actual origin enforcement is the `allowed_domain` check above, not CORS.
 
@@ -334,7 +335,7 @@ async def test_create_key_free_tariff(client, mock_service_data, mock_pool):
     
     # Call endpoint
     response = client.post(
-        "/api/v1/keys/create",
+        "/api/v1/keys/",
         json={"tg_id": 123, "tariff_id": 1},
         headers={"X-Bot-Secret": "test_secret"},
     )

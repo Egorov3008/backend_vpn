@@ -62,7 +62,7 @@ async def test_get_maintenance_mode_default_disabled(api_client, fake_pool_overr
 
 @pytest.mark.asyncio
 async def test_set_maintenance_mode_enabled(api_client, fake_pool_override):
-    response = await api_client.post(
+    response = await api_client.put(
         "/api/v1/admin/maintenance-mode",
         json={"enabled": True, "reason": "плановые работы на панели"},
         headers={"X-API-Key": "test"},
@@ -78,12 +78,12 @@ async def test_set_maintenance_mode_enabled(api_client, fake_pool_override):
 
 @pytest.mark.asyncio
 async def test_set_maintenance_mode_disabled_clears_reason(api_client, fake_pool_override):
-    await api_client.post(
+    await api_client.put(
         "/api/v1/admin/maintenance-mode",
         json={"enabled": True, "reason": "работы"},
         headers={"X-API-Key": "test"},
     )
-    response = await api_client.post(
+    response = await api_client.put(
         "/api/v1/admin/maintenance-mode",
         json={"enabled": False},
         headers={"X-API-Key": "test"},
@@ -124,8 +124,8 @@ async def test_renew_key_returns_503_when_panel_in_maintenance(api_client, mock_
         )
         mock_build.return_value = (MagicMock(), mock_renewal, MagicMock())
 
-        response = await api_client.post(
-            "/api/v1/keys/test@vpn.ru/renew",
+        response = await api_client.patch(
+            "/api/v1/keys/test@vpn.ru",
             json={"tg_id": 123, "tariff_id": 9, "number_of_months": 1},
         )
 
@@ -148,7 +148,7 @@ async def test_create_key_returns_503_when_panel_in_maintenance(api_client, mock
         mock_build.return_value = (mock_create_key_svc, MagicMock(), MagicMock())
 
         response = await api_client.post(
-            "/api/v1/keys/create", json={"tg_id": 123, "tariff_id": 1}
+            "/api/v1/keys/", json={"tg_id": 123, "tariff_id": 1}
         )
 
     assert response.status_code == 503

@@ -44,7 +44,7 @@ export async function render(container) {
               <td>${g.sender_tg_id}</td>
               <td>${g.tariff_id}</td>
               <td>${g.recipient_tg_id ?? "—"}</td>
-              <td>${g.used_at ? new Date(g.used_at).toLocaleString() : "нет"}</td>
+              <td>${g.redeemed_at ? new Date(g.redeemed_at).toLocaleString() : "нет"}</td>
             </tr>
           `).join("")}</tbody>
         </table>
@@ -69,7 +69,7 @@ export async function render(container) {
       box.innerHTML = `
         <p>Отправитель: ${g.sender_tg_id}, тариф: ${g.tariff_id}</p>
         <p>Получатель: ${g.recipient_tg_id ?? "—"} (${g.recipient_email ?? "—"})</p>
-        <p>Использован: ${g.used_at ? new Date(g.used_at).toLocaleString() : "нет"}</p>
+        <p>Использован: ${g.redeemed_at ? new Date(g.redeemed_at).toLocaleString() : "нет"}</p>
       `;
     } catch (e) {
       box.innerHTML = `<p class="error-text">${e.message}</p>`;

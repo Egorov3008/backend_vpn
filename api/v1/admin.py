@@ -147,7 +147,7 @@ async def get_maintenance_mode(
     return await maintenance_mode.get_status(pool)
 
 
-@destructive_router.post("/maintenance-mode", response_model=MaintenanceStatusResponse)
+@destructive_router.put("/maintenance-mode", response_model=MaintenanceStatusResponse)
 async def set_maintenance_mode(
     body: AdminMaintenanceModeRequest,
     principal: AdminPrincipal = Depends(verify_admin_actor),
@@ -178,8 +178,7 @@ async def list_users(
 ) -> List[UserResponse]:
     users = await service_data.users.get_all()
     response.headers["X-Total-Count"] = str(len(users))
-    if limit is not None:
-        users = users[offset:offset + limit]
+    users = users[offset:offset + limit] if limit is not None else users[offset:]
     return [UserResponse.from_user(u) for u in users]
 
 
@@ -299,7 +298,7 @@ async def admin_update_user(
     return UserResponse.from_user(user)
 
 
-@destructive_router.post("/keys/{email}/delete", status_code=204)
+@destructive_router.delete("/keys/{email}", status_code=204)
 async def admin_delete_key(
     email: str,
     principal: AdminPrincipal = Depends(verify_admin_actor),
@@ -340,7 +339,7 @@ async def admin_delete_key(
     return Response(status_code=204)
 
 
-@destructive_router.post("/users/inactive/delete", response_model=AdminDeleteCountResponse)
+@destructive_router.delete("/users/inactive", response_model=AdminDeleteCountResponse)
 async def delete_inactive_users(
     principal: AdminPrincipal = Depends(verify_admin_actor),
     service_data: ServiceDataModel = Depends(get_service_data),
@@ -368,7 +367,7 @@ async def delete_inactive_users(
     return {"deleted": deleted}
 
 
-@destructive_router.post("/keys/generate", response_model=AdminGenerateKeyResponse)
+@destructive_router.post("/keys", response_model=AdminGenerateKeyResponse)
 async def admin_generate_key(
     body: AdminGenerateKeyRequest,
     principal: AdminPrincipal = Depends(verify_admin_actor),
@@ -411,7 +410,7 @@ async def admin_generate_key(
     return result
 
 
-@destructive_router.post("/keys/mass-renew", response_model=AdminMassRenewResponse)
+@destructive_router.post("/keys/renewals", response_model=AdminMassRenewResponse)
 async def admin_mass_renew(
     body: AdminMassRenewRequest,
     principal: AdminPrincipal = Depends(verify_admin_actor),
@@ -467,7 +466,7 @@ async def admin_mass_renew(
     return {"total": len(body.emails), "success": success_count, "failed": len(body.emails) - success_count, "results": results}
 
 
-@destructive_router.post("/keys/{email}/change-date", response_model=AdminChangeDateResponse)
+@destructive_router.patch("/keys/{email}/expiry", response_model=AdminChangeDateResponse)
 async def admin_change_key_date(
     email: str,
     body: AdminChangeDateRequest,
@@ -510,7 +509,7 @@ async def admin_change_key_date(
     return {"email": email, "expiry_time": body.expiry_time}
 
 
-@destructive_router.post("/keys/{email}/change-tariff", response_model=AdminChangeTariffResponse)
+@destructive_router.patch("/keys/{email}/tariff", response_model=AdminChangeTariffResponse)
 async def admin_change_key_tariff(
     email: str,
     body: AdminChangeTariffRequest,
@@ -560,7 +559,7 @@ async def admin_change_key_tariff(
     return {"email": email, "tariff_id": tariff.id}
 
 
-@destructive_router.post(
+@destructive_router.patch(
     "/keys/{email}/panel-meta",
     response_model=AdminPanelMetaResponse,
     response_model_exclude_none=True,
@@ -621,12 +620,11 @@ async def admin_get_gift(
         "sender_tg_id": gift.sender_tg_id,
         "tariff_id": gift.tariff_id,
         "created_at": gift.created_at.isoformat() if gift.created_at else None,
-        # `used_at` в модели — это момент активации подарка (аналог redeemed_at);
-        # отдаём оба имени для совместимости с клиентом, который ожидает redeemed_at.
+        # `used_at` в модели — момент активации подарка; отдаём его под каноническим
+        # именем `redeemed_at`.
         "redeemed_at": gift.used_at.isoformat() if gift.used_at else None,
-        "used_at": gift.used_at.isoformat() if gift.used_at else None,
         "recipient_tg_id": gift.recipient_tg_id,
-        # В БД колонка `email` хранит email получателя (аналог recipient_email).
+        # В БД колонка `email` хранит email получателя.
         "recipient_email": gift.email,
     }
 
@@ -647,9 +645,8 @@ async def admin_list_gifts(
                 "sender_tg_id": g.sender_tg_id,
                 "tariff_id": g.tariff_id,
                 "created_at": g.created_at.isoformat() if g.created_at else None,
-                # См. замечание про `used_at` ↔ `redeemed_at` в admin_get_gift.
+                # См. замечание про `used_at` -> `redeemed_at` в admin_get_gift.
                 "redeemed_at": g.used_at.isoformat() if g.used_at else None,
-                "used_at": g.used_at.isoformat() if g.used_at else None,
                 "recipient_tg_id": g.recipient_tg_id,
                 "recipient_email": g.email,
             }
@@ -762,7 +759,7 @@ async def admin_list_tariffs(
     return {"tariffs": [AdminTariffItem.from_tariff(t) for t in tariffs]}
 
 
-@destructive_router.post("/users/{tg_id}/delete", response_model=AdminDeleteUserResponse)
+@destructive_router.delete("/users/{tg_id}", response_model=AdminDeleteUserResponse)
 async def admin_delete_user(
     tg_id: int,
     principal: AdminPrincipal = Depends(verify_admin_actor),
@@ -832,8 +829,7 @@ async def admin_list_keys(
     """Admin: list all keys."""
     keys = await service_data.keys.get_all()
     response.headers["X-Total-Count"] = str(len(keys))
-    if limit is not None:
-        keys = keys[offset:offset + limit]
+    keys = keys[offset:offset + limit] if limit is not None else keys[offset:]
     return {"keys": [AdminKeyItem.from_key(k) for k in keys]}
 
 
@@ -847,8 +843,7 @@ async def admin_list_payments(
     """Admin: list all payments."""
     payments = await service_data.payments.get_all()
     response.headers["X-Total-Count"] = str(len(payments))
-    if limit is not None:
-        payments = payments[offset:offset + limit]
+    payments = payments[offset:offset + limit] if limit is not None else payments[offset:]
     return {"payments": [AdminPaymentItem.from_payment(p) for p in payments]}
 
 
@@ -862,7 +857,7 @@ def _get_sync_scheduler():
     return getattr(app.state, "sync_scheduler", None)
 
 
-@destructive_router.post("/sync", response_model=AdminSyncStartedResponse, status_code=202)
+@destructive_router.post("/sync-jobs", response_model=AdminSyncStartedResponse, status_code=202)
 async def admin_sync(
     principal: AdminPrincipal = Depends(verify_admin_actor),
     pool: asyncpg.Pool = Depends(get_pool),
@@ -871,7 +866,7 @@ async def admin_sync(
 
     Раньше был синхронным (блокировал request на время sync_cache). Теперь
     запускает asyncio.Task через SyncScheduler.start_job и сразу отдаёт job_id.
-    Статус — через GET /admin/sync/{job_id}.
+    Статус — через GET /admin/sync-jobs/{job_id}.
     """
     scheduler = _get_sync_scheduler()
     if scheduler is None:
@@ -893,7 +888,7 @@ async def admin_sync(
     )
 
 
-@destructive_router.get("/sync/{job_id}", response_model=AdminSyncStatusResponse)
+@destructive_router.get("/sync-jobs/{job_id}", response_model=AdminSyncStatusResponse)
 async def admin_sync_status(
     job_id: str,
     principal: AdminPrincipal = Depends(verify_admin_actor),
@@ -935,7 +930,7 @@ async def list_api_clients(
     return {"clients": [ApiClientResponse.from_client(c) for c in clients]}
 
 
-@destructive_router.post("/api-clients/{client_id}/revoke", response_model=ApiClientResponse)
+@destructive_router.delete("/api-clients/{client_id}", response_model=ApiClientResponse)
 async def revoke_api_client(
     client_id: int,
     pool: asyncpg.Pool = Depends(get_pool),
@@ -948,7 +943,7 @@ async def revoke_api_client(
     return ApiClientResponse.from_client(client)
 
 
-@destructive_router.post("/api-clients/{client_id}/rotate", response_model=ApiClientCreatedResponse)
+@destructive_router.post("/api-clients/{client_id}/keys", response_model=ApiClientCreatedResponse)
 async def rotate_api_client(
     client_id: int,
     pool: asyncpg.Pool = Depends(get_pool),

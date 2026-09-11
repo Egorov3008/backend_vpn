@@ -70,7 +70,7 @@ def client_ctx():
 
 def test_panel_meta_updates_group_and_comment(client_ctx):
     client, xui = client_ctx
-    resp = client.post(
+    resp = client.patch(
         "/api/v1/admin/keys/user@example.com/panel-meta",
         json={"group": "vip", "comment": "test client"},
         headers=_headers(),
@@ -88,7 +88,7 @@ def test_panel_meta_updates_group_and_comment(client_ctx):
 
 def test_panel_meta_updates_only_group(client_ctx):
     client, xui = client_ctx
-    resp = client.post(
+    resp = client.patch(
         "/api/v1/admin/keys/user@example.com/panel-meta",
         json={"group": "vip"},
         headers=_headers(),
@@ -101,7 +101,7 @@ def test_panel_meta_updates_only_group(client_ctx):
 
 def test_panel_meta_updates_only_comment(client_ctx):
     client, xui = client_ctx
-    resp = client.post(
+    resp = client.patch(
         "/api/v1/admin/keys/user@example.com/panel-meta",
         json={"comment": "test client"},
         headers=_headers(),
@@ -114,7 +114,7 @@ def test_panel_meta_updates_only_comment(client_ctx):
 
 def test_panel_meta_rejects_empty_body(client_ctx):
     client, xui = client_ctx
-    resp = client.post(
+    resp = client.patch(
         "/api/v1/admin/keys/user@example.com/panel-meta",
         json={},
         headers=_headers(),
@@ -128,7 +128,7 @@ def test_panel_meta_404_when_key_missing(client_ctx):
     service_data = app.dependency_overrides[get_service_data]()
     service_data.keys.get_data = AsyncMock(return_value=None)
     service_data.data_service.keys.get = AsyncMock(return_value=None)
-    resp = client.post(
+    resp = client.patch(
         "/api/v1/admin/keys/missing@example.com/panel-meta",
         json={"group": "vip"},
         headers=_headers(),
@@ -140,7 +140,7 @@ def test_panel_meta_404_when_key_missing(client_ctx):
 def test_panel_meta_500_when_panel_call_fails(client_ctx):
     client, xui = client_ctx
     xui.update_standalone_client.side_effect = Exception("panel unavailable")
-    resp = client.post(
+    resp = client.patch(
         "/api/v1/admin/keys/user@example.com/panel-meta",
         json={"group": "vip"},
         headers=_headers(),

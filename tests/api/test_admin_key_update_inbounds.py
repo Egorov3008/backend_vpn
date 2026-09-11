@@ -96,7 +96,7 @@ def client_ctx():
 def test_mass_renew_calls_set_inbounds_with_paid_before_extend(client_ctx):
     client, xui = client_ctx
     resp = client.post(
-        "/api/v1/admin/keys/mass-renew",
+        "/api/v1/admin/keys/renewals",
         json={"emails": ["user@example.com"], "days": 30},
         headers=_headers(),
     )
@@ -115,7 +115,7 @@ def test_mass_renew_continues_when_set_inbounds_fails(client_ctx):
     client, xui = client_ctx
     xui.set_inbounds.return_value = False
     resp = client.post(
-        "/api/v1/admin/keys/mass-renew",
+        "/api/v1/admin/keys/renewals",
         json={"emails": ["user@example.com"], "days": 30},
         headers=_headers(),
     )
@@ -130,7 +130,7 @@ def test_mass_renew_continues_when_set_inbounds_fails(client_ctx):
 def test_mass_renew_uses_paid_inbound_ids_from_inbounds_module(client_ctx):
     client, xui = client_ctx
     client.post(
-        "/api/v1/admin/keys/mass-renew",
+        "/api/v1/admin/keys/renewals",
         json={"emails": ["user@example.com"], "days": 30},
         headers=_headers(),
     )
@@ -143,8 +143,8 @@ def test_mass_renew_uses_paid_inbound_ids_from_inbounds_module(client_ctx):
 
 def test_change_date_calls_set_inbounds_with_paid_before_extend(client_ctx):
     client, xui = client_ctx
-    resp = client.post(
-        "/api/v1/admin/keys/user@example.com/change-date",
+    resp = client.patch(
+        "/api/v1/admin/keys/user@example.com/expiry",
         json={"expiry_time": 1_900_000_000_000},
         headers=_headers(),
     )
@@ -159,8 +159,8 @@ def test_change_date_calls_set_inbounds_with_paid_before_extend(client_ctx):
 def test_change_date_continues_when_set_inbounds_fails(client_ctx):
     client, xui = client_ctx
     xui.set_inbounds.return_value = False
-    resp = client.post(
-        "/api/v1/admin/keys/user@example.com/change-date",
+    resp = client.patch(
+        "/api/v1/admin/keys/user@example.com/expiry",
         json={"expiry_time": 1_900_000_000_000},
         headers=_headers(),
     )
@@ -170,8 +170,8 @@ def test_change_date_continues_when_set_inbounds_fails(client_ctx):
 
 def test_change_date_uses_paid_inbound_ids_from_inbounds_module(client_ctx):
     client, xui = client_ctx
-    client.post(
-        "/api/v1/admin/keys/user@example.com/change-date",
+    client.patch(
+        "/api/v1/admin/keys/user@example.com/expiry",
         json={"expiry_time": 1_900_000_000_000},
         headers=_headers(),
     )
@@ -188,8 +188,8 @@ def test_change_tariff_calls_set_inbounds_with_paid_before_extend(client_ctx):
     service_data.tariffs.get_data = AsyncMock(return_value=MagicMock(
         id=20, name_tariff="Pro", limit_ip=5,
     ))
-    resp = client.post(
-        "/api/v1/admin/keys/user@example.com/change-tariff",
+    resp = client.patch(
+        "/api/v1/admin/keys/user@example.com/tariff",
         json={"tariff_id": 20},
         headers=_headers(),
     )
@@ -208,8 +208,8 @@ def test_change_tariff_continues_when_set_inbounds_fails(client_ctx):
         id=20, name_tariff="Pro", limit_ip=5,
     ))
     xui.set_inbounds.return_value = False
-    resp = client.post(
-        "/api/v1/admin/keys/user@example.com/change-tariff",
+    resp = client.patch(
+        "/api/v1/admin/keys/user@example.com/tariff",
         json={"tariff_id": 20},
         headers=_headers(),
     )
@@ -224,8 +224,8 @@ def test_change_tariff_uses_paid_inbound_ids_from_inbounds_module(client_ctx):
     service_data.tariffs.get_data = AsyncMock(return_value=MagicMock(
         id=20, name_tariff="Pro", limit_ip=5,
     ))
-    client.post(
-        "/api/v1/admin/keys/user@example.com/change-tariff",
+    client.patch(
+        "/api/v1/admin/keys/user@example.com/tariff",
         json={"tariff_id": 20},
         headers=_headers(),
     )

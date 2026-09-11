@@ -164,6 +164,64 @@ async def test_get_payment_history_multiple(api_client, mock_service_data):
     assert data[2]["status"] == "pending"
 
 
+def _make_payments(count: int) -> list:
+    return [
+        PaymentModel(
+            payment_id=f"pay_{i:03d}",
+            tg_id=123,
+            amount=10.0 * i,
+            status="succeeded",
+            payment_type="create_key|1",
+            created_at=datetime(2026, 4, 27, 10, 0, 0),
+        )
+        for i in range(1, count + 1)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_get_payment_history_total_count_header_without_pagination(api_client, mock_service_data):
+    mock_service_data.payments.get_by = AsyncMock(return_value=_make_payments(3))
+
+    response = await api_client.get("/api/v1/payments/?tg_id=123")
+    assert response.status_code == 200
+    assert response.headers["X-Total-Count"] == "3"
+    assert len(response.json()) == 3
+
+
+@pytest.mark.asyncio
+async def test_get_payment_history_limit_applies_page_size(api_client, mock_service_data):
+    mock_service_data.payments.get_by = AsyncMock(return_value=_make_payments(3))
+
+    response = await api_client.get("/api/v1/payments/?tg_id=123&limit=2")
+    assert response.status_code == 200
+    assert response.headers["X-Total-Count"] == "3"
+    data = response.json()
+    assert len(data) == 2
+    assert [p["payment_id"] for p in data] == ["pay_001", "pay_002"]
+
+
+@pytest.mark.asyncio
+async def test_get_payment_history_offset_applies_without_limit(api_client, mock_service_data):
+    """offset без limit не должен молча игнорироваться — иначе клиент,
+    листающий только по offset, получит дубли (см. code review)."""
+    mock_service_data.payments.get_by = AsyncMock(return_value=_make_payments(3))
+
+    response = await api_client.get("/api/v1/payments/?tg_id=123&offset=1")
+    assert response.status_code == 200
+    data = response.json()
+    assert [p["payment_id"] for p in data] == ["pay_002", "pay_003"]
+
+
+@pytest.mark.asyncio
+async def test_get_payment_history_limit_and_offset_combine(api_client, mock_service_data):
+    mock_service_data.payments.get_by = AsyncMock(return_value=_make_payments(3))
+
+    response = await api_client.get("/api/v1/payments/?tg_id=123&limit=1&offset=1")
+    assert response.status_code == 200
+    data = response.json()
+    assert [p["payment_id"] for p in data] == ["pay_002"]
+
+
 @pytest.mark.asyncio
 async def test_get_payment_status_success(api_client, mock_service_data):
     """Test getting status of a valid payment"""
@@ -330,7 +388,7 @@ def test_apply_stock_none_returns_full_price():
 
 
 # ---------------------------------------------------------------------------
-# /payments/calculate endpoint — enriched response
+# /payments/quotes endpoint — enriched response
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
@@ -345,7 +403,7 @@ async def test_calculate_payment_referred_first_purchase(api_client, mock_servic
     mock_service_data.users.get_data = AsyncMock(return_value=user)
     mock_service_data.stocks.get_data = AsyncMock(return_value=None)
 
-    response = await api_client.post("/api/v1/payments/calculate", json={
+    response = await api_client.post("/api/v1/payments/quotes", json={
         "tg_id": 7563318767, "tariff_id": 7,
         "number_of_months": 1, "operation": "create_key",
     })
@@ -369,7 +427,7 @@ async def test_calculate_payment_with_stock_percent(api_client, mock_service_dat
         return_value=Stock(tg_id=123, stock_type="percent", value=10.0)
     )
 
-    response = await api_client.post("/api/v1/payments/calculate", json={
+    response = await api_client.post("/api/v1/payments/quotes", json={
         "tg_id": 123, "tariff_id": 7, "number_of_months": 1, "operation": "create_key",
     })
     assert response.status_code == 200, response.text

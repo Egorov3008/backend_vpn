@@ -844,7 +844,7 @@ async def claim_key(
       если ключ уже истёк).
     - Ставит tariff_id = trial, trial=1, converted_tg_id = реальный tg_id.
     - Выравнивает user.server_id с сервером ключа (иначе продление из бота
-      сломается — /keys/{email}/renew берёт сервер из user.server_id).
+      сломается — PATCH /keys/{email} берёт сервер из user.server_id).
     - При наличии куки tg_ref — мержит referral_id (см. _attach_referral_if_any).
     """
     key_obj = await _get_key_by_landing_uid(service_data, pool, landing_uid)

@@ -43,7 +43,6 @@ class Settings(BaseSettings):
     external_subscription_url: str = Field(default="", alias="EXTERNAL_SUB_URL")
     admin_username: str = Field(default="", alias="XUI_LOGIN")
     admin_password: str = Field(default="", alias="XUI_PASSWORD")
-    xui_web_base_path: str = Field(default="/", alias="XUI_WEB_BASE_PATH")
     xui_server_id: int = Field(default=1, alias="XUI_SERVER_ID")
     xui_skip_ssl_verify: bool = Field(default=False, alias="XUI_SKIP_SSL_VERIFY")
 
@@ -119,7 +118,6 @@ XUI_SUBSCRIPTION_URL: str = settings.xui_subscription_url or settings.api_url
 EXTERNAL_SUBSCRIPTION_URL: str = settings.external_subscription_url
 ADMIN_USERNAME: str = settings.admin_username
 ADMIN_PASSWORD: str = settings.admin_password
-XUI_WEB_BASE_PATH: str = settings.xui_web_base_path
 XUI_SERVER_ID: int = settings.xui_server_id
 XUI_SKIP_SSL_VERIFY: bool = settings.xui_skip_ssl_verify
 YOOKASSA_SHOP_ID: str = settings.yookassa_shop_id or core_settings.yookassa_shop_id

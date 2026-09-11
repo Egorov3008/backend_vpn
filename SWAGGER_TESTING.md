@@ -128,7 +128,7 @@ async with httpx.AsyncClient() as client:
 
 ### Пример: Создание нового ключа
 
-**Endpoint:** `POST /api/v1/keys/create`
+**Endpoint:** `POST /api/v1/keys/`
 
 1. Нажмите на endpoint → **Try it out**
 2. В **Request body** введите JSON:
@@ -304,7 +304,7 @@ Swagger показывает все возможные HTTP коды для ка
 Чтобы вызвать ошибку, передайте невалидные параметры:
 
 ```json
-// POST /api/v1/keys/create с платным тарифом
+// POST /api/v1/keys/ с платным тарифом
 {
   "tg_id": 123,
   "tariff_id": 2  // платный тариф → 402 Payment Required
