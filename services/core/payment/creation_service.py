@@ -3,6 +3,7 @@ from typing import Optional, Dict, Any
 from asyncpg import Pool
 
 from client import XUISession
+from config import settings
 from logger import logger
 
 from services.cache.service import CacheService
@@ -77,10 +78,6 @@ class KeyCreationService:
             tariff = await self.processor._model_service.tariffs.get_data(
                 int(tariff_id), self.processor._conn
             )
-            user = await self.processor._model_service.users.get_data(
-                self.processor.tg_id, self.processor._conn
-            )
-
             logger.info(
                 "[Цена:CreateKey] Создание ключа после оплаты",
                 tg_id=self.processor.tg_id,
@@ -128,7 +125,7 @@ class KeyCreationService:
             key_data = await self.create_key.proces(
                 tg_id=self.processor.tg_id,
                 tariff=tariff,
-                server_id=user.server_id,
+                server_id=settings.xui_server_id,
                 conn=self.processor._conn,
                 number_of_months=self.processor.number_of_months,
             )

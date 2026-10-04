@@ -1,6 +1,7 @@
 import asyncio
 from typing import Dict, Any, List
 
+from models.servers.server import resolve_panel_server
 from services.core.data.service import ServiceDataModel
 
 
@@ -16,10 +17,7 @@ class SaturationUser:
         user = await self.user_data.get_data(tg_id)
         if not user:
             return {}
-        server = await self.server.get_data(user.server_id)
-        if not server:
-            from models.servers.server import get_env_server
-            server = get_env_server()
+        server = await resolve_panel_server(self.server)
         keys = await self.user_data.get_by(tg_id=tg_id)
 
         return {"user": user, "connect_module": server, "keys": keys}

@@ -21,6 +21,7 @@ from services.core.user.utils.trial import TrialService
 from services.core.gift import GiftLinkProvider
 from services.core.promotions.channel_bonus_service import ChannelBonusService
 from database.service import DataService
+from models.servers.server import resolve_panel_server
 from services.cache.service import CacheService
 from services.system.maintenance import PanelMaintenanceError
 
@@ -273,12 +274,7 @@ async def renew_key(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    server = await service_data.servers.get_data(user.server_id, pool)
-    if not server:
-        from models.servers.server import get_env_server
-        server = get_env_server()
-    if not server:
-        raise HTTPException(status_code=500, detail="Server not found")
+    server = await resolve_panel_server(service_data.servers, pool)
 
     data_service = DataService()
     _, key_renewal_svc, _ = build_key_services(pool, service_data, cache, data_service)

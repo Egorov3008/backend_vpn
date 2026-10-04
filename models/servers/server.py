@@ -42,3 +42,17 @@ def get_env_server() -> Server:
         login=settings.admin_username,
         password=settings.admin_password,
     )
+
+
+async def resolve_panel_server(servers, conn=None) -> Server:
+    """Server единственной 3x-UI панели: строка ``servers`` с id=XUI_SERVER_ID,
+    иначе — из .env (``get_env_server``).
+
+    ``users.server_id`` для выбора панели не используется: это legacy-поле
+    multi-server схемы, у пользователей, зарегистрированных через API, оно
+    бывает NULL.
+    """
+    from config import settings
+
+    server = await servers.get_data(settings.xui_server_id, conn)
+    return server or get_env_server()

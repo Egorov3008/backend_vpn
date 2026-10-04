@@ -843,8 +843,8 @@ async def claim_key(
     - Продлевает срок на trial-период (7 дней) от текущего expiry (или от now,
       если ключ уже истёк).
     - Ставит tariff_id = trial, trial=1, converted_tg_id = реальный tg_id.
-    - Выравнивает user.server_id с сервером ключа (иначе продление из бота
-      сломается — PATCH /keys/{email} берёт сервер из user.server_id).
+    - Выставляет user.server_id = XUI_SERVER_ID (legacy-поле; backend по нему
+      панель не выбирает, но бот читает его).
     - При наличии куки tg_ref — мержит referral_id (см. _attach_referral_if_any).
     """
     key_obj = await _get_key_by_landing_uid(service_data, pool, landing_uid)
@@ -913,7 +913,8 @@ async def claim_key(
     # trial=1 (как в /keys/trial)
     await TrialService(service_data).installation_trial(body.tg_id, pool, trial=1)
 
-    # Выровнять server_id с сервером ключа, чтобы продление из бота работало
+    # legacy users.server_id: backend его не использует (см. resolve_panel_server),
+    # но бот читает — держим согласованным с XUI_SERVER_ID.
     if user.server_id != settings.xui_server_id:
         user.server_id = settings.xui_server_id
         await service_data.users.update(pool, user, {"tg_id": body.tg_id})

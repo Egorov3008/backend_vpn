@@ -334,3 +334,35 @@ async def test_get_key_not_found(api_client, mock_service_data):
         "/api/v1/keys/missing@example.com",
     )
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_renew_key_user_without_server_id(api_client, mock_service_data):
+    """users.server_id = NULL (регистрация без server_id) не ломает продление:
+    сервер панели берётся по XUI_SERVER_ID, а не по пользователю."""
+    from config import settings
+
+    key = make_key()
+
+    async def strict_get_data(identifier, conn=None):
+        if not identifier:
+            raise ValueError("BaseData: identifier is required")
+
+    mock_service_data.tariffs.get_data = AsyncMock(return_value=make_tariff())
+    mock_service_data.servers.get_data = AsyncMock(side_effect=strict_get_data)
+    mock_service_data.users.get_data = AsyncMock(return_value=make_user())
+
+    with patch("api.v1.keys.build_key_services") as mock_build:
+        mock_renewal = AsyncMock()
+        mock_build.return_value = (MagicMock(), mock_renewal, MagicMock())
+        mock_service_data.keys.get_data = AsyncMock(side_effect=[key, make_key()])
+
+        response = await api_client.patch("/api/v1/keys/test@vpn.ru", json={
+            "tg_id": 123,
+            "tariff_id": 1,
+            "number_of_months": 1,
+        })
+
+    assert response.status_code == 200
+    assert mock_service_data.servers.get_data.call_args.args[0] == settings.xui_server_id
+    assert mock_renewal.extension_key.call_args.kwargs["server"].api_url == settings.api_url
