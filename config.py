@@ -65,6 +65,13 @@ class Settings(BaseSettings):
     # Public URL of the landing page (used in deep-link to bot).
     landing_public_url: str = Field(default="", alias="LANDING_PUBLIC_URL")
 
+    # Telegram Mini App (/api/v1/miniapp). HMAC secret for session tokens;
+    # falls back to bot_secret_key if empty (same as landing_cookie_secret).
+    miniapp_session_secret: str = Field(default="", alias="MINIAPP_SESSION_SECRET")
+    miniapp_session_ttl_seconds: int = Field(default=3600, alias="MINIAPP_SESSION_TTL_SECONDS")
+    # Max age of Telegram.WebApp.initData accepted by POST /miniapp/auth.
+    miniapp_init_data_max_age_seconds: int = Field(default=86400, alias="MINIAPP_INIT_DATA_MAX_AGE_SECONDS")
+
     # YooKassa — values fall back to shared core_settings if .env is missing them
     yookassa_shop_id: str = ""
     yookassa_secret_key: str = ""
