@@ -218,7 +218,7 @@ Two independent nginx edges proxy `/api/v1/public/` straight to `backend` (not t
 - `users` (tg_id, server_id, created_at, ref_count, is_admin)
 - `keys` (email, tg_id, expiry_time, key, inbound_id, tariff_id, client_id, created_at)
 - `tariffs` (id, name_tariff, amount, duration_months, traffic_gb, is_active)
-- `payments` (payment_id, tg_id, amount, status, payment_type, created_at, updated_at, processing_started_at, processing_token)
+- `payments` (payment_id, tg_id, amount, status, payment_type, created_at, updated_at, processing_started_at, processing_token, succeeded_at, renewal_expiry_time)
 - `keys.payment_id` — payment that issued the key (NULL for trial/admin/landing-free keys), unique when set
 - `servers` (id, url, api_url, availability)
 - `stocks` (id, name, amount, description, created_at)
