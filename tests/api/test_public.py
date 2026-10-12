@@ -13,6 +13,12 @@ def fake_pool():
     return FakeApiClientsPool()
 
 
+@pytest.fixture(autouse=True)
+def public_available_rates(monkeypatch):
+    # Тарифы, доступные через публичный API (аналог AVAILABLE_RATES из .env)
+    monkeypatch.setattr("api.v1.public.tariffs.AVAILABLE_RATES_LIST", [1, 5])
+
+
 @pytest.mark.asyncio
 async def test_public_tariffs_requires_auth(api_client, fake_pool):
     app.dependency_overrides[get_pool] = lambda: fake_pool
@@ -195,3 +201,59 @@ async def test_public_payments_history_requires_payments_read_scope(api_client, 
         "/api/v1/public/payments/?tg_id=123", headers={"Authorization": f"Bearer {raw_key}"}
     )
     assert response.status_code == 403
+
+
+# --- AVAILABLE_RATES filter ----------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_public_tariffs_list_hides_tariffs_outside_available_rates(
+    api_client, fake_pool, mock_service_data
+):
+    app.dependency_overrides[get_pool] = lambda: fake_pool
+    mock_service_data.tariffs.get_all = AsyncMock(return_value=[
+        Tariff(id=1, name_tariff="Basic", amount=100.0),
+        Tariff(id=2, name_tariff="Hidden", amount=200.0),
+        Tariff(id=5, name_tariff="Pro", amount=300.0),
+    ])
+    _, raw_key = await ApiClientService(fake_pool).create("Partner A", scopes=["tariffs:read"])
+
+    response = await api_client.get(
+        "/api/v1/public/tariffs", headers={"Authorization": f"Bearer {raw_key}"}
+    )
+    assert response.status_code == 200
+    assert [t["id"] for t in response.json()] == [1, 5]
+
+
+@pytest.mark.asyncio
+async def test_public_get_tariff_outside_available_rates_returns_404(
+    api_client, fake_pool, mock_service_data
+):
+    app.dependency_overrides[get_pool] = lambda: fake_pool
+    mock_service_data.tariffs.get_data = AsyncMock(
+        return_value=Tariff(id=2, name_tariff="Hidden", amount=200.0)
+    )
+    _, raw_key = await ApiClientService(fake_pool).create("Partner A", scopes=["tariffs:read"])
+
+    response = await api_client.get(
+        "/api/v1/public/tariffs/2", headers={"Authorization": f"Bearer {raw_key}"}
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Tariff not found"
+
+
+@pytest.mark.asyncio
+async def test_public_get_tariff_in_available_rates_returns_200(
+    api_client, fake_pool, mock_service_data
+):
+    app.dependency_overrides[get_pool] = lambda: fake_pool
+    mock_service_data.tariffs.get_data = AsyncMock(
+        return_value=Tariff(id=5, name_tariff="Pro", amount=300.0)
+    )
+    _, raw_key = await ApiClientService(fake_pool).create("Partner A", scopes=["tariffs:read"])
+
+    response = await api_client.get(
+        "/api/v1/public/tariffs/5", headers={"Authorization": f"Bearer {raw_key}"}
+    )
+    assert response.status_code == 200
+    assert response.json()["id"] == 5
