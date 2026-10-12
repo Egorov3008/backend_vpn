@@ -264,7 +264,7 @@ Two independent nginx edges proxy `/api/v1/public/` straight to `backend` (not t
 - Only the claim owner sends the user notification.
 - **Renewals:** the target expiry is computed once and stored in `payments.renewal_expiry_time` (`PaymentRepository.reserve_renewal_expiry`, conditional write, `IS NULL`) before the panel is touched (`KeyRenewal.extension_key(expiry_guard=...)`). A retry after a DB failure or a takeover reuses the stored value, so the panel and DB get the same absolute expiry and the period is not added twice. Migration `db/migrations/20261014_payment_renewal_expiry.sql`. Direct renewals without a payment (`PATCH /keys/{email}`) are unchanged.
 
-**Schema migrations** for the claim: `db/migrations/20261011_*`, `20261012_*`, and for renewal expiry `20261014_*`. Apply by hand before deploying code that uses them (see the header of each file).
+**Schema migrations** for the claim: `db/migrations/20261011_*`, `20261012_*`, for success timestamp `20261013_*` (`payments.succeeded_at`), and for renewal expiry `20261014_*`. Apply by hand before deploying code that uses them (see the header of each file).
 
 ### Background Tasks
 
