@@ -1,7 +1,9 @@
 """Продление по платежу: целевой срок фиксируется до панели и повтор не добавляет период второй раз."""
 
-import pytest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from services.core.keys.utils.renewal import KeyRenewal
 from services.system.maintenance import maintenance_mode
@@ -18,6 +20,7 @@ def _renewal(computed_expiry):
     xui.extend_client_key = AsyncMock(return_value=True)
     md = MagicMock()
     md.keys.update = AsyncMock()
+    md.keys.get_data = AsyncMock(side_effect=lambda email, conn=None: _key())
     refresh = MagicMock()
     refresh.refresh_key = MagicMock(
         side_effect=lambda key, *a, **kw: setattr(key, "expiry_time", computed_expiry) or key
@@ -29,10 +32,7 @@ def _renewal(computed_expiry):
 
 
 def _key():
-    k = MagicMock()
-    k.expiry_time = 2000
-    k.email = "a@b.c"
-    return k
+    return SimpleNamespace(expiry_time=2000, email="a@b.c")
 
 
 @pytest.mark.asyncio

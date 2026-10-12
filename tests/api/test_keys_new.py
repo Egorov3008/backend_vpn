@@ -366,3 +366,28 @@ async def test_renew_key_user_without_server_id(api_client, mock_service_data):
     assert response.status_code == 200
     assert mock_service_data.servers.get_data.call_args.args[0] == settings.xui_server_id
     assert mock_renewal.extension_key.call_args.kwargs["server"].api_url == settings.api_url
+
+
+@pytest.mark.asyncio
+async def test_renew_key_panel_failure_returns_502(api_client, mock_service_data):
+    """Сбой 3x-UI при продлении — 502, а не общий 500 и не 200 при необновлённой панели."""
+    from client import XUIAPIError
+
+    key = make_key()
+    mock_service_data.keys.get_data = AsyncMock(return_value=key)
+    mock_service_data.tariffs.get_data = AsyncMock(return_value=make_tariff())
+    mock_service_data.servers.get_data = AsyncMock(return_value=make_server())
+    mock_service_data.users.get_data = AsyncMock(return_value=make_user())
+
+    with patch("api.v1.keys.build_key_services") as mock_build:
+        mock_renewal = AsyncMock()
+        mock_renewal.extension_key.side_effect = XUIAPIError("panel down")
+        mock_build.return_value = (MagicMock(), mock_renewal, MagicMock())
+
+        response = await api_client.patch("/api/v1/keys/test@vpn.ru", json={
+            "tg_id": 123,
+            "tariff_id": 1,
+            "number_of_months": 1,
+        })
+
+    assert response.status_code == 502

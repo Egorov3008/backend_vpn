@@ -13,6 +13,7 @@ from app.schemas.keys import (
     KeyRenewRequest,
     ChannelBonusResponse,
 )
+from client import XUIAPIError
 from config import DEFAULT_PRICING_PLAN, settings
 from services.cache.key_manager import CacheKeyManager
 from services.core.data.service import ServiceDataModel
@@ -289,6 +290,8 @@ async def renew_key(
         )
     except PanelMaintenanceError as e:
         raise HTTPException(status_code=503, detail=str(e))
+    except XUIAPIError as e:
+        raise HTTPException(status_code=502, detail="3x-UI panel failed to renew the key") from e
 
     renewed_key = await service_data.keys.get_data(email, pool)
     if not renewed_key:
