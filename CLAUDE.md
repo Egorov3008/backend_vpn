@@ -142,6 +142,7 @@ PostgreSQL + 3x-UI Panel
 - **GET `/?tg_id=...`** — Payment history (`limit`/`offset` optional, total count in `X-Total-Count` header)
 - **GET `/{payment_id}/status`** — Check payment status
   - Requires: `tg_id` (ownership check)
+  - Never processes the payment (never calls `route()`). If the stored status is `pending`, it asks YooKassa (at most once per 30s per payment, 15s timeout) and only handles cancellation: `pending → canceled` via a conditional `UPDATE ... WHERE status='pending'`.
 - **POST `/quotes`** — Calculate payment amount (discounts breakdown) without creating a payment
 - **POST `/create`** — Initiate payment
   - Creates YooKassa invoice
@@ -217,7 +218,8 @@ Two independent nginx edges proxy `/api/v1/public/` straight to `backend` (not t
 - `users` (tg_id, server_id, created_at, ref_count, is_admin)
 - `keys` (email, tg_id, expiry_time, key, inbound_id, tariff_id, client_id, created_at)
 - `tariffs` (id, name_tariff, amount, duration_months, traffic_gb, is_active)
-- `payments` (payment_id, tg_id, amount, status, payment_type, created_at, updated_at)
+- `payments` (payment_id, tg_id, amount, status, payment_type, created_at, updated_at, processing_started_at, processing_token)
+- `keys.payment_id` — payment that issued the key (NULL for trial/admin/landing-free keys), unique when set
 - `servers` (id, url, api_url, availability)
 - `stocks` (id, name, amount, description, created_at)
 - `api_clients` (public-API keys — see External API clients below)
@@ -253,10 +255,16 @@ Two independent nginx edges proxy `/api/v1/public/` straight to `backend` (not t
 2. Backend creates invoice via `yookassa.Payment.create()`
 3. Response includes `confirmation_url` (redirect to payment page)
 4. User pays, YooKassa POSTs webhook to `/payments/webhook`
-5. Backend verifies IP + signature, updates payment status
-6. If status == "succeeded", calls `KeyCreation.process()` to create/renew key
+5. Backend verifies IP + signature, then runs `PaymentRouter.route(payment_id)`
+6. `route()` takes an atomic claim (`pending → processing`, owner token in `payments.processing_token`) and only then calls `KeyCreation.process()` / `KeyRenewal`. On success, `complete_claim` sets `succeeded`; on failure, `release_claim` returns the payment to `pending` for retry
 
-**Idempotency:** Webhook processing checks `status == "succeeded"` before creating key. Duplicate webhooks are ignored.
+**Idempotency:** four layers.
+- The claim (`PaymentRepository.claim_pending`) lets only one of webhook / sweep process a payment (`GET /status` never processes, it only cancels). A `processing` claim older than `PAYMENT_CLAIM_STALE_MINUTES` (10) can be taken over; the previous owner can no longer complete or release it.
+- `keys.payment_id` has a partial unique index (`uq_keys_payment_id`), so a second key for the same payment cannot be written. `KeyCreationService` also returns the existing key (`already_created`) before any landing upgrade.
+- Only the claim owner sends the user notification.
+- **Renewals:** the target expiry is computed once and stored in `payments.renewal_expiry_time` (`PaymentRepository.reserve_renewal_expiry`, conditional write, `IS NULL`) before the panel is touched (`KeyRenewal.extension_key(expiry_guard=...)`). A retry after a DB failure or a takeover reuses the stored value, so the panel and DB get the same absolute expiry and the period is not added twice. Migration `db/migrations/20261014_payment_renewal_expiry.sql`. Direct renewals without a payment (`PATCH /keys/{email}`) are unchanged.
+
+**Schema migrations** for the claim: `db/migrations/20261011_*`, `20261012_*`, and for renewal expiry `20261014_*`. Apply by hand before deploying code that uses them (see the header of each file).
 
 ### Background Tasks
 
