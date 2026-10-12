@@ -60,7 +60,7 @@ from app.schemas.payments import (
 from app.schemas.tariffs import TariffResponse
 from app.schemas.users import UserResponse
 from app.services_auth import telegram_login
-from config import settings
+from config import AVAILABLE_RATES_LIST, settings
 from logger import logger
 from services.cache.key_manager import CacheKeyManager
 from services.cache.service import CacheService
@@ -181,7 +181,8 @@ async def miniapp_tariffs(
     service_data: ServiceDataModel = Depends(get_service_data),
     pool: asyncpg.Pool = Depends(get_pool),
 ):
-    return await list_tariffs(service_data=service_data, pool=pool)
+    tariffs = await list_tariffs(service_data=service_data, pool=pool)
+    return [t for t in tariffs if t.id in AVAILABLE_RATES_LIST]
 
 
 @router.get("/keys", response_model=List[KeyResponse], dependencies=_read_deps)
@@ -297,7 +298,7 @@ async def miniapp_create_payment(
         await _require_own_key(body.email, principal.tg_id, service_data, pool)
 
     tariff = await service_data.tariffs.get_data(body.tariff_id, conn=pool)
-    if not tariff:
+    if not tariff or body.tariff_id not in AVAILABLE_RATES_LIST:
         raise HTTPException(status_code=404, detail="Tariff not found")
     if not tariff.amount or tariff.amount <= 0:
         # Бесплатные тарифы не оплачиваются; триал — через POST /keys/trial.

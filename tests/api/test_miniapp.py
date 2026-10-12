@@ -47,6 +47,12 @@ def _bot_token(monkeypatch):
     monkeypatch.setattr(settings, "bot_secret_key", "t_bot_secret_x1")
 
 
+@pytest.fixture(autouse=True)
+def _available_rates(monkeypatch):
+    # Тарифы, доступные в miniapp (аналог AVAILABLE_RATES из .env)
+    monkeypatch.setattr("api.v1.miniapp.AVAILABLE_RATES_LIST", [1, 2, 5])
+
+
 # --- initData signature ----------------------------------------------------
 
 
@@ -276,3 +282,37 @@ async def test_no_route_accepts_tg_id_for_identity(miniapp_client):
     # Every protected endpoint must reject a request that only passes tg_id.
     r = await miniapp_client.get("/api/v1/miniapp/me?tg_id=%d" % TG_ID)
     assert r.status_code == 401
+
+
+# --- AVAILABLE_RATES filter ------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_miniapp_tariffs_hide_tariffs_outside_available_rates(miniapp_client, mock_service_data):
+    mock_service_data.tariffs.get_all = AsyncMock(return_value=[
+        Tariff(id=2, name_tariff="Std", amount=200.0),
+        Tariff(id=9, name_tariff="Hidden", amount=900.0),
+    ])
+    r = await miniapp_client.get("/api/v1/miniapp/tariffs", headers=bearer(TG_ID))
+    assert r.status_code == 200
+    assert [t["id"] for t in r.json()] == [2]
+
+
+@pytest.mark.asyncio
+async def test_create_payment_rejects_tariff_outside_available_rates(
+    miniapp_client, mock_service_data, monkeypatch
+):
+    mock_service_data.tariffs.get_data = AsyncMock(return_value=Tariff(id=9, name_tariff="Hidden", amount=900.0))
+    called = {"create": False}
+
+    async def fake_create(*args, **kwargs):
+        called["create"] = True
+
+    import api.v1.miniapp as miniapp_mod
+    monkeypatch.setattr(miniapp_mod, "create_payment", fake_create)
+    r = await miniapp_client.post(
+        "/api/v1/miniapp/payments", json={"tariff_id": 9, "number_of_months": 1}, headers=bearer(TG_ID)
+    )
+    assert r.status_code == 404
+    assert r.json()["detail"] == "Tariff not found"
+    assert called["create"] is False
