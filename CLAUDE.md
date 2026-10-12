@@ -8,39 +8,35 @@ FastAPI backend serving as the source of truth for VPN service business logic.
 
 ## Standalone deployment (extracted from the platform monorepo)
 
-This repository was extracted from the `platform/` monorepo (which still hosts `bot/`
-and `web/`) via `git filter-repo`, keeping full commit history. It has its own
-Dockerfile, `docker-compose.yml`/`docker-compose.dev.yml`, and CI
-(`.github/workflows/ci.yml`) — but for **production it is not network-independent**:
-it depends on `platform/`'s Postgres and docker network being reachable, and only
-`docker-compose.dev.yml` (its own throwaway `postgres_dev`) is truly standalone.
+This repository was extracted from the `platform/` monorepo via `git filter-repo`,
+keeping full commit history. The long-term direction is **full independence from the
+monorepo**: `bot` and `web` move to their own servers and talk to `backend` over HTTP
+only. Nothing outside this repo should touch the database.
 
-- **Networking:** `docker-compose.yml` attaches `backend` to a single network — the
-  platform's existing external network `platform_net` (real name: `platform_default`,
-  created by `platform/docker-compose.yml`). This is what lets `bot`/`web`/`nginx` in
-  `platform/` keep resolving `backend:8000` by service name, and what lets `backend`
-  resolve `postgres:5432` (below) — both only work because `backend` and `platform/`
-  run on the **same host**, attached to the same local docker network. There is no
-  overlay/cross-host networking set up; moving `platform/` to a different server while
-  leaving `backend` on this one would break both directions of that name resolution.
-- **Database:** `backend` has **no Postgres of its own** in production — `DATABASE_URL`
-  points at `postgres:5432`, the platform monorepo's own Postgres container, resolved
-  by service name over `platform_net`. (An earlier revision gave `backend` its own
-  `postgres` service on a zero-copy-reused `platform_postgres_data` volume; that ran
-  *two* Postgres processes against the same data directory concurrently and corrupted
-  the WAL — reverted in `f1ec094`, do not reintroduce a local `postgres` service in
-  `docker-compose.yml`.) `DB_USER`/`DB_PASSWORD`/`DB_NAME` in `.env` must match the
-  platform monorepo's Postgres credentials. Schema DDL (`db/schema_fixed.sql`) and the
-  `tools/db/` backup/restore/migration tooling are still relevant for the dev compose's
-  isolated `postgres_dev`, not for prod.
-- **`shared/`:** this repo has its own copy of `shared/` (was a bind-mount in the
-  monorepo). `platform/bot/` keeps its own separate copy. **There is no automated sync**
-  — when `shared/config/core.py` changes in one place, mirror it manually:
-  `rsync -a --delete platform/shared/ platform-backend/shared/`, review the diff, run
-  tests before committing on both sides.
-- **Secrets:** `BOT_SECRET_KEY`, `ADMIN_API_KEY`, and `DB_NAME`/`DB_USER`/`DB_PASSWORD`/
-  `DATABASE_URL` must match the values in `platform/.env` (read by `bot`/`web`/its
-  `postgres`) — no automated sync, rotate by hand in both places.
+- **Networking:** `docker-compose.yml` is self-contained. `postgres` and `backend`
+  share the internal `backend_net` bridge network. No external networks, no
+  `platform_default` dependency. Clients will reach `backend:8000` through a private
+  channel (planned: WireGuard between servers); the port is not published publicly
+  by compose.
+- **Database:** `backend` owns the database. The stack's `postgres` service uses the
+  new volume `backend_postgres_data`. **Only `backend` may connect to Postgres**, so
+  the DB port is not published to the host. Clients (bot, web) must never get DB
+  credentials; they go through the API. (History: an earlier revision ran two
+  Postgres processes against the same `platform_postgres_data` volume and corrupted
+  the WAL — do not point two Postgres processes at one data directory.) Schema DDL
+  (`db/schema_fixed.sql`) initializes a fresh volume and is idempotent with the payment
+  migrations. Use `tools/db/` for backup/restore/migration.
+- **Migration from platform (pending, phase 3):** the existing `bot_db` data lives in
+  `platform-postgres-1` (`platform_postgres_data`). Move it with `pg_dump` and
+  `pg_restore` into `backend_postgres_data` during a write freeze, then verify row
+  counts. The old volume stays untouched until the new one is verified.
+- **`shared/`:** this repo has its own copy of `shared/`. `platform/bot/` keeps its own
+  copy. **There is no automated sync** — when `shared/config/core.py` changes in one
+  place, mirror it manually and review the diff. Do not `rsync --delete` blindly: the
+  backend copy has `reject_insecure_secret` validation that the platform copy lacks.
+- **Secrets:** `BOT_SECRET_KEY` and `ADMIN_API_KEY` are shared with every client that
+  calls the API. Rotate them by hand in every place they are used. `DB_*` credentials
+  are local to `backend` only.
 
 ## Commands
 
@@ -208,7 +204,7 @@ Two independent nginx edges proxy `/api/v1/public/` straight to `backend` (not t
 
 ### Database
 
-**Ownership:** in production, `backend` connects to the platform monorepo's Postgres container (not one of its own) — see the Database bullet under Standalone deployment above for why, and for the host/network coupling that implies.
+**Ownership:** `backend` owns the database. Its `postgres` service (in `docker-compose.yml`, volume `backend_postgres_data`) is the only access point. Clients use the HTTP API, never the DB directly. See the Database bullet under Standalone deployment above.
 
 **Connection Pool:** asyncpg, created once at startup by `create_db_pool()` (`database/base.py`) and stored on `app.state.pool`. Injected per-endpoint via `Depends(get_pool)` (`app/dependencies.py`; also `get_cache` and `get_service_data` for the other two `app.state` singletons set up in `app/main.py`'s lifespan).
 
