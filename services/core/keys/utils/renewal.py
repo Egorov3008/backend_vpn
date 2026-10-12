@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Awaitable, Callable, Optional
 
 import asyncpg
 
@@ -33,6 +33,7 @@ class KeyRenewal:
         server: Server,
         tariff: Tariff,
         number_of_months: Optional[int] = 1,
+        expiry_guard: Optional[Callable[[int], Awaitable[int]]] = None,
     ):
         """Продлевает ключ и сбрасывает флаги уведомлений.
 
@@ -41,6 +42,11 @@ class KeyRenewal:
         ``ExpiryCalculator.key_duration`` отсчитывает новый срок от
         ``max(now, expiry)``, а ``extend_client_key`` всегда выставляет
         ``enable=True``, так что просроченный ключ корректно реактивируется.
+
+        ``expiry_guard`` (платёжный путь): получает вычисленный срок до вызова панели и
+        возвращает срок, который надо применить. Так повтор продления использует уже
+        зафиксированный срок, а не считает новый от текущего expiry — иначе период
+        добавился бы второй раз.
         """
         if await maintenance_mode.is_enabled(conn):
             raise PanelMaintenanceError(
@@ -48,6 +54,8 @@ class KeyRenewal:
             )
 
         refresh_key = self.refresh.refresh_key(key, tariff, server, number_of_months)
+        if expiry_guard is not None:
+            refresh_key.expiry_time = await expiry_guard(refresh_key.expiry_time)
         await self.xui_session.extend_client_key(refresh_key)
         await self.key_data.update(conn, key, search_data={"email": key.email})
 

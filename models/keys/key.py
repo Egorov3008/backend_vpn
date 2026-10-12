@@ -34,6 +34,9 @@ class Key:
     # converted_tg_id — set by bot when user completes /start landing_<uid>.
     converted_tg_id: Optional[int] = None
     landing_uid: Optional[str] = None
+    # Платёж, по которому создан ключ (NULL для trial/админских/лендинговых ключей).
+    # Уникален в БД (uq_keys_payment_id) — второй ключ по тому же платежу не запишется.
+    payment_id: Optional[str] = None
     _name: str = "key"
 
     def __post_init__(self):
@@ -57,6 +60,7 @@ class Key:
             "notified_expired_grace",
             "converted_tg_id",
             "landing_uid",
+            "payment_id",
         }
     )
 

@@ -14,6 +14,7 @@ Safety net for missed YooKassa webhooks + one-off backlog recovery tool.
 """
 
 import asyncio
+import dataclasses
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -23,9 +24,10 @@ from app.factories import build_payment_router
 from config import settings
 from database.service import DataService
 from logger import logger
-from models import PaymentModel
+from services.cache.key_manager import CacheKeyManager
 from services.cache.service import CacheService
 from services.core.data.service import ServiceDataModel
+from database.service import PAYMENT_CLAIM_STALE_MINUTES
 from services.core.notifications import TelegramBotNotifier
 
 
@@ -49,7 +51,12 @@ async def list_pending_payments(
     ``since`` — только созданные после указанного момента (напр. после починки webhook).
     Можно комбинировать; ``limit`` ограничивает кол-во.
     """
-    conditions = ["status = 'pending'"]
+    # Брошенные claim'ы (процесс упал в середине обработки) тоже подбираем: захват
+    # старше PAYMENT_CLAIM_STALE_MINUTES считается протухшим (см. PaymentRepository).
+    conditions = [
+        "(status = 'pending' OR (status = 'processing' "
+        f"AND processing_started_at < NOW() - make_interval(mins => {int(PAYMENT_CLAIM_STALE_MINUTES)})))"
+    ]
     params: list[Any] = []
     if max_age_minutes is not None:
         params.append(datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes))
@@ -97,25 +104,24 @@ async def _check_yookassa_status(payment_id: str) -> Optional[str]:
 async def _mark_canceled(
     pool: asyncpg.Pool,
     service_data: ServiceDataModel,
+    cache: CacheService,
     payment_id: str,
 ) -> None:
-    """Пометить платёж canceled в БД и кеше (зеркало логики из get_payment_status)."""
-    payment = await service_data.payments.get_data(payment_id, conn=pool)
-    if not payment:
-        logger.warning("Sweep: платеж не найден для отмены", payment_id=payment_id)
+    """Пометить платёж canceled (отмена, подтверждённая YooKassa).
+
+    Тот же условный UPDATE, что и в GET /status: переводит только pending, не затирая
+    processing/succeeded. Кеш обновляется копией строки, чтобы не потерять created_at.
+    """
+    if not await service_data.payments.service.mark_canceled_if_pending(pool, payment_id):
+        logger.info("Sweep: платёж уже не pending, отмену пропускаем", payment_id=payment_id)
         return
-    canceled = PaymentModel(
-        payment_id=payment.payment_id,
-        tg_id=payment.tg_id,
-        amount=payment.amount,
-        payment_type=payment.payment_type,
-        status="canceled",
-        number_of_months=payment.number_of_months,
-        discount_percent=payment.discount_percent,
-        referral_discount=payment.referral_discount,
-        balance_discount=payment.balance_discount,
-    )
-    await service_data.payments.update(pool, canceled, search_data={"payment_id": payment_id})
+    payment = await service_data.payments.service.get(pool, payment_id=payment_id)
+    if payment is not None:
+        canceled = dataclasses.replace(payment, status="canceled")
+        try:
+            await cache.payments.set(CacheKeyManager.payment(payment_id), canceled)
+        except Exception as e:
+            logger.warning("Sweep: не удалось обновить кеш платежа", payment_id=payment_id, error=str(e))
     logger.info("Sweep: платёж помечен canceled", payment_id=payment_id)
 
 
@@ -198,7 +204,7 @@ async def sweep_pending_payments(
             if dry_run:
                 continue
             try:
-                await _mark_canceled(pool, service_data, pid)
+                await _mark_canceled(pool, service_data, cache, pid)
             except Exception as e:
                 logger.error("Sweep: mark canceled failed", payment_id=pid, error=str(e), exc_info=True)
                 report["errors"].append({"payment_id": pid, "error": str(e)})

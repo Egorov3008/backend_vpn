@@ -48,6 +48,7 @@ class CreateKey:
         conn: asyncpg.Pool,
         number_of_months: int = 1,
         inbound_id_override: Optional[int] = None,
+        payment_id: Optional[str] = None,
     ) -> Optional[dict]:
         """
         Создает новый ключ для пользователя в системе.
@@ -56,6 +57,7 @@ class CreateKey:
             inbound_id_override: форсирует конкретный inbound (для лендинга
                 и других специальных потоков). None = стандартное поведение
                 (берётся первый из server.inbound_ids).
+            payment_id: платёж, за который выдан ключ (сохраняется в keys.payment_id).
         """
 
         if await maintenance_mode.is_enabled(conn):
@@ -73,6 +75,7 @@ class CreateKey:
                     "Не удалось сформировать ключ", tg_id=tg_id, tariff_id=tariff.id
                 )
                 return None
+            key.payment_id = payment_id
 
             panel_expiry = key.expiry_time
             # externalLinks в панели — decorative-ссылка на EXTERNAL_SUB_URL,

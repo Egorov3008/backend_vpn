@@ -1,4 +1,6 @@
 import asyncio
+import dataclasses
+import time
 import uuid
 from typing import List, Optional
 from ipaddress import ip_address, ip_network
@@ -23,6 +25,7 @@ from app.schemas.payments import (
 from config import settings, REFERRAL_DISCOUNT_PERCENT, DISCOUNTS
 from database.service import DataService
 from models import PaymentModel
+from services.cache.key_manager import CacheKeyManager
 from services.cache.service import CacheService
 from services.core.data.service import ServiceDataModel
 from services.core.notifications import TelegramBotNotifier
@@ -539,12 +542,65 @@ async def get_payment_history(
             payment_id=p.payment_id,
             tg_id=p.tg_id,
             amount=p.amount,
-            status=p.status,
+            # Внутренний 'processing' наружу не отдаём, как и в GET /{payment_id}/status
+            status="pending" if p.status == "processing" else p.status,
             payment_type=p.payment_type,
             created_at=p.created_at,
         )
         for p in payments
     ]
+
+
+# Проверка отмены в YooKassa на чтении статуса: не чаще раза в N секунд на платёж,
+# чтобы опрос бота не превращался в поток запросов к YooKassa. Состояние процессное —
+# при нескольких воркерах проверок будет чуть больше, но корректность не страдает.
+_YK_CANCEL_CHECK_INTERVAL_SECONDS = 30.0
+_yk_cancel_checked_at: dict[str, float] = {}
+
+
+def _yookassa_cancel_check_due(payment_id: str) -> bool:
+    """True, если по платежу пора спросить YooKassa (с учётом троттлинга)."""
+    now = time.monotonic()
+    # Удаляем устаревшие записи, чтобы словарь не рос без границ
+    expired = [
+        pid for pid, checked in _yk_cancel_checked_at.items()
+        if now - checked >= _YK_CANCEL_CHECK_INTERVAL_SECONDS
+    ]
+    for pid in expired:
+        del _yk_cancel_checked_at[pid]
+    if payment_id in _yk_cancel_checked_at:
+        return False
+    _yk_cancel_checked_at[payment_id] = now
+    return True
+
+
+async def _fetch_yookassa_status(payment_id: str) -> Optional[str]:
+    """Статус платежа в YooKassa или None, если узнать не удалось (таймаут, ошибка)."""
+    try:
+        import yookassa
+        yookassa.Configuration.account_id = settings.yookassa_shop_id
+        yookassa.Configuration.secret_key = settings.yookassa_secret_key
+
+        yk_payment = await asyncio.wait_for(
+            asyncio.to_thread(yookassa.Payment.find_one, payment_id),
+            timeout=15.0,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("YooKassa find_one timed out", extra={"payment_id": payment_id})
+        return None
+    except Exception as e:
+        logger.warning("Ошибка при проверке статуса в YooKassa", extra={"payment_id": payment_id, "error": str(e)})
+        return None
+    return getattr(yk_payment, "status", None)
+
+
+async def _refresh_payment_cache(cache: CacheService, payment: PaymentModel) -> None:
+    """Обновить только кеш платежа. Полная запись строки в БД здесь не нужна и опасна:
+    она могла бы перезаписать статус, который параллельно выставил вебхук."""
+    try:
+        await cache.payments.set(CacheKeyManager.payment(payment.payment_id), payment)
+    except Exception as e:
+        logger.warning("Не удалось обновить кеш платежа", extra={"payment_id": payment.payment_id, "error": str(e)})
 
 
 @router.get(
@@ -572,67 +628,28 @@ async def get_payment_status(
         logger.warning("Платёж принадлежит другому пользователю", extra={"payment_id": payment_id, "requested_tg_id": tg_id, "actual_tg_id": payment.tg_id})
         raise HTTPException(status_code=403, detail="Payment does not belong to this user")
 
-    if payment.status == "pending":
-        try:
-            import yookassa
-            yookassa.Configuration.account_id = settings.yookassa_shop_id
-            yookassa.Configuration.secret_key = settings.yookassa_secret_key
+    # Эндпоинт никогда не вызывает route(): обработку успешного платежа (создание ключа)
+    # запускают вебхук YooKassa и фоновый поллер (pending_sweep) через атомарный захват.
+    # Здесь только отмена: если YooKassa отменила платёж, а статус в БД ещё pending,
+    # переводим его в canceled, чтобы бот не выдавал мёртвую ссылку.
+    if payment.status == "pending" and _yookassa_cancel_check_due(payment_id):
+        yk_status = await _fetch_yookassa_status(payment_id)
+        if yk_status == "canceled":
+            logger.info("YooKassa подтвердила отмену платежа", extra={"payment_id": payment_id})
+            # service_data.payments — BaseData (кеш-обёртка); SQL-методы лежат в репозитории .service
+            if await service_data.payments.service.mark_canceled_if_pending(pool, payment_id):
+                payment = dataclasses.replace(payment, status="canceled")
+                await _refresh_payment_cache(cache, payment)
+            else:
+                # Платёж уже захвачен вебхуком/поллером — читаем актуальную строку из БД, а не из кеша
+                payment = await service_data.payments.service.get(pool, payment_id=payment_id) or payment
 
-            logger.debug("Проверка статуса платежа в YooKassa", extra={"payment_id": payment_id})
-            try:
-                yk_payment = await asyncio.wait_for(
-                    asyncio.to_thread(yookassa.Payment.find_one, payment_id),
-                    timeout=15.0,
-                )
-            except asyncio.TimeoutError:
-                logger.warning("YooKassa find_one timed out", extra={"payment_id": payment_id})
-                yk_payment = None
-
-            if yk_payment and hasattr(yk_payment, 'status'):
-                yk_status = yk_payment.status
-                logger.debug("Статус в YooKassa получен", extra={"payment_id": payment_id, "yk_status": yk_status})
-
-                if yk_status == "succeeded":
-                    logger.info("YooKassa подтвердил успех платежа, запускаем обработку", extra={"payment_id": payment_id})
-                    try:
-                        from database.service import DataService
-                        data_service = DataService()
-                        payment_router = build_payment_router(
-                            pool, service_data, cache, data_service, notifier=_NOTIFIER
-                        )
-                        await payment_router.route(payment_id)
-                    except Exception as e:
-                        logger.error("Ошибка при обработке платежа после YooKassa подтверждения", extra={"payment_id": payment_id, "error": str(e), "error_type": type(e).__name__}, exc_info=True)
-
-                    # Перезагружаем платёж из БД (с DB-fallback) чтобы получить актуальный статус
-                    payment = await service_data.payments.get_data(payment_id, conn=pool)
-                    if not payment:
-                        logger.warning("Платёж не найден после обработки", extra={"payment_id": payment_id})
-                        raise HTTPException(status_code=404, detail="Payment not found after processing")
-
-                elif yk_status == "canceled":
-                    logger.info("YooKassa подтвердил отмену платежа, обновляем статус", extra={"payment_id": payment_id})
-                    try:
-                        canceled_payment = PaymentModel(
-                            payment_id=payment.payment_id,
-                            tg_id=payment.tg_id,
-                            amount=payment.amount,
-                            payment_type=payment.payment_type,
-                            status="canceled",
-                            number_of_months=payment.number_of_months,
-                            discount_percent=payment.discount_percent,
-                        )
-                        await service_data.payments.update(pool, canceled_payment, search_data={"payment_id": payment_id})
-                        payment = canceled_payment
-                        logger.info("Статус платежа обновлен на canceled", extra={"payment_id": payment_id})
-                    except Exception as e:
-                        logger.warning("Ошибка при обновлении статуса на canceled", extra={"payment_id": payment_id, "error": str(e)})
-        except Exception as e:
-            logger.warning("Ошибка при проверке статуса в YooKassa", extra={"payment_id": payment_id, "error": str(e)})
-
-    logger.info("Статус платежа возвращен", extra={"payment_id": payment_id, "status": payment.status})
+    # 'processing' — внутренний статус захвата: клиенту отдаём pending, иначе бот решит,
+    # что платёж не активен, и выставит новый счёт (двойная оплата).
+    public_status = "pending" if payment.status == "processing" else payment.status
+    logger.info("Статус платежа возвращен", extra={"payment_id": payment_id, "status": public_status})
     return PaymentStatusResponse(
         payment_id=payment.payment_id,
-        status=payment.status,
+        status=public_status,
         tg_id=payment.tg_id,
     )

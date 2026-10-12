@@ -27,12 +27,14 @@ class KeyRenewalService:
         self.key_manager = key_manager
         self.notifier = notifier
 
-    async def process(self, email: str = None):
+    async def process(self, email: str = None, payment_id: Optional[str] = None):
         """
         Продлевает ключ и возвращает данные для уведомления.
 
         Args:
             email: Email ключа (опционально, извлекается из payment_type если не указан)
+            payment_id: платёж, по которому продлеваем (платёжный путь). Целевой срок
+                фиксируется за платежом, чтобы повтор не продлил ключ второй раз.
 
         Returns:
             dict с данными продления (updated_key, new_expiry) или None
@@ -88,12 +90,21 @@ class KeyRenewalService:
                 used_cache=selected_tariff_id is not None,
             )
 
+            expiry_guard = None
+            if payment_id is not None:
+                async def expiry_guard(target: int) -> int:
+                    # service_data.payments — BaseData; SQL-метод лежит в репозитории .service
+                    return await self.processor._model_service.payments.service.reserve_renewal_expiry(
+                        self.processor._conn, payment_id, target
+                    )
+
             updated_key = await self.key_manager.extension_key(
                 key=key,
                 conn=self.processor._conn,
                 server=server,
                 tariff=tariff,
                 number_of_months=self.processor.number_of_months,
+                expiry_guard=expiry_guard,
             )
 
             new_expiry = datetime.fromtimestamp(updated_key.expiry_time / 1000)

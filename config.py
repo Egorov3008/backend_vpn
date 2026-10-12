@@ -111,6 +111,24 @@ class Settings(BaseSettings):
     # Backend needs it to call getChatMember for subscription checks.
     canall_url: str = Field(default="", alias="CANALL_URL")
 
+    # Ежедневная сводка успешных платежей за последние 24 часа — админам из ADMIN_ID.
+    # Время отправки — час по DAILY_PAYMENTS_REPORT_TZ (минуты фиксированы: 0).
+    daily_payments_report_enabled: bool = Field(default=True, alias="DAILY_PAYMENTS_REPORT_ENABLED")
+    daily_payments_report_hour: int = Field(default=18, ge=0, le=23, alias="DAILY_PAYMENTS_REPORT_HOUR")
+    daily_payments_report_tz: str = Field(default="Europe/Moscow", alias="DAILY_PAYMENTS_REPORT_TZ")
+
+    @field_validator("daily_payments_report_tz")
+    @classmethod
+    def _validate_report_tz(cls, value: str) -> str:
+        # Неверная зона иначе роняет create_scheduler и весь старт приложения
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError) as e:
+            raise ValueError(f"DAILY_PAYMENTS_REPORT_TZ: неизвестная часовая зона {value!r}") from e
+        return value
+
 
 settings = Settings()
 

@@ -474,3 +474,73 @@ async def test_create_payment_applies_stock_discount(api_client, mock_service_da
     mock_service_data.payments.save_data.assert_called_once()
     saved_payment = mock_service_data.payments.save_data.call_args.args[1]
     assert saved_payment.amount == 144.0
+
+
+def _pending_payment(payment_id: str) -> PaymentModel:
+    return PaymentModel(
+        payment_id=payment_id,
+        tg_id=456,
+        amount=99.99,
+        status="pending",
+        payment_type="create_key|1",
+        created_at=datetime(2026, 10, 11, 10, 0, 0),
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_payment_status_succeeded_in_yookassa_does_not_route(api_client, mock_service_data):
+    """GET /status не создаёт ключ: даже если YooKassa уже подтвердила оплату,
+    роутер не запускается. Обработку делают вебхук и фоновый поллер через захват."""
+    mock_service_data.payments.get_data = AsyncMock(return_value=_pending_payment("pay_ok"))
+    mock_service_data.payments.service.mark_canceled_if_pending = AsyncMock(return_value=False)
+
+    with patch("api.v1.payments.build_payment_router") as mock_factory, \
+         patch("yookassa.Payment.find_one", return_value=MagicMock(status="succeeded")):
+        response = await api_client.get("/api/v1/payments/pay_ok/status?tg_id=456")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "pending"
+    mock_factory.assert_not_called()
+    mock_service_data.payments.service.mark_canceled_if_pending.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_payment_status_canceled_in_yookassa_marks_canceled(api_client, mock_service_data):
+    """Отмена в YooKassa переводит pending в canceled условным UPDATE и сразу отдаёт canceled.
+
+    payments мокаем по спецификации BaseData (как в ServiceDataModel): SQL-метод доступен
+    только через .service. Без spec такой тест маскировал AttributeError в проде.
+    """
+    from services.core.data.base import BaseData
+
+    payments = MagicMock(spec=BaseData)
+    payments.get_data = AsyncMock(return_value=_pending_payment("pay_cx"))
+    payments.service = MagicMock()
+    payments.service.mark_canceled_if_pending = AsyncMock(return_value=True)
+    payments.service.get = AsyncMock(return_value=None)
+    mock_service_data.payments = payments
+
+    with patch("api.v1.payments.build_payment_router") as mock_factory, \
+         patch("yookassa.Payment.find_one", return_value=MagicMock(status="canceled")):
+        response = await api_client.get("/api/v1/payments/pay_cx/status?tg_id=456")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "canceled"
+    payments.service.mark_canceled_if_pending.assert_awaited_once()
+    assert payments.service.mark_canceled_if_pending.await_args.args[1] == "pay_cx"
+    mock_factory.assert_not_called()
+    # Полная перезапись строки (save/update) не используется — только условный UPDATE
+    payments.update.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_payment_status_yookassa_check_is_throttled(api_client, mock_service_data):
+    """Повторные опросы того же платежа в пределах интервала не ходят в YooKassa."""
+    mock_service_data.payments.get_data = AsyncMock(return_value=_pending_payment("pay_thr"))
+    mock_service_data.payments.service.mark_canceled_if_pending = AsyncMock(return_value=False)
+
+    with patch("yookassa.Payment.find_one", return_value=MagicMock(status="pending")) as mock_find:
+        await api_client.get("/api/v1/payments/pay_thr/status?tg_id=456")
+        await api_client.get("/api/v1/payments/pay_thr/status?tg_id=456")
+
+    assert mock_find.call_count == 1
