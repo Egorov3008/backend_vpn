@@ -60,7 +60,7 @@ from app.schemas.payments import (
 from app.schemas.tariffs import TariffResponse
 from app.schemas.users import UserResponse
 from app.services_auth import telegram_login
-from config import settings
+from config import AVAILABLE_RATES_LIST, settings
 from logger import logger
 from services.cache.key_manager import CacheKeyManager
 from services.cache.service import CacheService
@@ -97,6 +97,13 @@ class MiniAppPaymentRequest(MiniAppQuoteRequest):
 
 class MiniAppReferralLinkResponse(BaseModel):
     token: str
+
+
+def _require_available_tariff(tariff_id: int) -> None:
+    # Продаём только тарифы из AVAILABLE_RATES, как в боте и публичном API: иначе
+    # архивный тариф можно посчитать и купить по старой цене, собрав запрос руками.
+    if tariff_id not in AVAILABLE_RATES_LIST:
+        raise HTTPException(status_code=404, detail="Tariff not found")
 
 
 async def _require_own_key(email: str, tg_id: int, service_data: ServiceDataModel, pool) -> None:
@@ -181,7 +188,8 @@ async def miniapp_tariffs(
     service_data: ServiceDataModel = Depends(get_service_data),
     pool: asyncpg.Pool = Depends(get_pool),
 ):
-    return await list_tariffs(service_data=service_data, pool=pool)
+    tariffs = await list_tariffs(service_data=service_data, pool=pool)
+    return [t for t in tariffs if t.id in AVAILABLE_RATES_LIST]
 
 
 @router.get("/keys", response_model=List[KeyResponse], dependencies=_read_deps)
@@ -276,6 +284,7 @@ async def miniapp_quote(
     pool=Depends(get_pool),
     service_data: ServiceDataModel = Depends(get_service_data),
 ):
+    _require_available_tariff(body.tariff_id)
     return await calculate_payment(
         body=PaymentCalculateRequest(tg_id=principal.tg_id, **body.model_dump()),
         pool=pool,
@@ -296,6 +305,7 @@ async def miniapp_create_payment(
             raise HTTPException(status_code=422, detail="email required for renew_key operation")
         await _require_own_key(body.email, principal.tg_id, service_data, pool)
 
+    _require_available_tariff(body.tariff_id)
     tariff = await service_data.tariffs.get_data(body.tariff_id, conn=pool)
     if not tariff:
         raise HTTPException(status_code=404, detail="Tariff not found")

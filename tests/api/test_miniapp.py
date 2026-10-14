@@ -151,6 +151,12 @@ def user_repo():
     return repo
 
 
+@pytest.fixture(autouse=True)
+def _available_rates(monkeypatch):
+    import api.v1.miniapp as miniapp_mod
+    monkeypatch.setattr(miniapp_mod, "AVAILABLE_RATES_LIST", [1, 2])
+
+
 @pytest.fixture
 def miniapp_client(api_client, user_repo, mock_service_data):
     app.dependency_overrides[get_user_repository] = lambda: user_repo
@@ -269,6 +275,39 @@ async def test_create_payment_rejects_free_tariff(miniapp_client, mock_service_d
         "/api/v1/miniapp/payments", json={"tariff_id": 1}, headers=bearer(TG_ID)
     )
     assert r.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_tariffs_lists_only_available_rates(miniapp_client, mock_service_data):
+    mock_service_data.tariffs.get_all = AsyncMock(return_value=[
+        Tariff(id=2, name_tariff="Std", amount=200.0),
+        Tariff(id=5, name_tariff="Old", amount=50.0),
+    ])
+    r = await miniapp_client.get("/api/v1/miniapp/tariffs", headers=bearer(TG_ID))
+    assert r.status_code == 200
+    assert [t["id"] for t in r.json()] == [2]
+
+
+@pytest.mark.asyncio
+async def test_quote_for_hidden_tariff_returns_404(miniapp_client, mock_service_data):
+    mock_service_data.tariffs.get_data = AsyncMock(return_value=Tariff(id=5, name_tariff="Old", amount=50.0))
+    r = await miniapp_client.post(
+        "/api/v1/miniapp/payments/quotes", json={"tariff_id": 5}, headers=bearer(TG_ID)
+    )
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_create_payment_for_hidden_tariff_returns_404(miniapp_client, mock_service_data, monkeypatch):
+    mock_service_data.tariffs.get_data = AsyncMock(return_value=Tariff(id=5, name_tariff="Old", amount=50.0))
+    create = AsyncMock()
+    import api.v1.miniapp as miniapp_mod
+    monkeypatch.setattr(miniapp_mod, "create_payment", create)
+    r = await miniapp_client.post(
+        "/api/v1/miniapp/payments", json={"tariff_id": 5}, headers=bearer(TG_ID)
+    )
+    assert r.status_code == 404
+    create.assert_not_awaited()
 
 
 @pytest.mark.asyncio
