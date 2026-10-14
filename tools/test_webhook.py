@@ -274,7 +274,7 @@ async def main() -> None:
 
     url = f"http://{args.host}:{args.port}{args.path}"
 
-    print(f"\n  Симулятор вебхуков YooKassa (backend)")
+    print("\n  Симулятор вебхуков YooKassa (backend)")
     print(f"  Endpoint: {url}\n")
 
     # Создание записи в БД (если запрошено)

@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock
 
 from app.dependencies import get_pool
 from app.main import app
-from models import Key, Tariff, User
+from models import Tariff, User
 from services.api_clients.service import ApiClientService
 from tests.services.test_api_clients_service import FakeApiClientsPool
 

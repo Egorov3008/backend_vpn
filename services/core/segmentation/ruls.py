@@ -74,7 +74,7 @@ def cold_lead_condition() -> Condition:
 
 
 def blocked_condition() -> Condition:
-    return SimpleCondition(lambda user, keys: user.is_blocked == True)
+    return SimpleCondition(lambda user, keys: bool(user.is_blocked))
 
 
 # === Сегментатор ===

@@ -8,8 +8,7 @@ Verifies circuit breaker state transitions for XUI API calls:
 """
 import pytest
 import httpx
-from unittest.mock import AsyncMock, patch, MagicMock
-from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock
 
 from client import XUISession, _xui_circuit_breaker, _StandaloneClientAPI
 

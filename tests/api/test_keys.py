@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from models import Key
 
 
@@ -122,8 +122,6 @@ async def test_get_key_detail(api_client, mock_service_data):
     assert "days_left" in data
     assert "is_active" in data
 
-
-from unittest.mock import patch, AsyncMock as _AsyncMock
 
 
 def make_user(tg_id=123, trial=0):

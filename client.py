@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-import re
 import time
+from dataclasses import dataclass
 from datetime import datetime
 from multiprocessing import AuthenticationError
 from typing import Optional, Any
@@ -113,8 +113,6 @@ class XUIAPIError(Exception):
 # чтобы такой провал НЕ считался failure'ом circuit breaker'а (это не проблема доступности).
 _ADD_LOGICAL_FAIL = object()
 
-
-from dataclasses import dataclass
 
 @dataclass
 class PanelClient:

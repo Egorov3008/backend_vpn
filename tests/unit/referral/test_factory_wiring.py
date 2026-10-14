@@ -4,7 +4,7 @@ Regression test: PaymentRouter factory must wire ReferralBonusService.
 Bug: build_payment_router previously returned a PaymentRouter with
 bonus_service=None, so successful payments never triggered referral bonuses.
 """
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
