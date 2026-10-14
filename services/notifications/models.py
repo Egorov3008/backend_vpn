@@ -1,8 +1,7 @@
 """Модели данных для системы уведомлений (backend scheduler)."""
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Dict, List
+from typing import Dict
 
 from models.keys.key import Key
 from models.users.user import User

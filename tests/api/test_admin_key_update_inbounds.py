@@ -15,7 +15,6 @@ from app.auth import AdminPrincipal
 from app.dependencies import get_cache, get_pool, get_service_data
 from app.main import app
 from services.cache.service import CacheService
-from services.core.data.service import ServiceDataModel
 from services.core.keys.utils.inbounds import paid_inbound_ids
 
 
