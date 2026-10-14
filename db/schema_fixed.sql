@@ -106,8 +106,22 @@ CREATE TABLE IF NOT EXISTS payments
     number_of_months INTEGER NOT NULL DEFAULT 1,
     discount_percent INTEGER NOT NULL DEFAULT 0,
     referral_discount REAL NOT NULL DEFAULT 0.0,
-    balance_discount REAL NOT NULL DEFAULT 0.0
+    balance_discount REAL NOT NULL DEFAULT 0.0,
+    -- Момент захвата платежа для обработки (см. PaymentRepository.claim_pending).
+    processing_started_at TIMESTAMP WITH TIME ZONE,
+    -- Токен владельца захвата (claim-token): release/complete только при совпадении.
+    processing_token TEXT,
+    -- Момент перехода в 'succeeded' (см. PaymentRepository.complete_claim). NULL у исторических строк.
+    succeeded_at TIMESTAMP WITH TIME ZONE,
+    -- Целевой срок продления, зафиксированный до обращения к панели (см. reserve_renewal_expiry).
+    renewal_expiry_time BIGINT
 );
+
+-- Существующие БД: колонки claim/renewal добавляем явно (CREATE TABLE выше на них не влияет).
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS processing_started_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS processing_token TEXT;
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS succeeded_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS renewal_expiry_time BIGINT;
 
 -- Backfill safety: ensure existing rows have referral_discount before any NOT NULL enforcement
 DO $$
@@ -150,6 +164,8 @@ CREATE TABLE IF NOT EXISTS keys
     server_info JSONB,
     converted_tg_id BIGINT,
     landing_uid VARCHAR(64),
+    -- Платёж, по которому выдан ключ (см. uq_keys_payment_id ниже).
+    payment_id TEXT,
     -- Флаг отправки уведомления об истечении ключа (см. key_expired_grace funnel).
     notified_expired_grace BOOLEAN DEFAULT FALSE,
     UNIQUE (tg_id, client_id),
@@ -158,6 +174,15 @@ CREATE TABLE IF NOT EXISTS keys
 
 CREATE INDEX IF NOT EXISTS idx_keys_landing_uid ON keys(landing_uid)
     WHERE landing_uid IS NOT NULL;
+
+-- Существующие БД: CREATE TABLE IF NOT EXISTS выше не добавляет колонки в уже созданную таблицу,
+-- поэтому колонку дописываем явно (идемпотентно).
+ALTER TABLE keys ADD COLUMN IF NOT EXISTS payment_id TEXT;
+
+-- Один ключ на один платёж: защита от двойного создания ключа при гонке
+-- вебхука и поллинга (см. db/migrations/20261011_payment_claim_and_key_payment_id.sql).
+CREATE UNIQUE INDEX IF NOT EXISTS uq_keys_payment_id ON keys(payment_id)
+    WHERE payment_id IS NOT NULL;
 
 -- ============================================================================
 -- 5a. User promo claims (one-time bonuses like +7 days for channel subscribe)

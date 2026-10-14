@@ -18,10 +18,11 @@ cp .env.example .env       # fill in values; BOT_SECRET_KEY/ADMIN_API_KEY must m
 docker compose up -d --build
 ```
 
-Requires the platform's external network to already exist (`platform_default`,
-created by `platform/docker-compose.yml`) and, on first deploy of an existing
-production stack, the `platform_postgres_data` volume to already hold the data
-(see the Postgres migration note in CLAUDE.md).
+The stack is self-contained: `postgres` (its own volume `backend_postgres_data`)
+and `backend` share the internal `backend_net` network. No external networks and
+no dependency on `platform/`. A fresh volume is initialized from
+`db/schema_fixed.sql`; migrating existing data from the old platform Postgres is
+a separate step (see CLAUDE.md).
 
 ## Tests / Lint
 

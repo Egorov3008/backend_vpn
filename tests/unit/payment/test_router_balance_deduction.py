@@ -12,7 +12,6 @@ Root cause: `router.py` was deducting `self.processor.referral_discount`
 the price via the user's reward balance).
 """
 
-from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 from unittest.mock import AsyncMock, MagicMock
@@ -65,6 +64,9 @@ def make_processor_and_router(
     model_service = MagicMock()
     model_service.payments.get_data = AsyncMock(return_value=payment)
     model_service.payments.update = AsyncMock(return_value=None)
+    model_service.payments.service.claim_pending = AsyncMock(return_value="claim-token")
+    model_service.payments.service.release_claim = AsyncMock(return_value=True)
+    model_service.payments.service.complete_claim = AsyncMock(return_value=True)
     model_service.payments.save_data = AsyncMock(return_value=None)
 
     if user is not None:
@@ -204,10 +206,9 @@ async def test_processor_loads_balance_discount_from_payment():
 
 
 @pytest.mark.asyncio
-async def test_update_payment_preserves_discount_fields():
-    """When the processor updates a payment status, it must preserve the
-    discount fields (referral_discount, balance_discount) so the persisted
-    payment record is not corrupted with zeros."""
+async def test_refresh_cache_preserves_discounts_and_created_at():
+    """Обновление кеша после обработки меняет только статус: скидки и created_at
+    из загруженной строки сохраняются (иначе история платежей показала бы время оплаты)."""
     payment = make_payment(
         payment_id="pay_update",
         tg_id=400,
@@ -217,14 +218,16 @@ async def test_update_payment_preserves_discount_fields():
         status="pending",
     )
     processor, _, model_service, _ = make_processor_and_router(payment, make_user())
+    processor._cache.payments.set = AsyncMock()
     await processor.load_payment_data(payment.payment_id)
 
-    await processor.update_payment(payment.payment_id, status="succeeded")
+    await processor.refresh_payment_cache(payment.payment_id)
 
-    # The update call must include a PaymentModel that still has the discounts.
-    model_service.payments.update.assert_awaited_once()
-    args, kwargs = model_service.payments.update.await_args
-    # args == (conn, payment), kwargs == {"search_data": {...}}
-    updated_payment = args[1]
-    assert updated_payment.referral_discount == pytest.approx(20.0, abs=1e-9)
-    assert updated_payment.balance_discount == pytest.approx(50.0, abs=1e-9)
+    processor._cache.payments.set.assert_awaited_once()
+    _, cached = processor._cache.payments.set.await_args.args
+    assert cached.status == "succeeded"
+    assert cached.referral_discount == pytest.approx(20.0, abs=1e-9)
+    assert cached.balance_discount == pytest.approx(50.0, abs=1e-9)
+    assert cached.created_at == payment.created_at
+    # В БД полная запись строки не пишется
+    model_service.payments.update.assert_not_called()

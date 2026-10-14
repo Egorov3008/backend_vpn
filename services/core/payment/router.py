@@ -1,3 +1,4 @@
+from functools import partial
 from typing import Optional
 
 from logger import logger
@@ -63,12 +64,26 @@ class PaymentRouter:
             )
             return
 
+        # Разбор payment_type до захвата: некорректный формат должен падать без
+        # claim, иначе платёж застрянет в processing до истечения таймаута.
         logger.debug(
             "Извлечение операции из payment_type",
             payment_type=self.processor.payment_type,
         )
         operation, data = self.processor.extract_operation()
+        notify = None
         logger.debug("Операция извлечена", operation=operation, data=data)
+
+        # Атомарный захват: единственный вход в обработку. Если второй процесс
+        # (вебхук или поллинг) уже захватил платёж — выходим, ключ не создаём.
+        claim_token = await self.processor.claim_payment(payment_id)
+        if claim_token is None:
+            logger.info(
+                "Платёж уже обрабатывается другим процессом или не в статусе pending, пропуск",
+                payment_id=payment_id,
+                tg_id=self.processor.tg_id,
+            )
+            return
 
         try:
             if operation == "create_key":
@@ -83,11 +98,16 @@ class PaymentRouter:
                 )
 
                 # Process creation
-                key_data = await self.creation_service.process(tariff_id=data)
+                key_data = await self.creation_service.process(
+                    tariff_id=data, payment_id=payment_id
+                )
 
-                # Send notification
+                # Уведомление отправляем и для already_created: уведомление шлётся только
+                # после фиксации статуса (см. ниже), значит предыдущая попытка с этим ключом
+                # до уведомления не дошла, и пользователь о ключе ещё не знает. Повторно
+                # route по уже succeeded-платежу сюда не попадает (ранний return выше).
                 if key_data:
-                    await self.creation_service.send_notification(key_data)
+                    notify = partial(self.creation_service.send_notification, key_data)
 
                 logger.debug("KeyCreationService завершен", tariff_id=data)
 
@@ -104,11 +124,12 @@ class PaymentRouter:
                 )
 
                 # Process renewal
-                renewal_data = await self.renewal_service.process(email=data)
+                renewal_data = await self.renewal_service.process(email=data, payment_id=payment_id)
 
-                # Send notification
+                # Уведомление отправим после фиксации статуса (см. ниже).
                 if renewal_data:
-                    await self.renewal_service.send_notification(
+                    notify = partial(
+                        self.renewal_service.send_notification,
                         updated_key=renewal_data["updated_key"],
                         new_expiry=renewal_data["new_expiry"],
                     )
@@ -126,19 +147,54 @@ class PaymentRouter:
 
         except Exception as e:
             logger.error(
-                "Ошибка при обработке платежа (статус остается pending для retry)",
+                "Ошибка при обработке платежа (захват снят, статус возвращен в pending для retry)",
                 payment_id=payment_id,
                 operation=operation,
                 error_type=type(e).__name__,
                 error=str(e),
                 exc_info=True,
             )
+            if not await self.processor.release_claim(payment_id, claim_token):
+                logger.error(
+                    "Захват уже перехвачен другим процессом, release пропущен",
+                    payment_id=payment_id,
+                )
             raise
 
         logger.debug(
             "Обновление статуса платежа на succeeded", payment_id=payment_id
         )
-        await self.processor.update_payment(payment_id)
+        # Финальный переход проверяет владельца: если захват перехвачен (обработка
+        # затянулась дольше PAYMENT_CLAIM_STALE_MINUTES), статус не трогаем.
+        # Сбой самой записи (сеть/БД) тоже снимает захват, иначе платёж висит в processing
+        # до истечения таймаута; повтор увидит уже созданный ключ (already_created).
+        try:
+            completed = await self.processor.complete_claim(payment_id, claim_token)
+        except Exception as e:
+            logger.error(
+                "Ошибка фиксации статуса succeeded (захват снят, retry)",
+                payment_id=payment_id,
+                tg_id=self.processor.tg_id,
+                operation=operation,
+                error_type=type(e).__name__,
+                error=str(e),
+                exc_info=True,
+            )
+            await self.processor.release_claim(payment_id, claim_token)
+            raise
+        if not completed:
+            logger.error(
+                "Захват платежа потерян до завершения, статус не обновлён",
+                payment_id=payment_id,
+                tg_id=self.processor.tg_id,
+                operation=operation,
+            )
+            raise RuntimeError(f"Захват платежа {payment_id} перехвачен другим процессом")
+        # Статус уже зафиксирован в БД (complete_claim); здесь только кеш, best-effort
+        await self.processor.refresh_payment_cache(payment_id)
+
+        if notify is not None:
+            await notify()
         logger.debug(
             "Статус платежа обновлен", payment_id=payment_id, new_status="succeeded"
         )

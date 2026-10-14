@@ -8,39 +8,35 @@ FastAPI backend serving as the source of truth for VPN service business logic.
 
 ## Standalone deployment (extracted from the platform monorepo)
 
-This repository was extracted from the `platform/` monorepo (which still hosts `bot/`
-and `web/`) via `git filter-repo`, keeping full commit history. It has its own
-Dockerfile, `docker-compose.yml`/`docker-compose.dev.yml`, and CI
-(`.github/workflows/ci.yml`) — but for **production it is not network-independent**:
-it depends on `platform/`'s Postgres and docker network being reachable, and only
-`docker-compose.dev.yml` (its own throwaway `postgres_dev`) is truly standalone.
+This repository was extracted from the `platform/` monorepo via `git filter-repo`,
+keeping full commit history. The long-term direction is **full independence from the
+monorepo**: `bot` and `web` move to their own servers and talk to `backend` over HTTP
+only. Nothing outside this repo should touch the database.
 
-- **Networking:** `docker-compose.yml` attaches `backend` to a single network — the
-  platform's existing external network `platform_net` (real name: `platform_default`,
-  created by `platform/docker-compose.yml`). This is what lets `bot`/`web`/`nginx` in
-  `platform/` keep resolving `backend:8000` by service name, and what lets `backend`
-  resolve `postgres:5432` (below) — both only work because `backend` and `platform/`
-  run on the **same host**, attached to the same local docker network. There is no
-  overlay/cross-host networking set up; moving `platform/` to a different server while
-  leaving `backend` on this one would break both directions of that name resolution.
-- **Database:** `backend` has **no Postgres of its own** in production — `DATABASE_URL`
-  points at `postgres:5432`, the platform monorepo's own Postgres container, resolved
-  by service name over `platform_net`. (An earlier revision gave `backend` its own
-  `postgres` service on a zero-copy-reused `platform_postgres_data` volume; that ran
-  *two* Postgres processes against the same data directory concurrently and corrupted
-  the WAL — reverted in `f1ec094`, do not reintroduce a local `postgres` service in
-  `docker-compose.yml`.) `DB_USER`/`DB_PASSWORD`/`DB_NAME` in `.env` must match the
-  platform monorepo's Postgres credentials. Schema DDL (`db/schema_fixed.sql`) and the
-  `tools/db/` backup/restore/migration tooling are still relevant for the dev compose's
-  isolated `postgres_dev`, not for prod.
-- **`shared/`:** this repo has its own copy of `shared/` (was a bind-mount in the
-  monorepo). `platform/bot/` keeps its own separate copy. **There is no automated sync**
-  — when `shared/config/core.py` changes in one place, mirror it manually:
-  `rsync -a --delete platform/shared/ platform-backend/shared/`, review the diff, run
-  tests before committing on both sides.
-- **Secrets:** `BOT_SECRET_KEY`, `ADMIN_API_KEY`, and `DB_NAME`/`DB_USER`/`DB_PASSWORD`/
-  `DATABASE_URL` must match the values in `platform/.env` (read by `bot`/`web`/its
-  `postgres`) — no automated sync, rotate by hand in both places.
+- **Networking:** `docker-compose.yml` is self-contained. `postgres` and `backend`
+  share the internal `backend_net` bridge network. No external networks, no
+  `platform_default` dependency. Clients will reach `backend:8000` through a private
+  channel (planned: WireGuard between servers); the port is not published publicly
+  by compose.
+- **Database:** `backend` owns the database. The stack's `postgres` service uses the
+  new volume `backend_postgres_data`. **Only `backend` may connect to Postgres**, so
+  the DB port is not published to the host. Clients (bot, web) must never get DB
+  credentials; they go through the API. (History: an earlier revision ran two
+  Postgres processes against the same `platform_postgres_data` volume and corrupted
+  the WAL — do not point two Postgres processes at one data directory.) Schema DDL
+  (`db/schema_fixed.sql`) initializes a fresh volume and is idempotent with the payment
+  migrations. Use `tools/db/` for backup/restore/migration.
+- **Migration from platform (pending, phase 3):** the existing `bot_db` data lives in
+  `platform-postgres-1` (`platform_postgres_data`). Move it with `pg_dump` and
+  `pg_restore` into `backend_postgres_data` during a write freeze, then verify row
+  counts. The old volume stays untouched until the new one is verified.
+- **`shared/`:** this repo has its own copy of `shared/`. `platform/bot/` keeps its own
+  copy. **There is no automated sync** — when `shared/config/core.py` changes in one
+  place, mirror it manually and review the diff. Do not `rsync --delete` blindly: the
+  backend copy has `reject_insecure_secret` validation that the platform copy lacks.
+- **Secrets:** `BOT_SECRET_KEY` and `ADMIN_API_KEY` are shared with every client that
+  calls the API. Rotate them by hand in every place they are used. `DB_*` credentials
+  are local to `backend` only.
 
 ## Commands
 
@@ -142,6 +138,7 @@ PostgreSQL + 3x-UI Panel
 - **GET `/?tg_id=...`** — Payment history (`limit`/`offset` optional, total count in `X-Total-Count` header)
 - **GET `/{payment_id}/status`** — Check payment status
   - Requires: `tg_id` (ownership check)
+  - Never processes the payment (never calls `route()`). If the stored status is `pending`, it asks YooKassa (at most once per 30s per payment, 15s timeout) and only handles cancellation: `pending → canceled` via a conditional `UPDATE ... WHERE status='pending'`.
 - **POST `/quotes`** — Calculate payment amount (discounts breakdown) without creating a payment
 - **POST `/create`** — Initiate payment
   - Creates YooKassa invoice
@@ -168,6 +165,8 @@ PostgreSQL + 3x-UI Panel
 #### Landing (`/api/v1/landing`)
 
 Anonymous, cookie-based flow for the marketing landing page (separate from the bot/web `tg_id`-trusting flow above): `POST /set-ref-cookie`, `POST /quick-key` (mints a short-lived key on `XUI_INBOUND_ID_LANDING`), `GET /state`, `POST /mark-converted/{landing_uid}`, `POST /claim/{landing_uid}`. Signed cookies use `LANDING_COOKIE_SECRET` (falls back to `BOT_SECRET_KEY`).
+
+`mark-converted` and `claim` are bot-only: they also require `X-Landing-Internal-Secret: <LANDING_INTERNAL_SECRET>` (`app/auth.py::verify_landing_internal_secret`, fail-closed when unset). nginx injects `X-Bot-Secret` on public `/api/v1/landing/*`, so that header alone must not open these routes.
 
 #### Mobile MVP (`/api/v1/mobile`)
 
@@ -207,7 +206,7 @@ Two independent nginx edges proxy `/api/v1/public/` straight to `backend` (not t
 
 ### Database
 
-**Ownership:** in production, `backend` connects to the platform monorepo's Postgres container (not one of its own) — see the Database bullet under Standalone deployment above for why, and for the host/network coupling that implies.
+**Ownership:** `backend` owns the database. Its `postgres` service (in `docker-compose.yml`, volume `backend_postgres_data`) is the only access point. Clients use the HTTP API, never the DB directly. See the Database bullet under Standalone deployment above.
 
 **Connection Pool:** asyncpg, created once at startup by `create_db_pool()` (`database/base.py`) and stored on `app.state.pool`. Injected per-endpoint via `Depends(get_pool)` (`app/dependencies.py`; also `get_cache` and `get_service_data` for the other two `app.state` singletons set up in `app/main.py`'s lifespan).
 
@@ -217,7 +216,8 @@ Two independent nginx edges proxy `/api/v1/public/` straight to `backend` (not t
 - `users` (tg_id, server_id, created_at, ref_count, is_admin)
 - `keys` (email, tg_id, expiry_time, key, inbound_id, tariff_id, client_id, created_at)
 - `tariffs` (id, name_tariff, amount, duration_months, traffic_gb, is_active)
-- `payments` (payment_id, tg_id, amount, status, payment_type, created_at, updated_at)
+- `payments` (payment_id, tg_id, amount, status, payment_type, created_at, updated_at, processing_started_at, processing_token, succeeded_at, renewal_expiry_time)
+- `keys.payment_id` — payment that issued the key (NULL for trial/admin/landing-free keys), unique when set
 - `servers` (id, url, api_url, availability)
 - `stocks` (id, name, amount, description, created_at)
 - `api_clients` (public-API keys — see External API clients below)
@@ -253,10 +253,16 @@ Two independent nginx edges proxy `/api/v1/public/` straight to `backend` (not t
 2. Backend creates invoice via `yookassa.Payment.create()`
 3. Response includes `confirmation_url` (redirect to payment page)
 4. User pays, YooKassa POSTs webhook to `/payments/webhook`
-5. Backend verifies IP + signature, updates payment status
-6. If status == "succeeded", calls `KeyCreation.process()` to create/renew key
+5. Backend verifies IP + signature, then runs `PaymentRouter.route(payment_id)`
+6. `route()` takes an atomic claim (`pending → processing`, owner token in `payments.processing_token`) and only then calls `KeyCreation.process()` / `KeyRenewal`. On success, `complete_claim` sets `succeeded`; on failure, `release_claim` returns the payment to `pending` for retry
 
-**Idempotency:** Webhook processing checks `status == "succeeded"` before creating key. Duplicate webhooks are ignored.
+**Idempotency:** four layers.
+- The claim (`PaymentRepository.claim_pending`) lets only one of webhook / sweep process a payment (`GET /status` never processes, it only cancels). A `processing` claim older than `PAYMENT_CLAIM_STALE_MINUTES` (10) can be taken over; the previous owner can no longer complete or release it.
+- `keys.payment_id` has a partial unique index (`uq_keys_payment_id`), so a second key for the same payment cannot be written. `KeyCreationService` also returns the existing key (`already_created`) before any landing upgrade.
+- Only the claim owner sends the user notification.
+- **Renewals:** the target expiry is computed once and stored in `payments.renewal_expiry_time` (`PaymentRepository.reserve_renewal_expiry`, conditional write, `IS NULL`) before the panel is touched (`KeyRenewal.extension_key(expiry_guard=...)`). A retry after a DB failure or a takeover reuses the stored value, so the panel and DB get the same absolute expiry and the period is not added twice. Migration `db/migrations/20261014_payment_renewal_expiry.sql`. Direct renewals without a payment (`PATCH /keys/{email}`) are unchanged.
+
+**Schema migrations** for the claim: `db/migrations/20261011_*`, `20261012_*`, for success timestamp `20261013_*` (`payments.succeeded_at`), and for renewal expiry `20261014_*`. Apply by hand before deploying code that uses them (see the header of each file).
 
 ### Background Tasks
 

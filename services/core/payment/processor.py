@@ -1,9 +1,13 @@
+import dataclasses
+from typing import Optional
+
 import asyncpg
 
+from logger import logger
 from models import PaymentModel
 from services.cache import CacheService
+from services.cache.key_manager import CacheKeyManager
 from services.core.data.service import ServiceDataModel
-from logger import logger
 
 
 class PaymentProcessor:
@@ -18,6 +22,8 @@ class PaymentProcessor:
         self._conn = conn
         self._model_service = model_service
         self._cache = cache
+        # Строка платежа, загруженная из БД: основа для обновления кеша (сохраняет created_at, id)
+        self._payment: Optional[PaymentModel] = None
 
         # Поля, заполняемые при обработке
         self.amount: float = None
@@ -47,6 +53,7 @@ class PaymentProcessor:
         self.referral_discount = data.referral_discount
         self.balance_discount = data.balance_discount
         self.status = data.status
+        self._payment = data
 
         logger.debug(
             "Данные платежа успешно загружены",
@@ -61,39 +68,49 @@ class PaymentProcessor:
             balance_discount=self.balance_discount,
         )
 
-    async def update_payment(self, payment_id: str, status: str = "succeeded"):
-        """Обновляет или создает платеж в БД (UPSERT)."""
-        logger.debug("Обновление статуса платежа", payment_id=payment_id, old_status=self.status, new_status=status)
+    async def refresh_payment_cache(self, payment_id: str, status: str = "succeeded") -> None:
+        """Обновляет только кеш платежа после того, как статус уже записан в БД атомарно
+        (complete_claim). Берём загруженную строку и меняем только статус: так сохраняются
+        created_at и id, которых нет в полях процессора. Полная перезапись строки здесь
+        не нужна, и её сбой не должен прерывать уведомление, списание и бонус — best-effort.
+        """
+        if self._payment is None or self._payment.payment_id != payment_id:
+            logger.warning("Кеш платежа не обновлён: строка не загружена", payment_id=payment_id)
+            return
+        payment = dataclasses.replace(self._payment, status=status)
+        self._payment = payment
+        try:
+            await self._cache.payments.set(CacheKeyManager.payment(payment_id), payment)
+        except Exception as e:
+            logger.warning(
+                "Не удалось обновить кеш платежа после обработки",
+                payment_id=payment_id,
+                error_type=type(e).__name__,
+                error=str(e),
+            )
 
-        payment = PaymentModel(
-            payment_id=payment_id,
-            payment_type=self.payment_type,
-            tg_id=self.tg_id,
-            amount=self.amount,
-            number_of_months=self.number_of_months or 1,
-            discount_percent=self.discount_percent,
-            referral_discount=self.referral_discount,
-            balance_discount=self.balance_discount,
-            status=status,
+    async def claim_payment(self, payment_id: str) -> Optional[str]:
+        """Атомарно захватывает платёж для обработки (pending -> processing).
+
+        Возвращает claim-token владельца захвата; None — платёж уже захвачен другим
+        процессом или не в статусе pending. Токен нужен для release/complete.
+        """
+        return await self._model_service.payments.service.claim_pending(self._conn, payment_id)
+
+    async def release_claim(self, payment_id: str, token: str) -> bool:
+        """Снимает захват (processing -> pending), чтобы платёж мог быть обработан повторно.
+
+        False — захват уже перехвачен другим владельцем, ничего не сброшено.
+        """
+        return await self._model_service.payments.service.release_claim(
+            self._conn, payment_id, token
         )
 
-        # Проверяем, существует ли платёж
-        existing_payment = await self._model_service.payments.get_data(payment_id, self._conn)
-
-        if existing_payment:
-            logger.debug("Платёж найден в БД, выполняю UPDATE", payment_id=payment_id)
-            # UPDATE если существует
-            await self._model_service.payments.update(
-                self._conn, payment, search_data={"payment_id": payment_id}
-            )
-            logger.debug("Платёж обновлен успешно", payment_id=payment_id, new_status=status)
-        else:
-            logger.debug("Платёж не найден в БД, выполняю CREATE", payment_id=payment_id)
-            # CREATE если не существует
-            await self._model_service.payments.save_data(
-                self._conn, payment, payment_id=payment_id
-            )
-            logger.debug("Платёж создан успешно", payment_id=payment_id, status=status)
+    async def complete_claim(self, payment_id: str, token: str) -> bool:
+        """Переводит захваченный платёж в succeeded. False — захват уже не наш."""
+        return await self._model_service.payments.service.complete_claim(
+            self._conn, payment_id, token
+        )
 
     def extract_operation(self) -> list[str]:
         """Извлекает тип операции и данные из payment_type."""

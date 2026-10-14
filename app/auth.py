@@ -1,3 +1,4 @@
+import hmac
 from dataclasses import dataclass
 from typing import List, Optional
 from urllib.parse import urlparse
@@ -32,6 +33,30 @@ api_key_scheme = APIKeyHeader(
 async def verify_bot_secret(x_bot_secret: Optional[str] = Security(bot_secret_scheme)) -> None:
     if not x_bot_secret or x_bot_secret != settings.bot_secret_key:
         raise HTTPException(status_code=401, detail="Invalid bot secret")
+
+
+landing_internal_scheme = APIKeyHeader(
+    name="X-Landing-Internal-Secret",
+    scheme_name="XLandingInternalSecret",
+    auto_error=False,
+    description="Bot-only secret for landing claim/mark-converted (never injected by nginx)",
+)
+
+
+async def verify_landing_internal_secret(
+    x_landing_internal_secret: Optional[str] = Security(landing_internal_scheme),
+) -> None:
+    """Вторичный секрет бота для /landing/claim и /landing/mark-converted.
+
+    Дополняет X-Bot-Secret: nginx подставляет тот же X-Bot-Secret на публичных
+    путях /api/v1/landing/*, а этот секрет nginx не отдаёт. Пустой секрет в
+    настройках = маршруты закрыты для всех.
+    """
+    expected = settings.landing_internal_secret
+    if not expected or not x_landing_internal_secret or not hmac.compare_digest(
+        x_landing_internal_secret, expected
+    ):
+        raise HTTPException(status_code=401, detail="Invalid landing internal secret")
 
 
 async def verify_api_key(x_api_key: Optional[str] = Security(api_key_scheme)) -> None:

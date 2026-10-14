@@ -151,7 +151,7 @@ class ChannelBonusService:
                 tg_id, client_id, email, created_at, expiry_time, key,
                 inbound_id, notified_10h, notified_24h, tariff_id,
                 limit_ip, notified_expired_grace, converted_tg_id,
-                landing_uid
+                landing_uid, reset_date, payment_id
             FROM keys
             WHERE tg_id = $1
             """,

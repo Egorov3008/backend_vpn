@@ -93,7 +93,10 @@ CREATE TABLE IF NOT EXISTS payments (
     number_of_months INTEGER NOT NULL DEFAULT 1,
     discount_percent INTEGER NOT NULL DEFAULT 0,
     referral_discount REAL NOT NULL DEFAULT 0.0,
-    balance_discount REAL NOT NULL DEFAULT 0.0
+    balance_discount REAL NOT NULL DEFAULT 0.0,
+    processing_started_at TIMESTAMP WITH TIME ZONE,
+    processing_token TEXT,
+    succeeded_at TIMESTAMP WITH TIME ZONE
 );
 
 CREATE TABLE IF NOT EXISTS keys (
@@ -119,9 +122,11 @@ CREATE TABLE IF NOT EXISTS keys (
     notified_expired_grace boolean DEFAULT false,
     landing_uid varchar(64),
     converted_tg_id bigint,
+    payment_id TEXT,
     CONSTRAINT uq_keys_email UNIQUE (email)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS keys_pkey ON keys (tg_id, client_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_keys_payment_id ON keys (payment_id) WHERE payment_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS servers (
     id SERIAL PRIMARY KEY,
@@ -332,7 +337,7 @@ async def test_full_referral_bonus_flow(payment_router, pool, service_data):
     router = payment_router
     original_creation_process = router.creation_service.process
 
-    async def fake_creation_process(tariff_id):
+    async def fake_creation_process(tariff_id, payment_id=None):
         # Insert a synthetic key row directly so the router can "send" a notification.
         # Return the minimal shape that send_notification expects.
         now_ms = int(time.time() * 1000)
@@ -348,6 +353,7 @@ async def test_full_referral_bonus_flow(payment_router, pool, service_data):
                     expiry_time=now_ms + 30 * 24 * 3600 * 1000,
                     key="vless://created",
                     inbound_id=11,
+                    payment_id=payment_id,
                 ),
             )
         return {
@@ -397,7 +403,7 @@ async def test_full_referral_bonus_flow(payment_router, pool, service_data):
 
         # Referred user's key expiry is untouched by the referral bonus
         key_row = await conn.fetchrow(
-            "SELECT expiry_time FROM keys WHERE tg_id=$1 ORDER BY email", referred.tg_id
+            "SELECT expiry_time FROM keys WHERE email=$1", email
         )
         assert key_row is not None
         assert key_row["expiry_time"] == now_ms + 30 * 24 * 3600 * 1000

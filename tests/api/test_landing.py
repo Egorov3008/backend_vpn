@@ -1180,3 +1180,67 @@ async def test_state_response_landing_uid_none_for_new(api_client):
     resp = await api_client.get("/api/v1/landing/state")
     assert resp.status_code == 200
     assert resp.json()["landing_uid"] is None
+
+
+# ---------------------------------------------------------------------------
+# Доступ к claim / mark-converted: нужен X-Landing-Internal-Secret.
+# nginx подставляет X-Bot-Secret на публичных путях /api/v1/landing/*, поэтому
+# один только bot-secret не должен открывать эти маршруты.
+# ---------------------------------------------------------------------------
+_INTERNAL_SECRET = "internal-secret-for-tests-32chars!!"
+
+
+@pytest.fixture
+def real_internal_secret_check(api_client, monkeypatch):
+    """Снять заглушку из conftest, чтобы отработала настоящая проверка секрета."""
+    from config import settings
+    from app.auth import verify_landing_internal_secret
+
+    app.dependency_overrides.pop(verify_landing_internal_secret, None)
+    monkeypatch.setattr(settings, "landing_internal_secret", _INTERNAL_SECRET)
+    return api_client
+
+
+@pytest.mark.asyncio
+async def test_claim_rejected_without_internal_secret(real_internal_secret_check):
+    """Публичный запрос с одним только bot-secret (его подставляет nginx) → 401."""
+    resp = await real_internal_secret_check.post(
+        "/api/v1/landing/claim/anyuid", json={"tg_id": 999}
+    )
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_mark_converted_rejected_with_wrong_internal_secret(real_internal_secret_check):
+    resp = await real_internal_secret_check.post(
+        "/api/v1/landing/mark-converted/anyuid",
+        json={"tg_id": 999},
+        headers={"X-Landing-Internal-Secret": "wrong"},
+    )
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_routes_closed_when_internal_secret_not_configured(real_internal_secret_check, monkeypatch):
+    """Пустой LANDING_INTERNAL_SECRET = маршруты закрыты, даже если заголовок передан."""
+    from config import settings
+
+    monkeypatch.setattr(settings, "landing_internal_secret", "")
+    resp = await real_internal_secret_check.post(
+        "/api/v1/landing/claim/anyuid",
+        json={"tg_id": 999},
+        headers={"X-Landing-Internal-Secret": ""},
+    )
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_claim_passes_auth_with_correct_internal_secret(real_internal_secret_check, mock_service_data):
+    """С верным секретом запрос доходит до обработчика (здесь — 404: ключа нет)."""
+    mock_service_data.cache_service.keys.all = AsyncMock(return_value=[])
+    resp = await real_internal_secret_check.post(
+        "/api/v1/landing/claim/unknown_uid",
+        json={"tg_id": 999},
+        headers={"X-Landing-Internal-Secret": _INTERNAL_SECRET},
+    )
+    assert resp.status_code == 404

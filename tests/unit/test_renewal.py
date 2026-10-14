@@ -42,6 +42,7 @@ def _renewal():
 async def test_active_renewal_extends_key():
     kr, xui, md, refresh, resetter = _renewal()
     k = _key(expiry=10**13)
+    md.keys.get_data = AsyncMock(return_value=k)
     tariff = MagicMock(id=5, period=30, amount=100.0, name_tariff="m", limit_ip=3)
     # refresh_key mutates expiry_time; simulate it
     refresh.refresh_key = MagicMock(side_effect=lambda key, *a, **kw: setattr(key, "expiry_time", 5000) or key)
@@ -57,6 +58,7 @@ async def test_expired_renewal_extends_key():
     """Просроченный ключ продлевается так же, как активный — не должен блокироваться."""
     kr, xui, md, refresh, resetter = _renewal()
     k = _key(expiry=2000)  # в прошлом
+    md.keys.get_data = AsyncMock(return_value=k)
     tariff = MagicMock(id=5, period=30, amount=100.0, name_tariff="m", limit_ip=3)
     refresh.refresh_key = MagicMock(side_effect=lambda key, *a, **kw: setattr(key, "expiry_time", 5000) or key)
     out = await kr.extension_key(k, conn=MagicMock(), server=MagicMock(), tariff=tariff, number_of_months=1)
@@ -72,6 +74,7 @@ async def test_extension_blocked_when_maintenance_mode_enabled(monkeypatch):
     monkeypatch.setattr(maintenance_mode, "is_enabled", AsyncMock(return_value=True))
     kr, xui, md, refresh, resetter = _renewal()
     k = _key(expiry=10**13)
+    md.keys.get_data = AsyncMock(return_value=k)
     tariff = MagicMock(id=5, period=30, amount=100.0, name_tariff="m", limit_ip=3)
 
     with pytest.raises(PanelMaintenanceError):

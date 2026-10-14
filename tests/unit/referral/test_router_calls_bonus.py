@@ -42,6 +42,9 @@ async def test_route_calls_referral_bonus_service():
     model_service = MagicMock()
     model_service.payments.get_data = AsyncMock(return_value=payment)
     model_service.payments.update = AsyncMock()
+    model_service.payments.service.claim_pending = AsyncMock(return_value="claim-token")
+    model_service.payments.service.release_claim = AsyncMock(return_value=True)
+    model_service.payments.service.complete_claim = AsyncMock(return_value=True)
     model_service.users.get_data = AsyncMock(return_value=MagicMock(tg_id=200, balance=0.0))
     model_service.users.update = AsyncMock()
 
@@ -87,6 +90,9 @@ async def test_route_swallows_bonus_failure_so_payment_succeeds():
     model_service = MagicMock()
     model_service.payments.get_data = AsyncMock(return_value=payment)
     model_service.payments.update = AsyncMock()
+    model_service.payments.service.claim_pending = AsyncMock(return_value="claim-token")
+    model_service.payments.service.release_claim = AsyncMock(return_value=True)
+    model_service.payments.service.complete_claim = AsyncMock(return_value=True)
     model_service.users.get_data = AsyncMock(return_value=MagicMock(tg_id=200, balance=0.0))
     model_service.users.update = AsyncMock()
 

@@ -22,11 +22,15 @@ async def upgrade_landing_key(
     tariff: Tariff,
     new_expiry: int,
     transfer_tg: bool = True,
+    payment_id: Optional[str] = None,
 ) -> Optional[Key]:
     """Апгрейд лендинг-ключа: baseline+overlay в панели, expiry_time = new_expiry.
 
     transfer_tg=True переносит владельца на key.converted_tg_id (обычный сценарий
     claim с лендинга — тот же клиент, что жил на псевдо-tg_id).
+    payment_id — платёж, по которому выполнен апгрейд (платный путь). Записываем его
+    в ключ, чтобы уникальный индекс keys.payment_id и предохранитель в creation_service
+    покрывали и апгрейд, а не только новый ключ.
     """
     if not await xui_session.set_inbounds(key.email, paid_inbound_ids()):
         logger.error("upgrade_landing_key: set_inbounds провален", extra={"email": key.email})
@@ -49,6 +53,8 @@ async def upgrade_landing_key(
     key.notified_expired_grace = False
     if transfer_tg and key.converted_tg_id:
         key.tg_id = key.converted_tg_id
+    if payment_id:
+        key.payment_id = payment_id
 
     await model_data.keys.update(pool, key, search_data={"email": key.email})
     await cache.keys.set(CacheKeyManager.key(key.email), key)

@@ -44,10 +44,12 @@ CREATE TABLE IF NOT EXISTS keys (
     server_info            jsonb,
     notified_expired_grace boolean NOT NULL DEFAULT false,
     landing_uid            varchar(64),
-    converted_tg_id        bigint
+    converted_tg_id        bigint,
+    payment_id             text
 );
 CREATE UNIQUE INDEX IF NOT EXISTS keys_pkey   ON keys (tg_id, client_id);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_keys_email ON keys (email);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_keys_payment_id ON keys (payment_id) WHERE payment_id IS NOT NULL;
 """
 
 DROP = "DROP TABLE IF EXISTS keys CASCADE;"

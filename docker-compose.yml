@@ -1,16 +1,38 @@
 # ===================================================================
-# Standalone backend deployment.
+# Production backend stack (standalone, no platform/ dependency).
 #
-# backend has NO postgres service of its own — it connects over the
-# network to the platform monorepo's `postgres` container (service name
-# `postgres` in platform/docker-compose.yml, resolvable as `postgres` on
-# platform_net) via DATABASE_URL in .env. Running a second postgres
-# process against the same data volume caused WAL corruption on
-# 2026-08-26 (both processes writing to platform_postgres_data
-# concurrently) — do NOT reintroduce a local postgres service here.
+# postgres here is the ONLY database access point: nothing else (bot,
+# web, nginx) connects to it. Clients reach backend's HTTP API only.
+#
+# Data lives in the `backend_postgres_data` volume — a NEW volume, not
+# platform's `platform_postgres_data`. Migrating existing data is a
+# separate, manual step (dump from platform-postgres-1, restore here).
+#
+# The DB port is deliberately NOT published to the host.
 # ===================================================================
 
 services:
+  postgres:
+    image: postgres:16
+    container_name: backend-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - backend_postgres_data:/var/lib/postgresql/data
+      # Runs only on an empty volume (first init). schema_fixed.sql is idempotent
+      # and already includes the payment migrations, so a fresh DB is ready to use.
+      - ./db/schema_fixed.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend_net
+
   backend:
     build: .
     container_name: backend
@@ -20,6 +42,9 @@ services:
       - "8000"
     volumes:
       - ./static/downloads:/app/static/downloads
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s
@@ -27,9 +52,11 @@ services:
       retries: 5
       start_period: 15s
     networks:
-      - platform_net
+      - backend_net
+
+volumes:
+  backend_postgres_data:
 
 networks:
-  platform_net:
-    external: true
-    name: platform_default
+  backend_net:
+    driver: bridge

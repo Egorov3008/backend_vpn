@@ -57,12 +57,17 @@ class KeyCreationService:
                 return k
         return None
 
-    async def process(self, tariff_id: str = None) -> Optional[Dict[str, Any]]:
+    async def process(
+        self, tariff_id: str = None, payment_id: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
         """
         Создаёт ключ и отправляет уведомление пользователю.
 
         Args:
             tariff_id: ID тарифа (опционально, извлекается из payment_type если не указан)
+            payment_id: платёж, за который выдаётся ключ. Если по нему ключ уже есть
+                (retry после сбоя), новый не создаётся, а возвращаются данные существующего
+                с флагом already_created=True.
 
         Returns:
             key_data: Данные созданного ключа или None при ошибке
@@ -74,6 +79,28 @@ class KeyCreationService:
                     raise ValueError(
                         f"Ожидалась операция 'create_key', получено: {operation}"
                     )
+
+            # Предохранитель от двойной выдачи: ключ по этому платежу уже существует.
+            # Проверка стоит до landing-апгрейда, иначе повтор после частичного апгрейда
+            # создал бы ещё один ключ.
+            if payment_id:
+                existing = await self.processor._model_service.keys.service.get(
+                    self.processor._conn, payment_id=payment_id
+                )
+                if existing is not None:
+                    logger.warning(
+                        "[Цена:CreateKey] Ключ по этому платежу уже существует — новый не создаём",
+                        tg_id=self.processor.tg_id,
+                        payment_id=payment_id,
+                        email=existing.email,
+                    )
+                    return {
+                        "public_link": existing.key,
+                        "days": self.create_key._get_days(existing.expiry_time),
+                        "link_to_connect": existing.key,
+                        "email": existing.email,
+                        "already_created": True,
+                    }
 
             tariff = await self.processor._model_service.tariffs.get_data(
                 int(tariff_id), self.processor._conn
@@ -104,6 +131,7 @@ class KeyCreationService:
                         tariff=tariff,
                         new_expiry=new_expiry,
                         transfer_tg=True,
+                        payment_id=payment_id,
                     )
                     if upgraded is not None:
                         logger.info(
@@ -128,6 +156,7 @@ class KeyCreationService:
                 server_id=settings.xui_server_id,
                 conn=self.processor._conn,
                 number_of_months=self.processor.number_of_months,
+                payment_id=payment_id,
             )
 
             if not key_data:

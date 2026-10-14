@@ -64,6 +64,10 @@ class Settings(BaseSettings):
     landing_cookie_secret: str = Field(default="", alias="LANDING_COOKIE_SECRET")
     # Public URL of the landing page (used in deep-link to bot).
     landing_public_url: str = Field(default="", alias="LANDING_PUBLIC_URL")
+    # Second secret for bot-only landing routes (claim, mark-converted). nginx
+    # injects X-Bot-Secret on the public /api/v1/landing/* paths, so that header
+    # alone must not be enough. Empty = these routes are closed.
+    landing_internal_secret: str = Field(default="", alias="LANDING_INTERNAL_SECRET")
 
     # Telegram Mini App (/api/v1/miniapp). HMAC secret for session tokens.
     # Required: placeholder/empty values are rejected at startup (no fallback).
@@ -110,6 +114,24 @@ class Settings(BaseSettings):
     # Public URL of the Telegram channel (same CANALL_URL the bot uses).
     # Backend needs it to call getChatMember for subscription checks.
     canall_url: str = Field(default="", alias="CANALL_URL")
+
+    # Ежедневная сводка успешных платежей за последние 24 часа — админам из ADMIN_ID.
+    # Время отправки — час по DAILY_PAYMENTS_REPORT_TZ (минуты фиксированы: 0).
+    daily_payments_report_enabled: bool = Field(default=True, alias="DAILY_PAYMENTS_REPORT_ENABLED")
+    daily_payments_report_hour: int = Field(default=18, ge=0, le=23, alias="DAILY_PAYMENTS_REPORT_HOUR")
+    daily_payments_report_tz: str = Field(default="Europe/Moscow", alias="DAILY_PAYMENTS_REPORT_TZ")
+
+    @field_validator("daily_payments_report_tz")
+    @classmethod
+    def _validate_report_tz(cls, value: str) -> str:
+        # Неверная зона иначе роняет create_scheduler и весь старт приложения
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError) as e:
+            raise ValueError(f"DAILY_PAYMENTS_REPORT_TZ: неизвестная часовая зона {value!r}") from e
+        return value
 
 
 settings = Settings()

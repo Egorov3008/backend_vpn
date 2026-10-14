@@ -30,7 +30,7 @@ import asyncpg
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response
 from pydantic import BaseModel
 
-from app.auth import verify_bot_secret
+from app.auth import verify_bot_secret, verify_landing_internal_secret
 from app.dependencies import get_cache, get_pool, get_service_data
 from app.factories import build_key_services
 from bot_project import bot as telegram_bot
@@ -762,7 +762,10 @@ class MarkConvertedRequest(BaseModel):
     ref_token: Optional[str] = None
 
 
-@router.post("/mark-converted/{landing_uid}")
+@router.post(
+    "/mark-converted/{landing_uid}",
+    dependencies=[Depends(verify_landing_internal_secret)],
+)
 async def mark_converted(
     landing_uid: str,
     body: MarkConvertedRequest,
@@ -825,7 +828,10 @@ class ClaimRequest(BaseModel):
     ref_token: Optional[str] = None
 
 
-@router.post("/claim/{landing_uid}")
+@router.post(
+    "/claim/{landing_uid}",
+    dependencies=[Depends(verify_landing_internal_secret)],
+)
 async def claim_key(
     landing_uid: str,
     body: ClaimRequest,

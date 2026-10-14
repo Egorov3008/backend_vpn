@@ -5,11 +5,36 @@ import asyncpg
 import time
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
+from zoneinfo import ZoneInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 from logger import logger
 from services.core.data.service import ServiceDataModel
+
+_OPERATION_LABELS = {"create_key": "Новые ключи", "renew_key": "Продления"}
+
+
+def _format_daily_payments_report(report, tz: ZoneInfo) -> str:
+    """HTML-текст сводки для админов (см. SyncScheduler.run_daily_payments_report)."""
+    start = report.period_start.astimezone(tz).strftime("%d.%m %H:%M")
+    end = report.period_end.astimezone(tz).strftime("%d.%m %H:%M")
+    lines = [
+        "📊 <b>Успешные платежи за 24 ч</b>",
+        f"Период: {start} — {end} ({tz.key})",
+        "",
+        f"Платежей: <b>{report.count}</b>",
+        f"Сумма: <b>{report.total:.2f} RUB</b>",
+        f"Средний чек: {report.avg:.2f} RUB",
+    ]
+    if report.by_operation:
+        lines.append("")
+        for op in report.by_operation:
+            label = _OPERATION_LABELS.get(op.operation, op.operation)
+            lines.append(f"{label}: {op.count} · {op.total:.2f} RUB")
+    return "\n".join(lines)
 
 
 @dataclass
@@ -384,6 +409,47 @@ class SyncScheduler:
             async with self._sweep_lock:
                 self._sweep_in_progress = False
 
+    async def run_daily_payments_report(self) -> None:
+        """Сводка успешных платежей за последние 24 часа, отправка админам из ADMIN_ID.
+
+        Окно скользящее: [now - 24h, now), где now — момент запуска джобы.
+        Нулевой день тоже отправляется (сообщение с нулями).
+        """
+        from config import settings, ADMIN_ID
+        from services.core.notifications import TelegramBotNotifier
+        from services.core.payment.daily_report import get_daily_report
+
+        if not settings.daily_payments_report_enabled:
+            return
+
+        tz = ZoneInfo(settings.daily_payments_report_tz)
+        period_end = datetime.now(tz)
+        period_start = period_end - timedelta(hours=24)
+        try:
+            report = await get_daily_report(self._pool, period_start, period_end)
+        except Exception as e:
+            logger.error("Ошибка сборки ежедневной сводки платежей", error=str(e), exc_info=True)
+            return
+
+        text = _format_daily_payments_report(report, tz)
+        notifier = TelegramBotNotifier(
+            bot_token=settings.bot_token,
+            support_chat_url=settings.support_chat_url,
+        )
+        recipients = [admin_id for admin_id in ADMIN_ID if admin_id]  # 0 — заглушка по умолчанию
+        for admin_id in recipients:
+            try:
+                await notifier.send_message(admin_id, text)
+            except Exception as e:
+                logger.error("Не удалось отправить сводку платежей админу", admin_id=admin_id, error=str(e))
+
+        logger.info(
+            "Ежедневная сводка платежей отправлена",
+            payments=report.count,
+            total=f"{report.total:.2f}",
+            recipients=len(recipients),
+        )
+
 
 def create_scheduler(
     service_data: ServiceDataModel,
@@ -437,4 +503,18 @@ def create_scheduler(
         replace_existing=True,
         coalesce=True,
     )
+
+    # Ежедневная сводка успешных платежей (по умолчанию 18:00 МСК).
+    from config import settings
+
+    if settings.daily_payments_report_enabled:
+        report_tz = ZoneInfo(settings.daily_payments_report_tz)
+        scheduler.add_job(
+            sync_scheduler.run_daily_payments_report,
+            CronTrigger(hour=settings.daily_payments_report_hour, minute=0, timezone=report_tz),
+            id="daily_payments_report",
+            replace_existing=True,
+            misfire_grace_time=3600,
+            coalesce=True,
+        )
     return scheduler
