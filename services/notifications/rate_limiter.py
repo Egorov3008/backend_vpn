@@ -2,9 +2,7 @@
 
 import asyncio
 import time
-from typing import Optional
 
-from logger import logger
 
 _GLOBAL_RATE = 25  # msg/sec
 _PER_USER_DELAY = 1.1  # sec

@@ -2,12 +2,10 @@
 
 import time
 from datetime import datetime, timezone, timedelta
-from typing import List
 
 from logger import logger
 from models.keys.key import Key
 from models.users.user import User
-from services.cache.service import CacheService
 from services.core.data.service import ServiceDataModel
 from services.notifications.models import NotificationContext, FunnelRunReport
 from services.notifications.rate_limiter import RateLimiter

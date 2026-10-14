@@ -118,7 +118,6 @@ class TestKeyCreationServiceWithNotifier:
     async def test_send_notification_calls_notifier(self):
         """send_notification() вызывает notifier.send_key_created()."""
         from services.core.payment.creation_service import KeyCreationService
-        from services.core.notifications.protocols import INotifier
 
         # Моки
         processor = AsyncMock()
@@ -201,7 +200,6 @@ class TestKeyRenewalServiceWithNotifier:
     async def test_send_notification_calls_notifier(self):
         """send_notification() вызывает notifier.send_key_renewed()."""
         from services.core.payment.renewal_service import KeyRenewalService
-        from services.core.notifications.protocols import INotifier
         from datetime import datetime
 
         # Моки

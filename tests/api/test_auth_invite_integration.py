@@ -6,7 +6,6 @@ from unittest.mock import MagicMock, AsyncMock, patch
 from app.main import app
 from app.auth import verify_bot_secret
 from app.dependencies import get_service_data, get_pool, get_cache
-from config import settings
 
 
 @pytest.fixture

@@ -12,7 +12,6 @@ Root cause: `router.py` was deducting `self.processor.referral_discount`
 the price via the user's reward balance).
 """
 
-from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 from unittest.mock import AsyncMock, MagicMock

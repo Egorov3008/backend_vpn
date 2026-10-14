@@ -14,6 +14,7 @@ from app.schemas.keys import (
     ChannelBonusResponse,
 )
 from config import DEFAULT_PRICING_PLAN, settings
+from logger import logger
 from services.cache.key_manager import CacheKeyManager
 from services.core.data.service import ServiceDataModel
 from services.core.keys.service import KeyService

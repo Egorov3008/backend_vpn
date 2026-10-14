@@ -5,7 +5,7 @@ Telegram API и вызывает этот endpoint.
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import List, Optional
 
 import asyncpg
@@ -13,7 +13,7 @@ import asyncpg
 from client import XUISession
 from config import settings
 from logger import logger
-from models import Key, User
+from models import Key
 from services.cache.key_manager import CacheKeyManager
 from services.cache.service import CacheService
 from services.core.data.service import ServiceDataModel
