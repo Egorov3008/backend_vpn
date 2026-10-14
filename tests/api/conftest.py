@@ -8,6 +8,7 @@ from app.auth import (
     verify_api_key,
     verify_admin_or_bot,
     verify_admin_actor,
+    verify_landing_internal_secret,
     AdminPrincipal,
 )
 from app.dependencies import get_service_data, get_pool, get_cache
@@ -61,6 +62,7 @@ async def api_client(mock_service_data, monkeypatch):
     app.dependency_overrides[verify_bot_secret] = lambda: None
     app.dependency_overrides[verify_api_key] = lambda: None
     app.dependency_overrides[verify_admin_or_bot] = lambda: None
+    app.dependency_overrides[verify_landing_internal_secret] = lambda: None
     app.dependency_overrides[verify_admin_actor] = lambda: AdminPrincipal(admin_tg_id=1)
 
     async with AsyncClient(

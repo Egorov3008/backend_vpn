@@ -64,6 +64,10 @@ class Settings(BaseSettings):
     landing_cookie_secret: str = Field(default="", alias="LANDING_COOKIE_SECRET")
     # Public URL of the landing page (used in deep-link to bot).
     landing_public_url: str = Field(default="", alias="LANDING_PUBLIC_URL")
+    # Second secret for bot-only landing routes (claim, mark-converted). nginx
+    # injects X-Bot-Secret on the public /api/v1/landing/* paths, so that header
+    # alone must not be enough. Empty = these routes are closed.
+    landing_internal_secret: str = Field(default="", alias="LANDING_INTERNAL_SECRET")
 
     # Telegram Mini App (/api/v1/miniapp). HMAC secret for session tokens;
     # falls back to bot_secret_key if empty (same as landing_cookie_secret).

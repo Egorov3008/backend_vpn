@@ -166,6 +166,8 @@ PostgreSQL + 3x-UI Panel
 
 Anonymous, cookie-based flow for the marketing landing page (separate from the bot/web `tg_id`-trusting flow above): `POST /set-ref-cookie`, `POST /quick-key` (mints a short-lived key on `XUI_INBOUND_ID_LANDING`), `GET /state`, `POST /mark-converted/{landing_uid}`, `POST /claim/{landing_uid}`. Signed cookies use `LANDING_COOKIE_SECRET` (falls back to `BOT_SECRET_KEY`).
 
+`mark-converted` and `claim` are bot-only: they also require `X-Landing-Internal-Secret: <LANDING_INTERNAL_SECRET>` (`app/auth.py::verify_landing_internal_secret`, fail-closed when unset). nginx injects `X-Bot-Secret` on public `/api/v1/landing/*`, so that header alone must not open these routes.
+
 #### Mobile MVP (`/api/v1/mobile`)
 
 - **GET `/shared-config`** — One shared VPN config for the MVP Android app; no per-user auth, no accounts, no per-user state.
