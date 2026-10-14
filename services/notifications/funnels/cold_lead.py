@@ -4,6 +4,7 @@ from datetime import timedelta
 from typing import Optional
 
 from logger import logger
+from services.notifications.miniapp_buttons import trial_button
 from models.users.user import User
 from services.notifications.models import NotificationContext, NotificationResult
 from services.notifications.rate_limiter import RateLimiter
@@ -59,7 +60,7 @@ class ColdLeadFunnel:
     def _build_keyboard() -> Optional[dict]:
         return {
             "inline_keyboard": [
-                [{"text": "✨ Активировать пробный период", "callback_data": "activate_stock"}],
+                [trial_button("✨ Активировать пробный период")],
                 [{"text": "👤 Личный кабинет", "callback_data": "profile"}],
             ]
         }
