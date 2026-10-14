@@ -1,8 +1,6 @@
 import ast
 import os
-import sys
 from pathlib import Path
-from typing import Any
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -75,6 +73,16 @@ class Settings(BaseSettings):
     miniapp_session_ttl_seconds: int = Field(default=3600, alias="MINIAPP_SESSION_TTL_SECONDS")
     # Max age of Telegram.WebApp.initData accepted by POST /miniapp/auth.
     miniapp_init_data_max_age_seconds: int = Field(default=86400, alias="MINIAPP_INIT_DATA_MAX_AGE_SECONDS")
+    # Public URL of the Mini App frontend. When set, notification buttons
+    # (renew, trial) open it as a WebApp; empty keeps the old bot callbacks.
+    miniapp_url: str = Field(default="", alias="MINIAPP_URL")
+
+    @field_validator("miniapp_url")
+    @classmethod
+    def _validate_miniapp_url(cls, value: str) -> str:
+        from shared.miniapp_url import normalize_miniapp_url
+
+        return normalize_miniapp_url(value)
 
     # YooKassa — values fall back to shared core_settings if .env is missing them
     yookassa_shop_id: str = ""

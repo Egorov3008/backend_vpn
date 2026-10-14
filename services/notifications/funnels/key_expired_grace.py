@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from logger import logger
+from services.notifications.miniapp_buttons import renew_key_button
 from models.keys.key import Key
 from models.users.user import User
 from services.notifications.models import NotificationContext, NotificationResult
@@ -73,7 +74,7 @@ class KeyExpiredGraceFunnel:
     def _build_keyboard(key: Key) -> Optional[dict]:
         return {
             "inline_keyboard": [
-                [{"text": "🔄 Продлить ключ", "callback_data": f"renew_key|{key.email}"}],
+                [renew_key_button(key.email)],
                 [{"text": "👤 Личный кабинет", "callback_data": "profile"}],
             ]
         }

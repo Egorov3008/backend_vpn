@@ -7,8 +7,6 @@ Verifies that:
 3. REFERRAL_BONUS_PERCENTAGES is the single source of truth
 4. Fallback values work when .env is missing fields
 """
-import os
-import pytest
 
 from shared.config import (
     CoreSettings,

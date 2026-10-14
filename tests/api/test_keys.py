@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from models import Key
 
 
@@ -123,8 +123,6 @@ async def test_get_key_detail(api_client, mock_service_data):
     assert "is_active" in data
 
 
-from unittest.mock import patch, AsyncMock as _AsyncMock
-
 
 def make_user(tg_id=123, trial=0):
     u = MagicMock()
@@ -208,3 +206,61 @@ async def test_create_trial_key_user_not_found(api_client, mock_service_data):
 
     resp = await api_client.post("/api/v1/keys/trial?tg_id=999")
     assert resp.status_code == 404
+
+
+def _override_pool(fetchval_result):
+    from app.dependencies import get_pool
+    from app.main import app
+
+    pool = AsyncMock()
+    pool.fetchval = AsyncMock(return_value=fetchval_result)
+    app.dependency_overrides[get_pool] = lambda: pool
+    return pool
+
+
+@pytest.mark.asyncio
+async def test_create_trial_key_lost_race_returns_403(api_client, mock_service_data):
+    # Кеш ещё говорит trial=0, но другой запрос уже занял триал в БД.
+    mock_service_data.users.get_data = AsyncMock(return_value=make_user(trial=0))
+    mock_service_data.tariffs.get_data = AsyncMock(return_value=make_tariff())
+    _override_pool(None)
+
+    with patch("api.v1.keys.build_key_services") as mock_build:
+        resp = await api_client.post("/api/v1/keys/trial?tg_id=123")
+
+    assert resp.status_code == 403
+    mock_build.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_create_trial_key_failure_releases_trial(api_client, mock_service_data):
+    mock_service_data.users.get_data = AsyncMock(return_value=make_user(trial=0))
+    mock_service_data.tariffs.get_data = AsyncMock(return_value=make_tariff())
+    _override_pool(123)
+
+    with patch("api.v1.keys.build_key_services") as mock_build, \
+         patch("api.v1.keys.TrialService") as mock_trial_cls:
+        mock_build.return_value = (MagicMock(proces=AsyncMock(return_value=None)), None, None)
+        mock_trial = AsyncMock()
+        mock_trial_cls.return_value.installation_trial = mock_trial
+
+        resp = await api_client.post("/api/v1/keys/trial?tg_id=123")
+
+    assert resp.status_code == 500
+    mock_trial.assert_called_once()
+    assert mock_trial.call_args.kwargs["trial"] == 0
+
+
+@pytest.mark.asyncio
+async def test_create_trial_key_invalid_gift_keeps_trial(api_client, mock_service_data):
+    mock_service_data.users.get_data = AsyncMock(return_value=make_user(trial=0))
+    mock_service_data.tariffs.get_data = AsyncMock(return_value=make_tariff())
+    mock_service_data.gifts.get_by = AsyncMock(return_value=None)
+    pool = _override_pool(123)
+
+    with patch("api.v1.keys.build_key_services") as mock_build:
+        resp = await api_client.post("/api/v1/keys/trial?tg_id=123&gift_token=bad")
+
+    assert resp.status_code == 400
+    mock_build.assert_not_called()
+    pool.fetchval.assert_not_called()

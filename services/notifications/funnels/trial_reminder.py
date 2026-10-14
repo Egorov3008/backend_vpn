@@ -4,7 +4,6 @@ from datetime import timedelta
 from typing import Optional
 
 from logger import logger
-from models.keys.key import Key
 from models.users.user import User
 from services.notifications.models import NotificationContext, NotificationResult
 from services.notifications.rate_limiter import RateLimiter

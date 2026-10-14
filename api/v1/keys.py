@@ -15,6 +15,7 @@ from app.schemas.keys import (
 )
 from client import XUIAPIError
 from config import DEFAULT_PRICING_PLAN, settings
+from logger import logger
 from services.cache.key_manager import CacheKeyManager
 from services.core.data.service import ServiceDataModel
 from services.core.keys.service import KeyService
@@ -174,35 +175,56 @@ async def create_trial_key(
     if not tariff:
         raise HTTPException(status_code=404, detail="Trial tariff not found")
 
-    data_service = DataService()
-    create_key_svc, _, _ = build_key_services(pool, service_data, cache, data_service)
-
-    try:
-        result = await create_key_svc.proces(
-            tg_id=tg_id,
-            tariff=tariff,
-            server_id=settings.xui_server_id,
-            conn=pool,
-            number_of_months=1,
-        )
-    except PanelMaintenanceError as e:
-        raise HTTPException(status_code=503, detail=str(e))
-
-    if not result:
-        raise HTTPException(status_code=500, detail="Failed to create trial key")
-
-    key = await service_data.keys.get_data(result["email"])
-    if not key:
-        raise HTTPException(status_code=500, detail="Created key not found in database")
-
-    await TrialService(service_data).installation_trial(tg_id, pool, trial=1)
-
+    # Подарок проверяем до создания ключа: иначе невалидный токен съедал
+    # триал и оставлял ключ, хотя клиент получал 400.
+    gift = None
     if gift_token:
         gift = await service_data.gifts.get_by(token=gift_token)
         if not gift:
             raise HTTPException(status_code=400, detail="Gift not found")
         if not gift.is_redeemable():
             raise HTTPException(status_code=400, detail="Gift already used or expired")
+
+    # Проверка user.trial выше идёт по кешу и не защищает от гонки: двойной тап
+    # или одновременный запрос из бота и Mini App выдали бы два пробных ключа.
+    # Атомарно занимаем триал в БД; проигравший запрос получает 403.
+    if not await _claim_trial(pool, tg_id):
+        raise HTTPException(status_code=403, detail="Trial already used")
+
+    trial_service = TrialService(service_data)
+    try:
+        data_service = DataService()
+        create_key_svc, _, _ = build_key_services(pool, service_data, cache, data_service)
+
+        try:
+            result = await create_key_svc.proces(
+                tg_id=tg_id,
+                tariff=tariff,
+                server_id=settings.xui_server_id,
+                conn=pool,
+                number_of_months=1,
+            )
+        except PanelMaintenanceError as e:
+            raise HTTPException(status_code=503, detail=str(e))
+
+        if not result:
+            raise HTTPException(status_code=500, detail="Failed to create trial key")
+
+        key = await service_data.keys.get_data(result["email"])
+        if not key:
+            raise HTTPException(status_code=500, detail="Created key not found in database")
+    except Exception:
+        # Ключ не создан — возвращаем триал, чтобы пользователь мог повторить.
+        try:
+            await trial_service.installation_trial(tg_id, pool, trial=0)
+        except Exception:
+            logger.error("Не удалось вернуть триал после ошибки создания ключа", tg_id=tg_id, exc_info=True)
+        raise
+
+    # Синхронизирует кеш пользователя с БД (trial = 1 уже записан в _claim_trial).
+    await trial_service.installation_trial(tg_id, pool, trial=1)
+
+    if gift is not None:
         gift_provider = GiftLinkProvider(
             gen_token=service_data.gift_token_gen,
             model_data=service_data,
@@ -210,6 +232,15 @@ async def create_trial_key(
         await gift_provider.application(pool, gift, tg_id, key.email)
 
     return KeyResponse.from_key(key)
+
+
+async def _claim_trial(pool: asyncpg.Pool, tg_id: int) -> bool:
+    """Атомарно помечает триал использованным. False — его уже занял другой запрос."""
+    claimed = await pool.fetchval(
+        "UPDATE users SET trial = 1 WHERE tg_id = $1 AND COALESCE(trial, 0) = 0 RETURNING tg_id",
+        tg_id,
+    )
+    return claimed is not None
 
 
 @router.delete("/{email}", status_code=204)

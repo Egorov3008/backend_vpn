@@ -10,7 +10,6 @@
 """
 from datetime import datetime, timezone
 
-import pytest
 
 from services.core.keys.utils.calculator import (
     ExpiryCalculator,

@@ -34,7 +34,9 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        # ruff нет в requirements.txt (он попадает в прод-образ) — ставим только в CI,
+        # с фиксированной версией, чтобы набор правил не менялся между прогонами.
+        run: pip install -r requirements.txt ruff==0.17.0
 
       - name: Lint
         run: make lint
@@ -42,6 +44,13 @@ jobs:
       - name: Test
         env:
           DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_db
+          # config.py отклоняет пустые и placeholder-секреты ещё при импорте —
+          # без этих значений pytest падает на сборе тестов. Значения тестовые.
+          BOT_SECRET_KEY: ci-bot-secret-0123456789abcdef0123
+          INVITE_TOKEN: ci-invite-token-0123456789abcdef
+          ADMIN_API_KEY: ci-admin-api-key-0123456789abcdef
+          MVP_APP_SECRET: ci-mvp-app-secret-0123456789abcdef
+          MINIAPP_SESSION_SECRET: ci-miniapp-session-0123456789abcdef
         run: make test
 
   # TODO: deploy job — deployment mechanism for the standalone backend

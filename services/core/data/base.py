@@ -134,7 +134,7 @@ class BaseData(Generic[T]):
                     class_name=self.__class__.__name__,
                     identifier=identifier,
                 )
-        except:
+        except Exception:
             pass
 
     def _extract_identifier(self, data: T) -> int | str | tuple:

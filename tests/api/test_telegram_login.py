@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.core.telegram import TelegramHashError, verify_telegram_hash
-from app.schemas.auth import TelegramAuthData, TelegramLoginResponse
+from app.schemas.auth import TelegramAuthData
 from app.services_auth import telegram_login
 
 BOT_TOKEN = "1234567890:test_bot_token_for_tests_only"
