@@ -27,6 +27,7 @@ from models import PaymentModel
 from services.cache.service import CacheService
 from services.core.data.service import ServiceDataModel
 from services.core.notifications import TelegramBotNotifier
+from services.core.payment.router import RouteOutcome
 
 
 def _notifier() -> TelegramBotNotifier:
@@ -186,7 +187,12 @@ async def sweep_pending_payments(
                 continue
             try:
                 router = build_payment_router(pool, service_data, cache, data_service, notifier=notifier)
-                await router.route(pid)
+                outcome = await router.route(pid)
+                if outcome is RouteOutcome.BUSY:
+                    # Платёж сейчас обрабатывает webhook/status — не трогаем, следующий
+                    # проход sweep увидит итог.
+                    report["pending"].append(pid)
+                    continue
                 report["routed"] += 1
                 logger.info("Sweep: платёж обработан (route)", payment_id=pid)
             except Exception as e:

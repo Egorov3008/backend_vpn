@@ -1,10 +1,19 @@
+from enum import Enum
 from typing import Optional
 
 from logger import logger
+from services.core.payment.claim import PaymentClaim
 from services.core.payment.creation_service import KeyCreationService
 from services.core.payment.processor import PaymentProcessor
 from services.core.payment.renewal_service import KeyRenewalService
 from services.core.referral.bonus_service import ReferralBonusService
+
+
+class RouteOutcome(str, Enum):
+    PROCESSED = "processed"
+    ALREADY_PROCESSED = "already_processed"
+    # Платёж сейчас обрабатывает другой вызов (webhook / status / sweep).
+    BUSY = "busy"
 
 
 class PaymentRouter:
@@ -24,19 +33,34 @@ class PaymentRouter:
         creation_service: KeyCreationService,
         renewal_service: KeyRenewalService,
         bonus_service: Optional[ReferralBonusService] = None,
+        claim: PaymentClaim | None = None,
     ):
         self.processor = processor
         self.creation_service = creation_service
         self.renewal_service = renewal_service
         self.bonus_service = bonus_service
+        self.claim = claim
 
-    async def route(self, payment_id: str) -> None:
+    async def route(self, payment_id: str) -> RouteOutcome:
         """
         Обработать платеж и отправить уведомления.
+
+        С ``claim`` платёж обрабатывается только под эксклюзивным захватом:
+        параллельный вызов для того же платежа получает ``BUSY`` и ничего не делает.
 
         Args:
             payment_id: ID платежа для обработки
         """
+        if self.claim is None:
+            return await self._route(payment_id)
+
+        async with self.claim.hold(payment_id) as held:
+            if not held.acquired:
+                logger.info("Платёж уже обрабатывается другим вызовом, пропуск", payment_id=payment_id)
+                return RouteOutcome.BUSY
+            return await self._route(payment_id, db_status=held.db_status)
+
+    async def _route(self, payment_id: str, db_status: str | None = None) -> RouteOutcome:
         logger.info(
             "Начало обработки платежа",
             payment_id=payment_id,
@@ -52,8 +76,9 @@ class PaymentRouter:
             amount=self.processor.amount,
         )
 
-        # Идемпотентность: пропускаем уже обработанный платёж
-        if self.processor.status == "succeeded":
+        # Идемпотентность: пропускаем уже обработанный платёж. db_status прочитан
+        # под захватом и свежее кеша, если платёж обработал другой процесс.
+        if "succeeded" in (self.processor.status, db_status):
             logger.info(
                 "Платёж уже обработан, пропуск",
                 payment_id=payment_id,
@@ -61,7 +86,7 @@ class PaymentRouter:
                 amount=self.processor.amount,
                 payment_type=self.processor.payment_type,
             )
-            return
+            return RouteOutcome.ALREADY_PROCESSED
 
         logger.debug(
             "Извлечение операции из payment_type",
@@ -221,3 +246,5 @@ class PaymentRouter:
                     payment_id=payment_id,
                     error=str(e),
                 )
+
+        return RouteOutcome.PROCESSED

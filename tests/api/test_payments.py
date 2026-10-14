@@ -37,6 +37,27 @@ async def test_webhook_payment_succeeded_calls_router(api_client, mock_service_d
 
 
 @pytest.mark.asyncio
+async def test_webhook_returns_409_while_payment_is_busy(api_client, mock_service_data):
+    """Платёж уже обрабатывает status/sweep — webhook не должен отвечать 2xx,
+    чтобы ЮKassa повторила уведомление, если тот вызов упадёт."""
+    from services.core.payment.router import RouteOutcome
+
+    with patch("api.v1.payments.build_payment_router") as mock_factory, \
+         patch("yookassa.Payment.find_one", return_value=MagicMock(status="succeeded")):
+        mock_router = MagicMock()
+        mock_router.route = AsyncMock(return_value=RouteOutcome.BUSY)
+        mock_factory.return_value = mock_router
+
+        response = await api_client.post("/api/v1/payments/webhook", json={
+            "type": "notification",
+            "event": "payment.succeeded",
+            "object": {"id": "pay_busy"},
+        })
+
+    assert response.status_code == 409
+
+
+@pytest.mark.asyncio
 async def test_webhook_not_confirmed_by_yookassa_returns_409(api_client, mock_service_data):
     """Webhook claims payment.succeeded, but a direct check against the
     YooKassa API disagrees — must not process the (possibly forged) webhook."""

@@ -26,6 +26,7 @@ from models import PaymentModel
 from services.cache.service import CacheService
 from services.core.data.service import ServiceDataModel
 from services.core.notifications import TelegramBotNotifier
+from services.core.payment.router import RouteOutcome
 from logger import logger
 
 router = APIRouter(
@@ -246,7 +247,11 @@ async def payment_webhook(
     payment_router = build_payment_router(
         pool, service_data, cache, data_service, notifier=_NOTIFIER
     )
-    await payment_router.route(payment_id)
+    outcome = await payment_router.route(payment_id)
+    if outcome is RouteOutcome.BUSY:
+        # Платёж прямо сейчас обрабатывает другой вызов (status/sweep). Не 2xx, чтобы
+        # ЮKassa повторила уведомление: если тот вызов упадёт, платёж не потеряется.
+        raise HTTPException(status_code=409, detail="Payment is being processed")
 
     logger.info("Webhook платежа обработан", extra={"payment_id": payment_id})
     return {"ok": True}

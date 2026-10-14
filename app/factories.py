@@ -13,6 +13,7 @@ from services.core.keys.utils.formtion import FormationKey
 from services.core.keys.utils.renewal import KeyRenewal
 from services.core.keys.utils.reset import KeyResetter
 from services.core.keys.utils.updating import KeyUpdater
+from services.core.payment.claim import PgAdvisoryPaymentClaim
 from services.core.payment.creation_service import KeyCreationService
 from services.core.payment.processor import PaymentProcessor
 from services.core.payment.renewal_service import KeyRenewalService
@@ -103,4 +104,5 @@ def build_payment_router(
         creation_service=creation_svc,
         renewal_service=renewal_svc,
         bonus_service=bonus_svc,
+        claim=PgAdvisoryPaymentClaim(pool),
     )
