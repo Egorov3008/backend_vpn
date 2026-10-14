@@ -29,10 +29,10 @@ class MiniAppSessionError(ValueError):
 
 
 def _signing_key() -> bytes:
-    # Falls back to BOT_SECRET_KEY like LANDING_COOKIE_SECRET does. The key is
-    # derived with a fixed label so a token can't be replayed as a landing
-    # cookie signature (or vice versa) when both share the fallback secret.
-    secret = settings.miniapp_session_secret or settings.bot_secret_key
+    # The secret is validated at startup (config.py), so it is never empty here.
+    # The key is derived with a fixed label so a token can't be replayed as a
+    # landing cookie signature (or vice versa).
+    secret = settings.miniapp_session_secret
     return hmac.new(secret.encode(), _KEY_LABEL, hashlib.sha256).digest()
 
 

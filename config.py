@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     mvp_app_secret: str = Field(default="changeme", alias="MVP_APP_SECRET")
     mvp_shared_key_email: str = Field(default="", alias="MVP_SHARED_KEY_EMAIL")
 
-    @field_validator("bot_secret_key", "invite_token", "admin_api_key", "mvp_app_secret")
+    @field_validator("bot_secret_key", "invite_token", "admin_api_key", "mvp_app_secret", "miniapp_session_secret")
     @classmethod
     def _validate_secret(cls, value: str, info) -> str:
         return reject_insecure_secret(info.field_name.upper(), value)
@@ -65,9 +65,9 @@ class Settings(BaseSettings):
     # Public URL of the landing page (used in deep-link to bot).
     landing_public_url: str = Field(default="", alias="LANDING_PUBLIC_URL")
 
-    # Telegram Mini App (/api/v1/miniapp). HMAC secret for session tokens;
-    # falls back to bot_secret_key if empty (same as landing_cookie_secret).
-    miniapp_session_secret: str = Field(default="", alias="MINIAPP_SESSION_SECRET")
+    # Telegram Mini App (/api/v1/miniapp). HMAC secret for session tokens.
+    # Required: placeholder/empty values are rejected at startup (no fallback).
+    miniapp_session_secret: str = Field(default="changeme", alias="MINIAPP_SESSION_SECRET")
     miniapp_session_ttl_seconds: int = Field(default=3600, alias="MINIAPP_SESSION_TTL_SECONDS")
     # Max age of Telegram.WebApp.initData accepted by POST /miniapp/auth.
     miniapp_init_data_max_age_seconds: int = Field(default=86400, alias="MINIAPP_INIT_DATA_MAX_AGE_SECONDS")
