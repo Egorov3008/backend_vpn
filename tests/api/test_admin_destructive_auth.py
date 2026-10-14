@@ -10,7 +10,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import asyncpg
 
-from app.auth import verify_admin_actor
 from app.dependencies import get_service_data, get_pool, get_cache
 from app.main import app
 from config import settings

@@ -9,7 +9,7 @@ Regression-тест для race condition в scheduler.
 2. Второй вызов получает status='skipped'
 """
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -74,7 +74,7 @@ class TestSchedulerRaceCondition:
             assert result.get('status') == 'error'
 
         # Проверяем, что флаг сбросился после исключения
-        assert scheduler._sync_in_progress == False, "Флаг должен сброситься после исключения"
+        assert scheduler._sync_in_progress is False, "Флаг должен сброситься после исключения"
 
         # Второй вызов должен выполниться нормально (состояние сбросилось)
         mock_loader2 = AsyncMock()
@@ -145,7 +145,7 @@ class TestSchedulerRaceCondition:
         # Initial stats
         stats = scheduler.stats
         assert stats['sync_count'] == 0
-        assert stats['is_sync_in_progress'] == False
+        assert stats['is_sync_in_progress'] is False
 
         # Первый вызов
         result1 = await scheduler.sync_cache()
@@ -153,6 +153,6 @@ class TestSchedulerRaceCondition:
         assert scheduler.stats['sync_count'] == 1
 
         # Второй вызов (должен быть skipped)
-        result2 = await scheduler.sync_cache()
+        await scheduler.sync_cache()
         # Note: второй вызов выполнится успешно, т.к. первый уже завершился
         assert scheduler.stats['sync_count'] == 2

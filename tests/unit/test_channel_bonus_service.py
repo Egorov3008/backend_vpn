@@ -1,9 +1,9 @@
 import pytest
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 from models import Key
-from services.core.promotions.channel_bonus_service import ChannelBonusService, ChannelBonusResult, PROMO_ID
+from services.core.promotions.channel_bonus_service import ChannelBonusService
 
 
 def _ms(days: int) -> int:

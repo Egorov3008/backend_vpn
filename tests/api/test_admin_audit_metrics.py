@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock
 import asyncpg
 
 from services.admin_audit import AuditLogger
-from services.metrics.registry import REGISTRY, admin_audit_failures_total
+from services.metrics.registry import REGISTRY
 
 
 def _make_pool(conn):
