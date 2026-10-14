@@ -40,6 +40,8 @@ only. Nothing outside this repo should touch the database.
 
 ## Commands
 
+No venv is set up in the repo and `python` is not on PATH — use `python3` (or an activated venv).
+
 ```bash
 # Install dependencies
 pip install -r requirements.txt
@@ -54,15 +56,20 @@ pytest
 pytest tests/api/test_keys.py
 
 # Run a single test
-pytest tests/api/test_keys.py::test_list_keys
+pytest tests/api/test_keys.py::test_list_keys_single
+
+# Integration tests (tests/integration/*_real_db.py) need a real Postgres:
+# set TEST_DATABASE_URL; tools/db/init_test_db.py prepares the test database.
+# Without it they are skipped.
+TEST_DATABASE_URL=postgresql://... pytest tests/integration
 
 # Fail-fast / coverage / one module (Makefile wrappers around pytest)
 make test-fast
 make test-cov            # HTML report at htmlcov/index.html
 make test-module MODULE=api
 
-# Lint (ruff check) / auto-fix + format
-make lint
+# Lint / auto-fix + format
+make lint                # NOT clean today: the repo has no ruff config, so ruff's default rules report ~900 findings
 make formatting
 ```
 
@@ -116,51 +123,12 @@ PostgreSQL + 3x-UI Panel
 
 ### API Endpoints
 
-#### Keys (`/api/v1/keys`)
+Routes live in `api/v1/<resource>.py` — grep there for the full list. Behaviour that is easy to get wrong:
 
-- **GET `/?tg_id=...`** — List user's keys (`limit`/`offset` optional, total count in `X-Total-Count` header)
-- **GET `/{email}`** — Get key details (includes client_id, key config, expiry, trial status)
-- **POST `/`** — Create new key (free tariffs only). Trailing slash is mandatory — `POST /api/v1/keys` (no slash) 307-redirects to `POST /api/v1/keys/`, and `httpx`/most HTTP clients don't follow redirects on POST by default.
-  - Requires: `tg_id`, `tariff_id`
-  - Fails: 402 if tariff is paid (use payments flow instead)
-- **POST `/trial`** — Create a free trial key (sets `user.trial = 1`)
-  - Requires: `tg_id` (query param)
-  - Optional: `gift_token` (query param) — applies gift if provided
-  - Fails: 403 if trial already used
-- **PATCH `/{email}`** — Renew key expiry
-  - Requires: `tg_id`, `tariff_id`, `number_of_months`
-  - Fails: 402 if tariff is paid
-- **DELETE `/{email}`** — Delete key (from 3x-UI and DB)
-  - Requires: `tg_id` (ownership check)
-
-#### Payments (`/api/v1/payments`)
-
-- **GET `/?tg_id=...`** — Payment history (`limit`/`offset` optional, total count in `X-Total-Count` header)
-- **GET `/{payment_id}/status`** — Check payment status
-  - Requires: `tg_id` (ownership check)
-  - Never processes the payment (never calls `route()`). If the stored status is `pending`, it asks YooKassa (at most once per 30s per payment, 15s timeout) and only handles cancellation: `pending → canceled` via a conditional `UPDATE ... WHERE status='pending'`.
-- **POST `/quotes`** — Calculate payment amount (discounts breakdown) without creating a payment
-- **POST `/create`** — Initiate payment
-  - Creates YooKassa invoice
-  - Sets payment_type to encode operation (create_key|renew_key)
-- **POST `/webhook`** — YooKassa webhook
-  - Verifies IP whitelist
-  - Updates payment status, calls KeyCreation on success
-
-#### Tariffs (`/api/v1/tariffs`)
-
-- **GET `/`** — List all tariffs
-- **GET `/{id}`** — Get tariff details
-
-#### Users (`/api/v1/users`)
-
-- **GET `/{tg_id}`** — Get user info (server_id, ref_count, etc.)
-- **POST `/`** — Register new user (auto-called by bot or web on first key creation)
-
-#### Auth (`/api/v1/auth`)
-
-- **POST `/register-from-invite`** — one-time invite-token registration for the web form (`INVITE_TOKEN` env var).
-- **POST `/telegram-login`** — verifies a Telegram Login Widget payload (`app/core/telegram.py::verify_telegram_hash`) and issues/looks up the corresponding user.
+- **Keys (`/api/v1/keys`):** `POST /keys/` needs the trailing slash — `POST /api/v1/keys` 307-redirects, and POST clients don't follow it. Creating a key is free-tariff only (402 for paid; those go through payments). `POST /keys/trial` sets `user.trial = 1` and returns 403 if the trial was already used. `PATCH` and `DELETE /{email}` check that `tg_id` owns the key; `PATCH` rejects paid tariffs (402).
+- **Payments (`/api/v1/payments`):** `GET /{payment_id}/status` never processes a payment (never calls `route()`). For a `pending` payment it asks YooKassa at most once per 30 s (15 s timeout) and only does `pending → canceled` via a conditional `UPDATE ... WHERE status='pending'`. `POST /create` sets `payment_type` to `create_key|renew_key`. `POST /webhook` is YooKassa-only (IP allowlist, see YooKassa Integration).
+- **Users / tariffs:** plain reads; `POST /users/` is auto-called by bot/web on first key creation.
+- **Auth (`/api/v1/auth`):** `POST /register-from-invite` (checked against `INVITE_TOKEN`) and `POST /telegram-login` (`app/core/telegram.py::verify_telegram_hash`).
 
 #### Landing (`/api/v1/landing`)
 
@@ -197,6 +165,8 @@ Grep `api/v1/admin.py` for the current full route list rather than trusting a ma
 **Service-to-Service:** `X-Bot-Secret: <BOT_SECRET_KEY>` header required on all endpoints (checked by `verify_bot_secret()` dependency), **except** `/api/v1/mobile/shared-config`, which uses its own static secret (`X-App-Secret: <MVP_APP_SECRET>`, checked by `verify_app_secret()`) — see Mobile MVP above.
 
 **No user authentication** — backend trusts the `tg_id` parameter from the calling service (bot or web). The calling service is responsible for JWT validation.
+
+**Telegram Mini App:** user sessions, not service secrets. `POST /api/v1/miniapp/auth` verifies `Telegram.WebApp.initData` (`app/core/telegram.py::verify_webapp_init_data`) and returns a signed token (`app/core/miniapp_session.py`; HMAC key `MINIAPP_SESSION_SECRET`, falls back to `BOT_SECRET_KEY`). Every `/api/v1/miniapp/*` route takes the user from that token via `verify_miniapp_session`, never from a `tg_id` in the request; renewals check ownership with `_require_own_key`.
 
 **External API clients (public-api tag):** Unlike bot/web/mobile-mvp above, these don't use a static env-secret — `Authorization: Bearer <key>` against per-client keys stored (hashed) in the `api_clients` table, checked by `verify_api_client(required_scopes=[...])` (`app/auth.py`, `services/api_clients/service.py`). Keys are issued/listed via admin-only `POST/GET /admin/api-clients`, revoked via `DELETE /admin/api-clients/{id}`, and rotated via `POST /admin/api-clients/{id}/keys` (`X-API-Key` + `X-Admin-Tg-Id`, same as other destructive admin ops), optionally passing `allowed_domain` at creation — if set, `verify_api_client` rejects requests whose `Origin`/`Referer` host doesn't match it (unset = unrestricted, e.g. existing/server-to-server keys). The raw key is only ever shown once, in the create/rotate response.
 
@@ -308,48 +278,13 @@ Configurable via env vars:
 
 ## Testing Patterns
 
-Tests use `AsyncMock` for asyncpg, native XUI client, and yookassa clients.
+Tests use `AsyncMock` for asyncpg, the native XUI client, and yookassa clients. Async tests run in auto mode (`pytest.ini`).
 
-**Setup Pattern:**
-```python
-@pytest.fixture
-async def mock_service_data():
-    # Mock ServiceDataModel with all sub-services
-    service_data = MagicMock(spec=ServiceDataModel)
-    service_data.keys = AsyncMock()
-    service_data.users = AsyncMock()
-    service_data.tariffs = AsyncMock()
-    # ... etc
-    return service_data
+**Shared fixtures are in `tests/api/conftest.py`:** `mock_service_data` and `api_client` (an httpx `AsyncClient` over `ASGITransport`). `api_client` overrides `get_pool`, `get_cache`, `get_service_data` and every auth dependency (`verify_bot_secret`, `verify_api_key`, `verify_admin_or_bot`, `verify_admin_actor`, `verify_landing_internal_secret`) with no-ops, and clears `app.dependency_overrides` afterwards. To test a real auth check, pop its override inside the test (see `real_internal_secret_check` in `tests/api/test_landing.py`).
 
-@pytest.fixture
-async def mock_pool():
-    return AsyncMock(spec=asyncpg.Pool)
-
-# In test:
-app.dependency_overrides[get_service_data] = lambda: mock_service_data
-app.dependency_overrides[get_pool] = lambda: mock_pool
-```
-
-**Example Test:**
-```python
-@pytest.mark.asyncio
-async def test_create_key_free_tariff(client, mock_service_data, mock_pool):
-    # Setup mocks
-    mock_service_data.tariffs.get_data.return_value = Mock(amount=0, id=1)
-    mock_service_data.users.get_data.return_value = Mock(tg_id=123, server_id=1)
-    
-    # Call endpoint
-    response = client.post(
-        "/api/v1/keys/",
-        json={"tg_id": 123, "tariff_id": 1},
-        headers={"X-Bot-Secret": "test_secret"},
-    )
-    
-    # Assert
-    assert response.status_code == 200
-    assert "email" in response.json()
-```
+Mocking gotchas seen in the suite:
+- Landing keys are looked up through `service_data.cache_service.keys.all()`, not `keys.get_data()` — mock the path the handler actually uses.
+- `pool.acquire()` used as `async with` needs `__aenter__`/`__aexit__` set on the mock (`AsyncMock()` alone is not enough).
 
 ## Factories
 
@@ -379,4 +314,6 @@ All settings are defined in `config.py` (`Settings`, pydantic-settings, loads `.
 - `LOG_LEVEL` / `LOG_FILE` / `LOG_FORMAT` — see Logging below
 - `MVP_APP_SECRET` / `MVP_SHARED_KEY_EMAIL` — see Mobile MVP endpoint above (empty `MVP_SHARED_KEY_EMAIL` by default; endpoint returns 500 until set)
 - `LANDING_COOKIE_SECRET` / `LANDING_PUBLIC_URL` / `CHANNEL_BONUS_DAYS` — landing-page and channel-subscription-bonus flow
+- `LANDING_INTERNAL_SECRET` — required header value for landing `claim` / `mark-converted`; empty = those routes are closed (see Landing)
+- `MINIAPP_SESSION_SECRET` / `MINIAPP_SESSION_TTL_SECONDS` — Mini App session tokens (see Authentication)
 - `PAYMENT_SWEEP_MAX_AGE_MINUTES` / `PAYMENT_SWEEP_EXCLUDE_IDS` — safety-net poller for missed YooKassa webhooks (see `background/scheduler.py`)
