@@ -6,6 +6,7 @@ from api.v1 import (
     auth,
     keys,
     landing,
+    miniapp,
     mobile_mvp,
     payments,
     public,
@@ -23,5 +24,6 @@ api_router.include_router(admin.router)
 api_router.include_router(admin.destructive_router)
 api_router.include_router(landing.router)
 api_router.include_router(mobile_mvp.router)
+api_router.include_router(miniapp.router)
 api_router.include_router(public.router)
 api_router.include_router(app_distribution.router)

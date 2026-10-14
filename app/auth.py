@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 from fastapi import Depends, Header, HTTPException, Request, Security
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 
+from app.core.miniapp_session import MiniAppSessionError, verify_session_token
 from app.dependencies import get_pool
 from config import settings
 from models.api_clients.api_client import ApiClient
@@ -132,3 +133,32 @@ def verify_api_client(required_scopes: Optional[List[str]] = None):
         return client
 
     return _dependency
+
+
+# --- Telegram Mini App ----------------------------------------------------
+# Пользовательская сессия (не сервисный секрет): токен выдаёт
+# POST /api/v1/miniapp/auth после проверки initData, в нём tg_id. Эндпоинты
+# /api/v1/miniapp/* берут пользователя только отсюда — tg_id из запроса
+# не принимается вовсе.
+miniapp_bearer_scheme = HTTPBearer(
+    scheme_name="MiniAppSession",
+    auto_error=False,
+    description="Сессия Telegram Mini App из POST /api/v1/miniapp/auth: `Authorization: Bearer <token>`",
+)
+
+
+@dataclass
+class MiniAppPrincipal:
+    tg_id: int
+
+
+async def verify_miniapp_session(
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(miniapp_bearer_scheme),
+) -> MiniAppPrincipal:
+    if not credentials or not credentials.credentials:
+        raise HTTPException(status_code=401, detail="Missing session token")
+    try:
+        tg_id = verify_session_token(credentials.credentials)
+    except MiniAppSessionError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    return MiniAppPrincipal(tg_id=tg_id)
