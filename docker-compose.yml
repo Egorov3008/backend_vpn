@@ -53,10 +53,18 @@ services:
       start_period: 15s
     networks:
       - backend_net
+      - backend_api
 
 volumes:
   backend_postgres_data:
 
 networks:
   backend_net:
+    driver: bridge
+  # Network for API clients on the same host (platform-web nginx): they reach
+  # backend:8000 here. postgres is NOT on it, so a client container cannot even
+  # open a connection to the DB. Fixed name so other compose projects can join it
+  # as an external network without knowing this project's directory name.
+  backend_api:
+    name: backend_api
     driver: bridge

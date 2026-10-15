@@ -18,6 +18,9 @@ only. Nothing outside this repo should touch the database.
   `platform_default` dependency. Clients will reach `backend:8000` through a private
   channel (planned: WireGuard between servers); the port is not published publicly
   by compose.
+  Clients on the same host (the `platform-web` nginx) join the fixed-name network
+  `backend_api` as an external network and reach `backend:8000` there; `postgres` is
+  not on `backend_api`, so a client container cannot open a DB connection at all.
 - **Database:** `backend` owns the database. The stack's `postgres` service uses the
   new volume `backend_postgres_data`. **Only `backend` may connect to Postgres**, so
   the DB port is not published to the host. Clients (bot, web) must never get DB
