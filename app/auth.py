@@ -1,12 +1,13 @@
 import hmac
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import FrozenSet, List, Optional, Protocol
 from urllib.parse import urlparse
 
 from fastapi import Depends, Header, HTTPException, Request, Security
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 
-from app.core.miniapp_session import MiniAppSessionError, verify_session_token, web_sessions
+import config
+from app.core.miniapp_session import MiniAppSessionError, admin_sessions, verify_session_token, web_sessions
 from app.dependencies import get_pool
 from config import settings
 from models.api_clients.api_client import ApiClient
@@ -64,39 +65,129 @@ async def verify_api_key(x_api_key: Optional[str] = Security(api_key_scheme)) ->
         raise HTTPException(status_code=401, detail="Invalid API key")
 
 
-async def verify_admin_or_bot(
-    x_api_key: Optional[str] = Security(api_key_scheme),
-    x_bot_secret: Optional[str] = Security(bot_secret_scheme),
-) -> None:
-    """Allow access with either admin API key or bot service secret."""
-    if x_api_key and x_api_key == settings.admin_api_key:
-        return
-    if x_bot_secret and x_bot_secret == settings.bot_secret_key:
-        return
-    raise HTTPException(status_code=401, detail="Invalid credentials")
-
-
 @dataclass
 class AdminPrincipal:
     admin_tg_id: Optional[int]
+
+
+# --- Админ-аутентификация ----------------------------------------------------
+# Два способа доказать, что запрос от админа, за одним протоколом:
+#   * ApiKeyAdminAuth — бот: X-API-Key + X-Admin-Tg-Id (заголовку tg_id сервер
+#     верит, потому что ключ есть только у бота);
+#   * SessionAdminAuth — веб-админка: Bearer-токен из POST /admin/session,
+#     tg_id берётся из подписанного токена и на каждом запросе сверяется с ADMIN_ID.
+# Стратегия возвращает None, если её учётных данных в запросе нет, и бросает
+# 401/403, если они есть, но неверны. Новый способ входа = новый класс в
+# ADMIN_AUTHENTICATORS, проверки эндпоинтов не меняются.
+admin_session_scheme = HTTPBearer(
+    scheme_name="AdminSession",
+    auto_error=False,
+    description="Сессия веб-админки из POST /api/v1/admin/session: `Authorization: Bearer <token>`",
+)
+
+
+@dataclass(frozen=True)
+class AdminCredentials:
+    api_key: Optional[str] = None
+    admin_tg_id_header: Optional[str] = None
+    session_token: Optional[str] = None
+
+
+class AdminAuthenticator(Protocol):
+    def authenticate(self, creds: AdminCredentials) -> Optional[AdminPrincipal]: ...
+
+
+def admin_ids() -> FrozenSet[int]:
+    """Telegram ID админов из ADMIN_ID (читается при каждом вызове)."""
+    ids = set()
+    for raw in config.ADMIN_ID:
+        try:
+            ids.add(int(raw))
+        except (TypeError, ValueError):
+            continue
+    ids.discard(0)  # значение по умолчанию "[0]" — не админ
+    return frozenset(ids)
+
+
+class ApiKeyAdminAuth:
+    def authenticate(self, creds: AdminCredentials) -> Optional[AdminPrincipal]:
+        if not creds.api_key:
+            return None
+        if not hmac.compare_digest(creds.api_key, settings.admin_api_key):
+            raise HTTPException(status_code=401, detail="Invalid admin API key")
+        admin_tg_id: Optional[int] = None
+        if creds.admin_tg_id_header:
+            try:
+                admin_tg_id = int(creds.admin_tg_id_header)
+            except (ValueError, TypeError):
+                admin_tg_id = None
+        return AdminPrincipal(admin_tg_id=admin_tg_id)
+
+
+class SessionAdminAuth:
+    def authenticate(self, creds: AdminCredentials) -> Optional[AdminPrincipal]:
+        if not creds.session_token:
+            return None
+        try:
+            tg_id = admin_sessions.verify(creds.session_token)
+        except MiniAppSessionError as e:
+            raise HTTPException(status_code=401, detail=str(e))
+        # Удалили из ADMIN_ID — уже выданная сессия перестаёт работать сразу.
+        if tg_id not in admin_ids():
+            raise HTTPException(status_code=403, detail="Not an admin")
+        return AdminPrincipal(admin_tg_id=tg_id)
+
+
+ADMIN_AUTHENTICATORS: tuple[AdminAuthenticator, ...] = (ApiKeyAdminAuth(), SessionAdminAuth())
+
+
+def authenticate_admin(creds: AdminCredentials) -> Optional[AdminPrincipal]:
+    for authenticator in ADMIN_AUTHENTICATORS:
+        principal = authenticator.authenticate(creds)
+        if principal is not None:
+            return principal
+    return None
+
+
+def _bearer_token(credentials: Optional[HTTPAuthorizationCredentials]) -> Optional[str]:
+    # isinstance: при прямом вызове из тестов сюда может прийти дефолт Security(...)
+    if isinstance(credentials, HTTPAuthorizationCredentials) and credentials.credentials:
+        return credentials.credentials
+    return None
+
+
+async def verify_admin_or_bot(
+    x_api_key: Optional[str] = Security(api_key_scheme),
+    x_bot_secret: Optional[str] = Security(bot_secret_scheme),
+    admin_session: Optional[HTTPAuthorizationCredentials] = Security(admin_session_scheme),
+) -> None:
+    """Чтение в админке: ключ админа, сервисный секрет бота или админ-сессия."""
+    if x_bot_secret and x_bot_secret == settings.bot_secret_key:
+        return
+    principal = authenticate_admin(
+        AdminCredentials(api_key=x_api_key, session_token=_bearer_token(admin_session))
+    )
+    if principal is None:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
 
 
 async def verify_admin_actor(
     x_api_key: Optional[str] = Security(api_key_scheme),
     x_admin_tg_id: Optional[str] = Header(None, alias="X-Admin-Tg-Id"),
     x_bot_secret: Optional[str] = Header(None, alias="X-Bot-Secret"),
+    admin_session: Optional[HTTPAuthorizationCredentials] = Security(admin_session_scheme),
 ) -> AdminPrincipal:
-    """Деструктивные admin-операции: только X-API-Key. Bot-secret не принимается."""
-    if not x_api_key or x_api_key != settings.admin_api_key:
+    """Деструктивные admin-операции: X-API-Key или админ-сессия. Bot-secret не принимается."""
+    principal = authenticate_admin(
+        AdminCredentials(
+            api_key=x_api_key,
+            admin_tg_id_header=x_admin_tg_id,
+            session_token=_bearer_token(admin_session),
+        )
+    )
+    if principal is None:
         raise HTTPException(status_code=401, detail="Invalid admin API key")
-
-    admin_tg_id: Optional[int] = None
-    if x_admin_tg_id:
-        try:
-            admin_tg_id = int(x_admin_tg_id)
-        except (ValueError, TypeError):
-            admin_tg_id = None
-    return AdminPrincipal(admin_tg_id=admin_tg_id)
+    return principal
 
 
 # --- Внешние API-клиенты (Этап 4) ---------------------------------------

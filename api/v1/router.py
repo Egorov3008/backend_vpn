@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from api.v1 import (
     admin,
+    admin_session,
     app_distribution,
     auth,
     keys,
@@ -21,6 +22,7 @@ api_router.include_router(tariffs.router)
 api_router.include_router(users.router)
 api_router.include_router(keys.router)
 api_router.include_router(payments.router)
+api_router.include_router(admin_session.router)
 api_router.include_router(admin.router)
 api_router.include_router(admin.destructive_router)
 api_router.include_router(landing.router)

@@ -1,9 +1,12 @@
+import time
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+
 import asyncpg
 
 from app.auth import verify_admin_or_bot, verify_admin_actor, AdminPrincipal
+from services.admin_filters import KeyStatus, filter_keys, filter_payments, filter_users
 from app.dependencies import get_service_data, get_pool, get_cache
 from app.factories import build_key_services
 from services.admin_audit import AuditLogger
@@ -173,9 +176,10 @@ async def list_users(
     response: Response,
     limit: Optional[int] = Query(None, ge=1, le=1000, description="Page size; omit for full list (legacy behaviour)"),
     offset: int = Query(0, ge=0),
+    q: Optional[str] = Query(None, max_length=64, description="Part of tg_id, or username/name"),
     service_data: ServiceDataModel = Depends(get_service_data),
 ) -> List[UserResponse]:
-    users = await service_data.users.get_all()
+    users = filter_users(await service_data.users.get_all(), q)
     response.headers["X-Total-Count"] = str(len(users))
     users = users[offset:offset + limit] if limit is not None else users[offset:]
     return [UserResponse.from_user(u) for u in users]
@@ -823,10 +827,19 @@ async def admin_list_keys(
     response: Response,
     limit: Optional[int] = Query(None, ge=1, le=1000, description="Page size; omit for full list (legacy behaviour)"),
     offset: int = Query(0, ge=0),
+    tg_id: Optional[int] = Query(None),
+    q: Optional[str] = Query(None, max_length=128, description="Part of the key email"),
+    status: Optional[KeyStatus] = Query(None, description="active (incl. expiring) | expiring (<=3 days) | expired"),
     service_data: ServiceDataModel = Depends(get_service_data),
 ):
-    """Admin: list all keys."""
-    keys = await service_data.keys.get_all()
+    """Admin: list keys, optionally filtered; X-Total-Count counts the filtered list."""
+    keys = filter_keys(
+        await service_data.keys.get_all(),
+        now_ms=int(time.time() * 1000),
+        tg_id=tg_id,
+        q=q,
+        status=status,
+    )
     response.headers["X-Total-Count"] = str(len(keys))
     keys = keys[offset:offset + limit] if limit is not None else keys[offset:]
     return {"keys": [AdminKeyItem.from_key(k) for k in keys]}
@@ -837,10 +850,12 @@ async def admin_list_payments(
     response: Response,
     limit: Optional[int] = Query(None, ge=1, le=1000, description="Page size; omit for full list (legacy behaviour)"),
     offset: int = Query(0, ge=0),
+    tg_id: Optional[int] = Query(None),
+    status: Optional[str] = Query(None, max_length=32, description="pending | processing | succeeded | canceled"),
     service_data: ServiceDataModel = Depends(get_service_data),
 ):
-    """Admin: list all payments."""
-    payments = await service_data.payments.get_all()
+    """Admin: list payments, optionally filtered; X-Total-Count counts the filtered list."""
+    payments = filter_payments(await service_data.payments.get_all(), tg_id=tg_id, status=status)
     response.headers["X-Total-Count"] = str(len(payments))
     payments = payments[offset:offset + limit] if limit is not None else payments[offset:]
     return {"payments": [AdminPaymentItem.from_payment(p) for p in payments]}

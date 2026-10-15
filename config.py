@@ -85,6 +85,14 @@ class Settings(BaseSettings):
     # Secure flag on web cookies. Turn off only for local http development.
     web_cookie_secure: bool = Field(default=True, alias="WEB_COOKIE_SECURE")
 
+    # Web admin (Mini App of a separate admin bot). Its initData is signed with
+    # ADMIN_BOT_TOKEN; only tg_id from ADMIN_ID gets a session. Empty = admin
+    # login is closed (the bot keeps working with X-API-Key).
+    admin_bot_token: str = Field(default="", alias="ADMIN_BOT_TOKEN")
+    admin_session_ttl_seconds: int = Field(default=8 * 3600, alias="ADMIN_SESSION_TTL_SECONDS")
+    # Max age of the admin bot's initData accepted by POST /admin/session.
+    admin_init_data_max_age_seconds: int = Field(default=3600, alias="ADMIN_INIT_DATA_MAX_AGE_SECONDS")
+
     # YooKassa — values fall back to shared core_settings if .env is missing them
     yookassa_shop_id: str = ""
     yookassa_secret_key: str = ""
