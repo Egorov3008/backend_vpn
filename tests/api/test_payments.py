@@ -672,3 +672,39 @@ async def test_create_payment_with_other_terms_creates_new(api_client, mock_serv
     assert response.status_code == 200, response.text
     assert response.json()["payment_id"] == "pay_new"
     mock_create.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_create_payment_issues_one_invoice(api_client, mock_service_data):
+    """Два одновременных «оплатить» от одного пользователя: второй получает тот же счёт."""
+    import asyncio
+
+    saved: list = []
+
+    async def list_open(_pool, _tg_id, _payment_type, _minutes):
+        return list(saved)
+
+    async def save_data(_pool, payment, **_kw):
+        saved.append(payment)
+
+    _setup_repeat_purchase(mock_service_data, [])
+    mock_service_data.payments.service.list_open_for_user = AsyncMock(side_effect=list_open)
+    mock_service_data.payments.save_data = AsyncMock(side_effect=save_data)
+
+    def slow_create(*_args, **_kw):
+        import time
+        time.sleep(0.2)  # YooKassa отвечает не мгновенно — окно для гонки
+        yk = _yk_payment("pending", url="https://pay.example/only")
+        yk.id = "pay_only"
+        return yk
+
+    with patch("yookassa.Payment.create", side_effect=slow_create) as mock_create, \
+         patch("yookassa.Payment.find_one", return_value=_yk_payment("pending", url="https://pay.example/only")):
+        r1, r2 = await asyncio.gather(
+            api_client.post("/api/v1/payments/create", json=_CREATE_BODY),
+            api_client.post("/api/v1/payments/create", json=_CREATE_BODY),
+        )
+
+    assert r1.status_code == r2.status_code == 200
+    assert r1.json()["payment_id"] == r2.json()["payment_id"] == "pay_only"
+    assert mock_create.call_count == 1

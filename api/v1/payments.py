@@ -2,6 +2,7 @@ import asyncio
 import dataclasses
 import time
 import uuid
+import weakref
 from typing import List, Optional
 from ipaddress import ip_address, ip_network
 
@@ -328,6 +329,30 @@ async def create_payment(
     service_data: ServiceDataModel = Depends(get_service_data),
     cache: CacheService = Depends(get_cache),
 ):
+    # Запросы одного пользователя обрабатываются по очереди: иначе два одновременных
+    # нажатия «оплатить» оба не увидят открытого счёта и выставят два.
+    async with _user_payment_lock(body.tg_id):
+        return await _create_payment(body, pool, service_data, cache)
+
+
+# Блокировки по tg_id живут, пока их кто-то держит (бэкенд работает одним процессом uvicorn).
+_user_payment_locks: "weakref.WeakValueDictionary[int, asyncio.Lock]" = weakref.WeakValueDictionary()
+
+
+def _user_payment_lock(tg_id: int) -> asyncio.Lock:
+    lock = _user_payment_locks.get(tg_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _user_payment_locks[tg_id] = lock
+    return lock
+
+
+async def _create_payment(
+    body: PaymentCreateRequest,
+    pool,
+    service_data: ServiceDataModel,
+    cache: CacheService,
+) -> PaymentCreateResponse:
     logger.debug("Запрос create_payment", extra={"tg_id": body.tg_id, "tariff_id": body.tariff_id, "months": body.number_of_months, "operation": body.operation})
 
     tariff = await service_data.tariffs.get_data(body.tariff_id, conn=pool)
