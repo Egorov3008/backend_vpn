@@ -50,7 +50,7 @@ def _bot_token(monkeypatch):
 @pytest.fixture(autouse=True)
 def _available_rates(monkeypatch):
     # Тарифы, доступные в miniapp (аналог AVAILABLE_RATES из .env)
-    monkeypatch.setattr("api.v1.miniapp.AVAILABLE_RATES_LIST", [1, 2, 5])
+    monkeypatch.setattr("api.v1.cabinet.AVAILABLE_RATES_LIST", [1, 2, 5])
 
 
 # --- initData signature ----------------------------------------------------
@@ -245,8 +245,9 @@ async def test_create_payment_ignores_client_amount(miniapp_client, mock_service
     mock_service_data.tariffs.get_data = AsyncMock(return_value=Tariff(id=2, name_tariff="Std", amount=200.0))
     captured = {}
 
-    async def fake_create(body, pool, service_data, cache):
+    async def fake_create(body, pool, service_data, cache, *, return_url=None):
         captured["body"] = body
+        captured["return_url"] = return_url
         return PaymentCreateResponse(
             payment_id="p1", confirmation_url="https://yk", amount=0,
             base_amount=0, volume_discount_percent=0, volume_discount_amount=0,
@@ -254,8 +255,8 @@ async def test_create_payment_ignores_client_amount(miniapp_client, mock_service
             has_volume_discount=False, has_referral_discount=False, has_balance_discount=False,
         )
 
-    import api.v1.miniapp as miniapp_mod
-    monkeypatch.setattr(miniapp_mod, "create_payment", fake_create)
+    import api.v1.cabinet as cabinet_mod
+    monkeypatch.setattr(cabinet_mod, "create_payment_for_user", fake_create)
     r = await miniapp_client.post(
         "/api/v1/miniapp/payments",
         json={"tariff_id": 2, "number_of_months": 3, "amount": 1, "referral_discount": 99, "tg_id": 1},
@@ -266,6 +267,8 @@ async def test_create_payment_ignores_client_amount(miniapp_client, mock_service
     assert body.tg_id == TG_ID
     assert body.amount is None
     assert body.referral_discount is None
+    # Mini App возвращается в бота (return_url по умолчанию).
+    assert captured["return_url"] is None
 
 
 @pytest.mark.asyncio
@@ -308,8 +311,8 @@ async def test_create_payment_rejects_tariff_outside_available_rates(
     async def fake_create(*args, **kwargs):
         called["create"] = True
 
-    import api.v1.miniapp as miniapp_mod
-    monkeypatch.setattr(miniapp_mod, "create_payment", fake_create)
+    import api.v1.cabinet as cabinet_mod
+    monkeypatch.setattr(cabinet_mod, "create_payment_for_user", fake_create)
     r = await miniapp_client.post(
         "/api/v1/miniapp/payments", json={"tariff_id": 9, "number_of_months": 1}, headers=bearer(TG_ID)
     )

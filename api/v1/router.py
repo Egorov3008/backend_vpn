@@ -12,6 +12,7 @@ from api.v1 import (
     public,
     tariffs,
     users,
+    web,
 )
 
 api_router = APIRouter(prefix="/api/v1")
@@ -25,5 +26,7 @@ api_router.include_router(admin.destructive_router)
 api_router.include_router(landing.router)
 api_router.include_router(mobile_mvp.router)
 api_router.include_router(miniapp.router)
+api_router.include_router(web.router)
+api_router.include_router(web.bot_router)
 api_router.include_router(public.router)
 api_router.include_router(app_distribution.router)

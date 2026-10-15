@@ -150,6 +150,13 @@ def _verify_cookie(cookie_value: str) -> Optional[str]:
     return payload.get("uid")
 
 
+def landing_uid_from_cookie(cookie_value: Optional[str]) -> Optional[str]:
+    """landing_uid из подписанной cookie ``tg_landing_id`` или ``None``.
+
+    Публичная обёртка для веб-кабинета (api/v1/web.py)."""
+    return _verify_cookie(cookie_value) if cookie_value else None
+
+
 # =============================================================================
 # Referral cookie (tg_ref) — фиксирует «от кого пришёл» при ?ref=… на лендинге
 # =============================================================================

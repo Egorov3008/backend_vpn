@@ -168,6 +168,17 @@ Anonymous, cookie-based flow for the marketing landing page (separate from the b
 
 `mark-converted` and `claim` are bot-only: they also require `X-Landing-Internal-Secret: <LANDING_INTERNAL_SECRET>` (`app/auth.py::verify_landing_internal_secret`, fail-closed when unset). nginx injects `X-Bot-Secret` on public `/api/v1/landing/*`, so that header alone must not open these routes.
 
+#### Mini App and web cabinet (`/api/v1/miniapp`, `/api/v1/web`)
+
+Both are built by one factory, `api/v1/cabinet.py::build_cabinet_router`, which reuses the internal handlers (keys, payments, tariffs, referral link). The factory takes only the auth dependency and the YooKassa `return_url`; `tg_id` always comes from the session, never from the request.
+
+- **Mini App:** `POST /miniapp/auth` verifies `Telegram.WebApp.initData` and returns a Bearer token (`verify_miniapp_session`).
+- **Web:** for users who may have no Telegram access yet. Session in HttpOnly cookie `web_session` (`SameSite=Strict`, `Path=/api/v1/web`); mutating requests also need `X-Requested-With: web` (`app/auth.py::verify_web_session`). Both token kinds are signed with `MINIAPP_SESSION_SECRET` under different labels (`app/core/session_tokens.py`), so one is never accepted as the other.
+  - `POST /web/anonymous/key`, `GET /web/anonymous/state` — the landing 24h key (`api/v1/landing.py` functions), no account.
+  - `POST /web/auth/bot-login` → deep link `t.me/<bot>?start=weblogin_<token>` + poll secret in cookie `web_login_poll`; the bot asks the user to confirm and calls `POST /auth/web-login/{token}/confirm` (`X-Bot-Secret` + `X-Landing-Internal-Secret`), which returns the browser's anonymous `landing_uid` so the bot can attach that key like `/start landing_<uid>`; the browser polls `POST /web/auth/bot-login/complete` and gets `web_session` once. Tokens live in `web_login_tokens` (hashes only, migration `db/migrations/20261015_web_login_tokens.sql`), logic in `services/web_auth/`.
+  - Payments from the web return to `WEB_PUBLIC_URL/pay/result`.
+  - The web nginx must proxy only `/api/v1/web/` and inject no secrets; `/api/v1/auth/*` must never be public.
+
 #### Mobile MVP (`/api/v1/mobile`)
 
 - **GET `/shared-config`** — One shared VPN config for the MVP Android app; no per-user auth, no accounts, no per-user state.

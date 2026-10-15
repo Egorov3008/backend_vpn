@@ -217,6 +217,26 @@ CREATE INDEX IF NOT EXISTS idx_admin_audit_log_action
     ON admin_audit_log(action);
 
 -- ============================================================================
+-- 5c2. Web login tokens — вход в веб-кабинет с подтверждением в боте
+-- ============================================================================
+-- См. миграцию db/migrations/20261015_web_login_tokens.sql.
+CREATE TABLE IF NOT EXISTS web_login_tokens
+(
+    token_hash   TEXT PRIMARY KEY,
+    poll_hash    TEXT NOT NULL UNIQUE,
+    landing_uid  TEXT,
+    status       TEXT NOT NULL DEFAULT 'pending'
+                 CHECK (status IN ('pending', 'confirmed', 'used')),
+    tg_id        BIGINT,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at   TIMESTAMPTZ NOT NULL,
+    confirmed_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_web_login_tokens_expires_at
+    ON web_login_tokens(expires_at);
+
+-- ============================================================================
 -- 5d. API clients — внешние потребители публичного REST API (Этап 4)
 -- ============================================================================
 -- См. миграцию 020. Хранится только hash ключа, не сырой ключ.
