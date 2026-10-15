@@ -75,7 +75,7 @@ class PaymentRouter:
         logger.debug("Операция извлечена", operation=operation, data=data)
 
         # Атомарный захват: единственный вход в обработку. Если второй процесс
-        # (вебхук или поллинг) уже захватил платёж — выходим, ключ не создаём.
+        # (вебхук или ручной sweep-скрипт) уже захватил платёж — выходим, ключ не создаём.
         claim_token = await self.processor.claim_payment(payment_id)
         if claim_token is None:
             logger.info(

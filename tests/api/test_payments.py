@@ -544,3 +544,167 @@ async def test_get_payment_status_yookassa_check_is_throttled(api_client, mock_s
         await api_client.get("/api/v1/payments/pay_thr/status?tg_id=456")
 
     assert mock_find.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# /payments/create — второй счёт за ту же покупку не выставляется
+# (баг: неудачная первая попытка, повторная покупка того же ключа → два ключа)
+# ---------------------------------------------------------------------------
+
+def _setup_repeat_purchase(mock_service_data, open_payments):
+    tariff = Tariff(id=7, name_tariff="Premium", amount=160.0)
+    mock_service_data.tariffs.get_data = AsyncMock(return_value=tariff)
+    user = MagicMock(tg_id=123, referral_id=None, check_referral=False, balance=0.0)
+    mock_service_data.users.get_data = AsyncMock(return_value=user)
+    mock_service_data.payments.service.list_open_for_user = AsyncMock(return_value=open_payments)
+    mock_service_data.payments.service.mark_canceled_if_pending = AsyncMock(return_value=True)
+
+
+def _open_payment(payment_id: str, *, amount: float = 160.0, months: int = 1, status: str = "pending"):
+    return PaymentModel(
+        payment_id=payment_id,
+        tg_id=123,
+        amount=amount,
+        status=status,
+        payment_type="create_key|7",
+        number_of_months=months,
+    )
+
+
+def _yk_payment(status: str, url: str = "https://pay.example/old"):
+    yk = MagicMock()
+    yk.status = status
+    yk.confirmation.confirmation_url = url
+    return yk
+
+
+_CREATE_BODY = {"tg_id": 123, "tariff_id": 7, "number_of_months": 1, "operation": "create_key"}
+
+
+@pytest.mark.asyncio
+async def test_create_payment_reuses_open_pending_payment(api_client, mock_service_data):
+    """Прежний счёт ещё можно оплатить — отдаём его, новый в YooKassa не создаём."""
+    _setup_repeat_purchase(mock_service_data, [_open_payment("pay_old")])
+
+    with patch("yookassa.Payment.find_one", return_value=_yk_payment("pending")), \
+         patch("yookassa.Payment.create") as mock_create:
+        response = await api_client.post("/api/v1/payments/create", json=_CREATE_BODY)
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["payment_id"] == "pay_old"
+    assert data["confirmation_url"] == "https://pay.example/old"
+    mock_create.assert_not_called()
+    mock_service_data.payments.save_data.assert_not_called()
+    args = mock_service_data.payments.service.list_open_for_user.await_args.args
+    assert args[1:3] == (123, "create_key|7")
+
+
+@pytest.mark.asyncio
+async def test_create_payment_rejects_when_previous_payment_already_paid(api_client, mock_service_data):
+    """Прежний счёт оплачен, но ключ ещё не выдан — второй счёт не выставляем (409)."""
+    _setup_repeat_purchase(mock_service_data, [_open_payment("pay_old")])
+
+    with patch("yookassa.Payment.find_one", return_value=_yk_payment("succeeded")), \
+         patch("yookassa.Payment.create") as mock_create:
+        response = await api_client.post("/api/v1/payments/create", json=_CREATE_BODY)
+
+    assert response.status_code == 409
+    assert "уже прошёл" in response.json()["detail"]
+    mock_create.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_create_payment_rejects_while_previous_payment_processing(api_client, mock_service_data):
+    """Прежний платёж захвачен вебхуком (ключ создаётся) — 409 без запроса в YooKassa."""
+    _setup_repeat_purchase(mock_service_data, [_open_payment("pay_old", status="processing")])
+
+    with patch("yookassa.Payment.find_one") as mock_find, \
+         patch("yookassa.Payment.create") as mock_create:
+        response = await api_client.post("/api/v1/payments/create", json=_CREATE_BODY)
+
+    assert response.status_code == 409
+    mock_find.assert_not_called()
+    mock_create.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_create_payment_rejects_when_previous_status_unknown(api_client, mock_service_data):
+    """Статус прежнего счёта узнать не удалось — второй счёт не выставляем (503)."""
+    _setup_repeat_purchase(mock_service_data, [_open_payment("pay_old")])
+
+    with patch("yookassa.Payment.find_one", side_effect=RuntimeError("yookassa down")), \
+         patch("yookassa.Payment.create") as mock_create:
+        response = await api_client.post("/api/v1/payments/create", json=_CREATE_BODY)
+
+    assert response.status_code == 503
+    mock_create.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_create_payment_after_canceled_previous_creates_new(api_client, mock_service_data):
+    """Прежний счёт отменён в YooKassa (оплата не прошла) — помечаем canceled и создаём новый."""
+    _setup_repeat_purchase(mock_service_data, [_open_payment("pay_old")])
+
+    with patch("yookassa.Payment.find_one", return_value=_yk_payment("canceled")), \
+         patch("yookassa.Payment.create") as mock_create:
+        mock_create.return_value = _yk_payment("pending", url="https://pay.example/new")
+        mock_create.return_value.id = "pay_new"
+        response = await api_client.post("/api/v1/payments/create", json=_CREATE_BODY)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["payment_id"] == "pay_new"
+    mock_service_data.payments.service.mark_canceled_if_pending.assert_awaited_once()
+    assert mock_service_data.payments.service.mark_canceled_if_pending.await_args.args[1] == "pay_old"
+
+
+@pytest.mark.asyncio
+async def test_create_payment_with_other_terms_creates_new(api_client, mock_service_data):
+    """Открытый счёт на другой срок не переиспользуется: пользователь выбрал другое."""
+    _setup_repeat_purchase(mock_service_data, [_open_payment("pay_old", amount=432.0, months=3)])
+
+    with patch("yookassa.Payment.find_one", return_value=_yk_payment("pending")), \
+         patch("yookassa.Payment.create") as mock_create:
+        mock_create.return_value = _yk_payment("pending", url="https://pay.example/new")
+        mock_create.return_value.id = "pay_new"
+        response = await api_client.post("/api/v1/payments/create", json=_CREATE_BODY)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["payment_id"] == "pay_new"
+    mock_create.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_create_payment_issues_one_invoice(api_client, mock_service_data):
+    """Два одновременных «оплатить» от одного пользователя: второй получает тот же счёт."""
+    import asyncio
+
+    saved: list = []
+
+    async def list_open(_pool, _tg_id, _payment_type, _minutes):
+        return list(saved)
+
+    async def save_data(_pool, payment, **_kw):
+        saved.append(payment)
+
+    _setup_repeat_purchase(mock_service_data, [])
+    mock_service_data.payments.service.list_open_for_user = AsyncMock(side_effect=list_open)
+    mock_service_data.payments.save_data = AsyncMock(side_effect=save_data)
+
+    def slow_create(*_args, **_kw):
+        import time
+        time.sleep(0.2)  # YooKassa отвечает не мгновенно — окно для гонки
+        yk = _yk_payment("pending", url="https://pay.example/only")
+        yk.id = "pay_only"
+        return yk
+
+    with patch("yookassa.Payment.create", side_effect=slow_create) as mock_create, \
+         patch("yookassa.Payment.find_one", return_value=_yk_payment("pending", url="https://pay.example/only")):
+        r1, r2 = await asyncio.gather(
+            api_client.post("/api/v1/payments/create", json=_CREATE_BODY),
+            api_client.post("/api/v1/payments/create", json=_CREATE_BODY),
+        )
+
+    assert r1.status_code == r2.status_code == 200
+    assert r1.json()["payment_id"] == r2.json()["payment_id"] == "pay_only"
+    assert mock_create.call_count == 1

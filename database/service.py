@@ -110,6 +110,27 @@ class PaymentRepository(BaseRepository[PaymentModel]):
                 raise RuntimeError(f"Платёж {payment_id} не найден при фиксации срока продления")
             return int(stored)
 
+    async def list_open_for_user(
+        self, pool, tg_id: int, payment_type: str, max_age_minutes: int
+    ) -> list[PaymentModel]:
+        """Незавершённые (pending/processing) платежи пользователя за ту же операцию.
+
+        Свежие сначала. Нужны, чтобы не выставлять второй счёт за тот же ключ, пока
+        первый ещё может быть оплачен: иначе обе оплаты пройдут и выдадут два ключа.
+        """
+        query = f"""
+            SELECT * FROM {self.table_name}
+            WHERE tg_id = $1::bigint
+              AND payment_type = $2
+              AND status IN ('pending', 'processing')
+              AND created_at >= NOW() - make_interval(mins => $3)
+            ORDER BY created_at DESC
+            LIMIT 5
+        """
+        async with await self._acquire(pool) as conn:
+            records = await conn.fetch(query, tg_id, payment_type, max_age_minutes)
+            return [self.model(**self._adapt(r)) for r in records]
+
     async def mark_canceled_if_pending(self, pool, payment_id: str) -> bool:
         """Перевести платёж pending -> canceled, только если он ещё не захвачен.
 
