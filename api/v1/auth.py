@@ -1,10 +1,8 @@
 """Authentication and registration endpoints."""
-import hashlib
 import logging
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import JSONResponse
 
 from app.auth import verify_bot_secret
 from app.core.telegram import verify_telegram_hash, TelegramHashError
@@ -92,7 +90,7 @@ async def register_from_invite_endpoint(
         if "already exists" in error_msg:
             raise HTTPException(status_code=409, detail=error_msg)
         raise HTTPException(status_code=400, detail=error_msg)
-    except Exception as e:
+    except Exception:
         logger.error(f"register_from_invite failed for tg_id={request.tg_id}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error during registration")
 
@@ -111,6 +109,6 @@ async def telegram_login_endpoint(
     try:
         result = await telegram_login(body, user_repo, notify_fn=_notify_admins_telegram)
         return result
-    except Exception as e:
+    except Exception:
         logger.error("telegram_login failed", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")

@@ -667,14 +667,14 @@ async def get_payment_history(
     service_data: ServiceDataModel = Depends(get_service_data),
 ) -> List[PaymentHistoryItem]:
     """Get payment history for a user"""
-    logger.debug(f"Запрос истории платежей", extra={"tg_id": tg_id})
+    logger.debug("Запрос истории платежей", extra={"tg_id": tg_id})
     result = await service_data.payments.get_by(tg_id=tg_id)
     payments = _normalize_get_by(result)
     response.headers["X-Total-Count"] = str(len(payments))
     payments = payments[offset:offset + limit] if limit is not None else payments[offset:]
-    logger.debug(f"Загружено платежей", extra={"tg_id": tg_id, "count": len(payments)})
+    logger.debug("Загружено платежей", extra={"tg_id": tg_id, "count": len(payments)})
     if payments:
-        logger.debug(f"IDs платежей", extra={"payment_ids": [p.payment_id for p in payments]})
+        logger.debug("IDs платежей", extra={"payment_ids": [p.payment_id for p in payments]})
     return [
         PaymentHistoryItem(
             payment_id=p.payment_id,

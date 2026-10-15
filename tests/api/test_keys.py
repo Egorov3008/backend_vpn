@@ -123,7 +123,7 @@ async def test_get_key_detail(api_client, mock_service_data):
     assert "is_active" in data
 
 
-from unittest.mock import patch, AsyncMock as _AsyncMock
+from unittest.mock import patch
 
 
 def make_user(tg_id=123, trial=0):

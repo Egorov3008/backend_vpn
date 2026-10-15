@@ -7,7 +7,7 @@ from typing import Any, Awaitable, Callable
 
 import asyncpg
 
-from models import User, LoginCode
+from models import User
 from app.schemas.auth import (
     RegisterFromInviteRequest,
     RegisterFromInviteResponse,
