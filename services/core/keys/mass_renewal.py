@@ -8,7 +8,7 @@
 import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import List, Optional, Dict, Any
+from typing import List, Optional
 
 import asyncpg
 
@@ -47,8 +47,8 @@ class MassRenewalReport:
     def format_summary(self) -> str:
         """Форматированная сводка для отправки админу."""
         lines = [
-            f"📦 <b>Массовое продление завершено</b>",
-            f"",
+            "📦 <b>Массовое продление завершено</b>",
+            "",
             f"📊 Всего ключей: <b>{self.total}</b>",
             f"✅ Успешно: <b>{self.success}</b>",
             f"❌ Ошибки: <b>{self.failed}</b>",

@@ -5,8 +5,8 @@
 - Прогноз планируемой прибыли на неделю и месяц
 """
 
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import datetime
 from typing import List, Tuple
 
 import asyncpg

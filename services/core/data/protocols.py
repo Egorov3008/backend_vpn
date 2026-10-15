@@ -2,8 +2,6 @@ from typing import Protocol, List, TypeVar, Optional, Dict, Any, Generic
 
 import asyncpg
 
-from services.cache.service import T
-
 T = TypeVar("T")
 
 

@@ -1,8 +1,6 @@
 import ast
 import os
-import sys
 from pathlib import Path
-from typing import Any
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -75,6 +73,17 @@ class Settings(BaseSettings):
     miniapp_session_ttl_seconds: int = Field(default=3600, alias="MINIAPP_SESSION_TTL_SECONDS")
     # Max age of Telegram.WebApp.initData accepted by POST /miniapp/auth.
     miniapp_init_data_max_age_seconds: int = Field(default=86400, alias="MINIAPP_INIT_DATA_MAX_AGE_SECONDS")
+
+    # Web cabinet (/api/v1/web). Session tokens are signed with
+    # MINIAPP_SESSION_SECRET under a separate label (app/core/miniapp_session.py).
+    web_session_ttl_seconds: int = Field(default=7 * 24 * 3600, alias="WEB_SESSION_TTL_SECONDS")
+    # Lifetime of a "log in via the bot" token (deep link + polling).
+    web_login_token_ttl_seconds: int = Field(default=600, alias="WEB_LOGIN_TOKEN_TTL_SECONDS")
+    # Public URL of the web cabinet, e.g. https://app.example.ru. Used as the
+    # YooKassa return_url for payments made from the web. Empty = back to the bot.
+    web_public_url: str = Field(default="", alias="WEB_PUBLIC_URL")
+    # Secure flag on web cookies. Turn off only for local http development.
+    web_cookie_secure: bool = Field(default=True, alias="WEB_COOKIE_SECURE")
 
     # YooKassa — values fall back to shared core_settings if .env is missing them
     yookassa_shop_id: str = ""

@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 from fastapi import Depends, Header, HTTPException, Request, Security
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 
-from app.core.miniapp_session import MiniAppSessionError, verify_session_token
+from app.core.miniapp_session import MiniAppSessionError, verify_session_token, web_sessions
 from app.dependencies import get_pool
 from config import settings
 from models.api_clients.api_client import ApiClient
@@ -173,17 +173,53 @@ miniapp_bearer_scheme = HTTPBearer(
 
 
 @dataclass
-class MiniAppPrincipal:
+class UserPrincipal:
+    """Пользователь кабинета (Mini App или веб): ``tg_id`` из подписанной сессии."""
+
     tg_id: int
+
+
+# Старое имя — используется в api/v1/miniapp.py и тестах.
+MiniAppPrincipal = UserPrincipal
 
 
 async def verify_miniapp_session(
     credentials: Optional[HTTPAuthorizationCredentials] = Security(miniapp_bearer_scheme),
-) -> MiniAppPrincipal:
+) -> UserPrincipal:
     if not credentials or not credentials.credentials:
         raise HTTPException(status_code=401, detail="Missing session token")
     try:
         tg_id = verify_session_token(credentials.credentials)
     except MiniAppSessionError as e:
         raise HTTPException(status_code=401, detail=str(e))
-    return MiniAppPrincipal(tg_id=tg_id)
+    return UserPrincipal(tg_id=tg_id)
+
+
+# --- Веб-кабинет -----------------------------------------------------------
+# Сессия в HttpOnly cookie (JS её не читает), SameSite=Strict, Path=/api/v1/web.
+# Изменяющие запросы дополнительно требуют заголовок X-Requested-With: web:
+# браузер не отправит его с чужого сайта без CORS-preflight, а CORS для
+# /api/v1/web/ не включён — это вторая линия защиты от CSRF после SameSite.
+WEB_SESSION_COOKIE = "web_session"
+WEB_CSRF_HEADER = "X-Requested-With"
+WEB_CSRF_HEADER_VALUE = "web"
+_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def require_web_csrf_header(request: Request) -> None:
+    if request.method in _SAFE_METHODS:
+        return
+    if request.headers.get(WEB_CSRF_HEADER) != WEB_CSRF_HEADER_VALUE:
+        raise HTTPException(status_code=403, detail="Missing X-Requested-With header")
+
+
+async def verify_web_session(request: Request) -> UserPrincipal:
+    require_web_csrf_header(request)
+    token = request.cookies.get(WEB_SESSION_COOKIE)
+    if not token:
+        raise HTTPException(status_code=401, detail="Not logged in")
+    try:
+        tg_id = web_sessions.verify(token)
+    except MiniAppSessionError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    return UserPrincipal(tg_id=tg_id)

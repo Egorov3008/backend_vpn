@@ -4,7 +4,6 @@ from datetime import datetime
 from enum import Enum
 from typing import List
 
-from logger import logger
 from models.keys.key import Key
 
 

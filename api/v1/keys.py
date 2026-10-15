@@ -22,6 +22,7 @@ from services.core.user.utils.trial import TrialService
 from services.core.gift import GiftLinkProvider
 from services.core.promotions.channel_bonus_service import ChannelBonusService
 from database.service import DataService
+from logger import logger
 from models.servers.server import resolve_panel_server
 from services.cache.service import CacheService
 from services.system.maintenance import PanelMaintenanceError

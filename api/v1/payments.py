@@ -329,10 +329,23 @@ async def create_payment(
     service_data: ServiceDataModel = Depends(get_service_data),
     cache: CacheService = Depends(get_cache),
 ):
+    return await create_payment_for_user(body, pool, service_data, cache)
+
+
+async def create_payment_for_user(
+    body: PaymentCreateRequest,
+    pool,
+    service_data: ServiceDataModel,
+    cache: CacheService,
+    *,
+    return_url: Optional[str] = None,
+) -> PaymentCreateResponse:
+    """Создать платёж; ``return_url`` — куда YooKassa вернёт пользователя после
+    оплаты (``None`` — в бота). Кабинеты (Mini App, веб) вызывают это напрямую."""
     # Запросы одного пользователя обрабатываются по очереди: иначе два одновременных
     # нажатия «оплатить» оба не увидят открытого счёта и выставят два.
     async with _user_payment_lock(body.tg_id):
-        return await _create_payment(body, pool, service_data, cache)
+        return await _create_payment(body, pool, service_data, cache, return_url=return_url)
 
 
 # Блокировки по tg_id живут, пока их кто-то держит (бэкенд работает одним процессом uvicorn).
@@ -352,6 +365,7 @@ async def _create_payment(
     pool,
     service_data: ServiceDataModel,
     cache: CacheService,
+    return_url: Optional[str] = None,
 ) -> PaymentCreateResponse:
     logger.debug("Запрос create_payment", extra={"tg_id": body.tg_id, "tariff_id": body.tariff_id, "months": body.number_of_months, "operation": body.operation})
 
@@ -461,7 +475,8 @@ async def _create_payment(
     # Username реального бота за BOT_TOKEN (getMe, закешировано) — не
     # settings.bot_name, который может разъехаться с фактически задеплоенным
     # токеном (see: platform/.env bot mismatch investigated 2026-08-18).
-    return_url_username = await telegram_bot.get_username(fallback=settings.bot_name)
+    if not return_url:
+        return_url = f"https://t.me/{await telegram_bot.get_username(fallback=settings.bot_name)}"
 
     try:
         # Формируем полный webhook URL для YooKassa
@@ -484,7 +499,7 @@ async def _create_payment(
                             "amount": {"value": f"{final_amount:.2f}", "currency": "RUB"},
                             "confirmation": {
                                 "type": "redirect",
-                                "return_url": f"https://t.me/{return_url_username}",
+                                "return_url": return_url,
                             },
                             "capture": True,
                             "description": f"Помощь в ИТ {body.tg_id} {tariff.name_tariff} x{body.number_of_months}",
@@ -652,14 +667,14 @@ async def get_payment_history(
     service_data: ServiceDataModel = Depends(get_service_data),
 ) -> List[PaymentHistoryItem]:
     """Get payment history for a user"""
-    logger.debug(f"Запрос истории платежей", extra={"tg_id": tg_id})
+    logger.debug("Запрос истории платежей", extra={"tg_id": tg_id})
     result = await service_data.payments.get_by(tg_id=tg_id)
     payments = _normalize_get_by(result)
     response.headers["X-Total-Count"] = str(len(payments))
     payments = payments[offset:offset + limit] if limit is not None else payments[offset:]
-    logger.debug(f"Загружено платежей", extra={"tg_id": tg_id, "count": len(payments)})
+    logger.debug("Загружено платежей", extra={"tg_id": tg_id, "count": len(payments)})
     if payments:
-        logger.debug(f"IDs платежей", extra={"payment_ids": [p.payment_id for p in payments]})
+        logger.debug("IDs платежей", extra={"payment_ids": [p.payment_id for p in payments]})
     return [
         PaymentHistoryItem(
             payment_id=p.payment_id,
