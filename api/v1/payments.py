@@ -602,7 +602,7 @@ async def _find_open_payment(
 
     for candidate in candidates:
         if candidate.status == "processing":
-            # Платёж уже захвачен вебхуком/поллером: ключ по нему создаётся прямо сейчас.
+            # Платёж уже захвачен вебхуком (или ручным sweep-скриптом): ключ по нему создаётся прямо сейчас.
             raise HTTPException(status_code=409, detail=PREVIOUS_PAYMENT_PAID_DETAIL)
 
         yk_payment = await _fetch_yookassa_payment(candidate.payment_id)
@@ -758,7 +758,7 @@ async def get_payment_status(
         raise HTTPException(status_code=403, detail="Payment does not belong to this user")
 
     # Эндпоинт никогда не вызывает route(): обработку успешного платежа (создание ключа)
-    # запускают вебхук YooKassa и фоновый поллер (pending_sweep) через атомарный захват.
+    # запускает вебхук YooKassa (или ручной scripts/sweep_pending_payments.py) через атомарный захват.
     # Здесь только отмена: если YooKassa отменила платёж, а статус в БД ещё pending,
     # переводим его в canceled, чтобы бот не выдавал мёртвую ссылку.
     if payment.status == "pending" and _yookassa_cancel_check_due(payment_id):
@@ -770,7 +770,7 @@ async def get_payment_status(
                 payment = dataclasses.replace(payment, status="canceled")
                 await _refresh_payment_cache(cache, payment)
             else:
-                # Платёж уже захвачен вебхуком/поллером — читаем актуальную строку из БД, а не из кеша
+                # Платёж уже захвачен вебхуком — читаем актуальную строку из БД, а не из кеша
                 payment = await service_data.payments.service.get(pool, payment_id=payment_id) or payment
 
     # 'processing' — внутренний статус захвата: клиенту отдаём pending, иначе бот решит,

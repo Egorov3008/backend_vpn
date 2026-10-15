@@ -257,7 +257,7 @@ Two independent nginx edges proxy `/api/v1/public/` straight to `backend` (not t
 6. `route()` takes an atomic claim (`pending → processing`, owner token in `payments.processing_token`) and only then calls `KeyCreation.process()` / `KeyRenewal`. On success, `complete_claim` sets `succeeded`; on failure, `release_claim` returns the payment to `pending` for retry
 
 **Idempotency:** four layers.
-- The claim (`PaymentRepository.claim_pending`) lets only one of webhook / sweep process a payment (`GET /status` never processes, it only cancels). A `processing` claim older than `PAYMENT_CLAIM_STALE_MINUTES` (10) can be taken over; the previous owner can no longer complete or release it.
+- The claim (`PaymentRepository.claim_pending`) lets only one of webhook / manual sweep script process a payment (`GET /status` never processes, it only cancels). A `processing` claim older than `PAYMENT_CLAIM_STALE_MINUTES` (10) can be taken over; the previous owner can no longer complete or release it.
 - `keys.payment_id` has a partial unique index (`uq_keys_payment_id`), so a second key for the same payment cannot be written. `KeyCreationService` also returns the existing key (`already_created`) before any landing upgrade.
 - Only the claim owner sends the user notification.
 - **Renewals:** the target expiry is computed once and stored in `payments.renewal_expiry_time` (`PaymentRepository.reserve_renewal_expiry`, conditional write, `IS NULL`) before the panel is touched (`KeyRenewal.extension_key(expiry_guard=...)`). A retry after a DB failure or a takeover reuses the stored value, so the panel and DB get the same absolute expiry and the period is not added twice. Migration `db/migrations/20261014_payment_renewal_expiry.sql`. Direct renewals without a payment (`PATCH /keys/{email}`) are unchanged.
@@ -379,4 +379,4 @@ All settings are defined in `config.py` (`Settings`, pydantic-settings, loads `.
 - `LOG_LEVEL` / `LOG_FILE` / `LOG_FORMAT` — see Logging below
 - `MVP_APP_SECRET` / `MVP_SHARED_KEY_EMAIL` — see Mobile MVP endpoint above (empty `MVP_SHARED_KEY_EMAIL` by default; endpoint returns 500 until set)
 - `LANDING_COOKIE_SECRET` / `LANDING_PUBLIC_URL` / `CHANNEL_BONUS_DAYS` — landing-page and channel-subscription-bonus flow
-- `PAYMENT_SWEEP_MAX_AGE_MINUTES` / `PAYMENT_SWEEP_EXCLUDE_IDS` — safety-net poller for missed YooKassa webhooks (see `background/scheduler.py`)
+- `PAYMENT_SWEEP_MAX_AGE_MINUTES` / `PAYMENT_SWEEP_EXCLUDE_IDS` — window of fresh pending payments (used by `create_payment` to find an open invoice for the same purchase) and defaults for the manual `scripts/sweep_pending_payments.py`. There is no background poller: keys are issued only from the YooKassa webhook; a missed webhook is recovered with that script.

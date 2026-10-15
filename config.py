@@ -101,10 +101,10 @@ class Settings(BaseSettings):
     webhook_path: str = "/api/v1/payments/webhook"
     webhook_base_url: str = ""  # Public URL of this backend, e.g. https://api.example.com
 
-    # Pending-payment sweep (safety net for missed YooKassa webhooks).
-    # Авто-поллинг из scheduler опрашивает YooKassa по pending-платежам младше
-    # payment_sweep_max_age_minutes и маршрутизирует succeeded (через payment_router).
-    # payment_sweep_exclude_ids — список payment_id, которые поллинг пропускает
+    # Окно «свежих» pending-платежей. Фонового опроса ЮKassa нет (ключ выдаётся только
+    # по вебхуку); окно используют create_payment (поиск незавершённого счёта за ту же
+    # покупку) и ручной scripts/sweep_pending_payments.py по умолчанию.
+    # payment_sweep_exclude_ids — payment_id, которые ручной sweep пропускает
     # (напр. уже обработанные вручную админом без обновления статуса — чтобы не продлить ключ повторно).
     payment_sweep_max_age_minutes: int = Field(default=1440, alias="PAYMENT_SWEEP_MAX_AGE_MINUTES")
     payment_sweep_exclude_ids_raw: str = Field(default="", alias="PAYMENT_SWEEP_EXCLUDE_IDS")

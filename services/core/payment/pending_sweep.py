@@ -1,11 +1,9 @@
 """Sweep pending payments: ask YooKassa and route the succeeded ones.
 
-Safety net for missed YooKassa webhooks + one-off backlog recovery tool.
+Ручной инструмент для пропущенных вебхуков YooKassa и разбора backlog.
 
-Центральная логика переиспользуется:
-  * фоновым поллингом из ``background.scheduler`` (авто, только свежие платежи,
-    с exclude-списком);
-  * разовым CLI-скриптом ``scripts/sweep_pending_payments.py`` (dry-run + --apply).
+Запускается только разовым CLI-скриптом ``scripts/sweep_pending_payments.py``
+(dry-run + --apply). Фонового опроса нет: ключ выдаётся по вебхуку.
 
 Идемпотентность: ``PaymentRouter.route`` сам пропускает платежи со статусом
 ``succeeded`` (router.py). Но платеж, обработанный админом *вручную* (продление
