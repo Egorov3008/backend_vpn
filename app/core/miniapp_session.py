@@ -7,7 +7,7 @@ HttpOnly cookie. В обоих случаях ``tg_id`` берётся толь�
 
 Оба вида подписываются ``MINIAPP_SESSION_SECRET``, но с разными метками
 (``app/core/session_tokens.py``), поэтому токен Mini App не принимается
-веб-кабинетом и наоборот.
+веб-кабинетом и наоборот. Так же устроена админ-сессия (``admin_sessions``).
 """
 
 from __future__ import annotations
@@ -32,6 +32,14 @@ web_sessions = SessionTokenService(
     label=b"web-session-v1",
     secret=lambda: settings.miniapp_session_secret,
     default_ttl=lambda: settings.web_session_ttl_seconds,
+)
+
+# Админ-сессия веб-админки (Mini App админ-бота). Отдельная метка: токен
+# кабинета никогда не проходит как админский.
+admin_sessions = SessionTokenService(
+    label=b"admin-session-v1",
+    secret=lambda: settings.miniapp_session_secret,
+    default_ttl=lambda: settings.admin_session_ttl_seconds,
 )
 
 
