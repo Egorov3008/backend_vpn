@@ -223,3 +223,28 @@ async def test_keys_payment_id_is_unique_when_set(pool):
             await conn.execute(
                 "INSERT INTO keys (email, tg_id, payment_id) VALUES ('b@x', 1, 'pay_k')"
             )
+
+
+@pytest.mark.asyncio
+async def test_list_open_for_user_returns_only_fresh_open_payments_of_same_operation(pool, repo):
+    old = datetime.now(timezone.utc) - timedelta(hours=3)
+    rows = [
+        ("pay_open", 7, "create_key|1", "pending", None),
+        ("pay_proc", 7, "create_key|1", "processing", None),
+        ("pay_done", 7, "create_key|1", "succeeded", None),
+        ("pay_canc", 7, "create_key|1", "canceled", None),
+        ("pay_other_tariff", 7, "create_key|2", "pending", None),
+        ("pay_other_user", 8, "create_key|1", "pending", None),
+        ("pay_stale", 7, "create_key|1", "pending", old),
+    ]
+    async with pool.acquire() as conn:
+        for payment_id, tg_id, payment_type, status, created_at in rows:
+            await conn.execute(
+                "INSERT INTO payments (payment_id, tg_id, payment_type, status, created_at) "
+                "VALUES ($1, $2, $3, $4, COALESCE($5, NOW()))",
+                payment_id, tg_id, payment_type, status, created_at,
+            )
+
+    found = await repo.list_open_for_user(pool, 7, "create_key|1", 60)
+
+    assert {p.payment_id for p in found} == {"pay_open", "pay_proc"}

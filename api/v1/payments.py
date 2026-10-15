@@ -406,6 +406,26 @@ async def create_payment(
         "final_amount": final_amount,
     })
 
+    # Один открытый счёт на одну операцию: если пользователь вернулся и снова нажал
+    # «оплатить» тот же ключ, отдаём прежний неоплаченный счёт, а не выставляем второй.
+    # Иначе обе оплаты проходят и выдаются два ключа (каждый платёж выдаёт свой ключ).
+    open_payment = await _find_open_payment(
+        service_data,
+        pool,
+        cache,
+        tg_id=body.tg_id,
+        payment_type=payment_type,
+        number_of_months=body.number_of_months,
+        amount=final_amount,
+    )
+    if open_payment is not None:
+        open_payment_id, open_confirmation_url = open_payment
+        logger.info(
+            "Повторно отдан незавершённый платёж вместо нового",
+            extra={"payment_id": open_payment_id, "tg_id": body.tg_id, "payment_type": payment_type},
+        )
+        return _payment_create_response(open_payment_id, open_confirmation_url, result)
+
     import yookassa
     yookassa.Configuration.account_id = settings.yookassa_shop_id
     yookassa.Configuration.secret_key = settings.yookassa_secret_key
@@ -500,10 +520,14 @@ async def create_payment(
 
     logger.info("Платёж успешно создан", extra={"payment_id": payment_id, "tg_id": body.tg_id, "amount": final_amount})
 
+    return _payment_create_response(payment_id, confirmation_url, result)
+
+
+def _payment_create_response(payment_id: str, confirmation_url: str, result: dict) -> PaymentCreateResponse:
     return PaymentCreateResponse(
         payment_id=payment_id,
         confirmation_url=confirmation_url,
-        amount=final_amount,
+        amount=result["final_amount"],
         base_amount=result["base_amount"],
         volume_discount_percent=result["volume_discount_percent"],
         volume_discount_amount=result["volume_discount_amount"],
@@ -514,6 +538,80 @@ async def create_payment(
         has_referral_discount=result["has_referral_discount"],
         has_balance_discount=result["has_balance_discount"],
     )
+
+
+PREVIOUS_PAYMENT_PAID_DETAIL = (
+    "Предыдущий платёж за эту покупку уже прошёл, ключ появится в течение нескольких минут. "
+    "Повторно оплачивать не нужно."
+)
+
+
+async def _find_open_payment(
+    service_data: ServiceDataModel,
+    pool,
+    cache: CacheService,
+    *,
+    tg_id: int,
+    payment_type: str,
+    number_of_months: int,
+    amount: float,
+) -> Optional[tuple[str, str]]:
+    """Найти незавершённый счёт пользователя за ту же операцию.
+
+    Возвращает (payment_id, confirmation_url) прежнего счёта, если его ещё можно
+    оплатить и он на ту же сумму и срок. Бросает 409, если прежний счёт уже оплачен
+    (ключ по нему выдаётся), и 503, если его статус в YooKassa узнать не удалось:
+    второй счёт в этих случаях выставлять нельзя, иначе пользователь заплатит дважды.
+    None — открытого счёта нет, можно создавать новый.
+    """
+    try:
+        candidates = await service_data.payments.service.list_open_for_user(
+            pool, tg_id, payment_type, settings.payment_sweep_max_age_minutes
+        )
+    except Exception as e:
+        logger.warning(
+            "Не удалось проверить незавершённые платежи пользователя",
+            extra={"tg_id": tg_id, "payment_type": payment_type, "error": str(e)},
+        )
+        return None
+
+    for candidate in candidates:
+        if candidate.status == "processing":
+            # Платёж уже захвачен вебхуком/поллером: ключ по нему создаётся прямо сейчас.
+            raise HTTPException(status_code=409, detail=PREVIOUS_PAYMENT_PAID_DETAIL)
+
+        yk_payment = await _fetch_yookassa_payment(candidate.payment_id)
+        yk_status = getattr(yk_payment, "status", None)
+        if yk_status in ("succeeded", "waiting_for_capture"):
+            logger.info(
+                "Предыдущий платёж уже оплачен, новый счёт не выставляем",
+                extra={"payment_id": candidate.payment_id, "tg_id": tg_id, "yookassa_status": yk_status},
+            )
+            raise HTTPException(status_code=409, detail=PREVIOUS_PAYMENT_PAID_DETAIL)
+        if yk_status == "canceled":
+            if await service_data.payments.service.mark_canceled_if_pending(pool, candidate.payment_id):
+                await _refresh_payment_cache(cache, dataclasses.replace(candidate, status="canceled"))
+            continue
+        if yk_status != "pending":
+            logger.warning(
+                "Не удалось узнать статус предыдущего платежа в YooKassa",
+                extra={"payment_id": candidate.payment_id, "tg_id": tg_id, "yookassa_status": yk_status},
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="Не удалось проверить предыдущий платёж. Попробуйте ещё раз через минуту.",
+            )
+
+        confirmation_url = getattr(getattr(yk_payment, "confirmation", None), "confirmation_url", None)
+        same_terms = (
+            candidate.number_of_months == number_of_months
+            and candidate.amount is not None
+            and abs(float(candidate.amount) - amount) < 0.01
+        )
+        if same_terms and isinstance(confirmation_url, str) and confirmation_url:
+            return candidate.payment_id, confirmation_url
+
+    return None
 
 
 @router.get(
@@ -576,6 +674,12 @@ def _yookassa_cancel_check_due(payment_id: str) -> bool:
 
 async def _fetch_yookassa_status(payment_id: str) -> Optional[str]:
     """Статус платежа в YooKassa или None, если узнать не удалось (таймаут, ошибка)."""
+    yk_payment = await _fetch_yookassa_payment(payment_id)
+    return getattr(yk_payment, "status", None)
+
+
+async def _fetch_yookassa_payment(payment_id: str):
+    """Платёж из YooKassa или None, если получить не удалось (таймаут, ошибка)."""
     try:
         import yookassa
         yookassa.Configuration.account_id = settings.yookassa_shop_id
@@ -591,7 +695,7 @@ async def _fetch_yookassa_status(payment_id: str) -> Optional[str]:
     except Exception as e:
         logger.warning("Ошибка при проверке статуса в YooKassa", extra={"payment_id": payment_id, "error": str(e)})
         return None
-    return getattr(yk_payment, "status", None)
+    return yk_payment
 
 
 async def _refresh_payment_cache(cache: CacheService, payment: PaymentModel) -> None:
