@@ -42,6 +42,13 @@ jobs:
       - name: Test
         env:
           DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_db
+          # config.py отклоняет пустые и placeholder-секреты при импорте.
+          # Это фиктивные значения только для тестов, не продовые секреты.
+          BOT_SECRET_KEY: ci-bot-secret-not-for-production-0001
+          INVITE_TOKEN: ci-invite-token-not-for-production-01
+          ADMIN_API_KEY: ci-admin-api-key-not-for-production-1
+          MVP_APP_SECRET: ci-mvp-app-secret-not-for-production
+          MINIAPP_SESSION_SECRET: ci-miniapp-session-secret-not-for-prod
         run: make test
 
   # TODO: deploy job — deployment mechanism for the standalone backend

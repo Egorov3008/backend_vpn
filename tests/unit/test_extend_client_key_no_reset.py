@@ -15,7 +15,7 @@ import pytest
 @pytest.mark.asyncio
 async def test_extend_client_key_does_not_call_reset_traffic(monkeypatch):
     """extend_client_key должен обновлять клиента, но НЕ вызывать reset_traffic."""
-    from client import XUISession, PanelClient
+    from client import XUISession
     from config import settings
     from models import Key
     from services.core.data.service import ServiceDataModel

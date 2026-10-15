@@ -21,7 +21,6 @@ import asyncpg
 import pytest
 
 from app.factories import build_payment_router
-from config import settings
 from database.service import DataService
 from models import PaymentModel, User, Key, ReferralLink, ReferralRedemption
 from services.cache.service import CacheService
@@ -317,7 +316,7 @@ async def test_full_referral_bonus_flow(payment_router, pool, service_data):
     # Act: route the payment. Because there is no notifier, no Telegram message is sent.
     # The create_key step needs a server/tariff. We mock XUI and notifications by
     # monkeypatching the services used inside the router.
-    from unittest.mock import AsyncMock, MagicMock, patch
+    from unittest.mock import AsyncMock, MagicMock
 
     # Provide a fake tariff so that PaymentProcessor.extract_operation can resolve tariff_id=1
     fake_tariff = MagicMock()

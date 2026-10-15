@@ -1,1 +1,3 @@
-from .gift_manager import *
+from .gift_manager import GiftLinkProvider
+
+__all__ = ["GiftLinkProvider"]

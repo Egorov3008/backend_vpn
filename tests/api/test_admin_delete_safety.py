@@ -9,7 +9,6 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.auth import verify_admin_actor, AdminPrincipal
-from app.dependencies import get_service_data
 from app.main import app
 from models import Key
 

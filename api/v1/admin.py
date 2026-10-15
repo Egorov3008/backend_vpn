@@ -44,7 +44,6 @@ from app.schemas.admin import (
     AdminSyncStartedResponse,
     AdminSyncStatusResponse,
 )
-from models.stocks.stock import Stock
 from database.service import DataService
 from logger import logger
 from models import User
