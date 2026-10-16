@@ -208,7 +208,7 @@ Split into two routers with different auth (see Authentication below):
 
 Grep `api/v1/admin.py` for the current full route list rather than trusting a manually maintained enumeration here — it grows frequently (referrals, gift codes, promotions, and sync jobs were all added after this section was first written).
 
-**Admin panel (`admin_panel/`):** vanilla-JS SPA (no build step) consuming `/api/v1/admin/*`, served by FastAPI itself via `StaticFiles` mounted at `/admin-panel` (`app/main.py`). Hash-based routing (`#/users`, `#/keys`, …) since `StaticFiles` doesn't rewrite sub-paths to `index.html`. Auth is the `ADMIN_API_KEY` + Telegram ID entered at `#/login`, stored client-side and sent as `X-API-Key`/`X-Admin-Tg-Id`. `pytest` only checks the static mount doesn't break other routes — it can't verify client-side behavior, so any change here must also be driven through a real browser (see `admin_panel/README.md` for the manual checklist: bad-key error, login redirect, paginated `#/users`, one destructive round-trip via maintenance-mode toggle, corrupted-key auto-logout, no console errors). Mass mailing/broadcast (present in the bot's own admin panel) has no backend endpoint and is intentionally out of scope — the nav shows a disabled entry pointing back to the bot.
+**Admin UI:** lives in `platform-web` (`/admin`, the Mini App of the admin bot, served on its own host) and uses the session login above. The old vanilla-JS `admin_panel/` mounted at `/admin-panel` was removed after the new admin went live (2026-10-16). Mass mailing stays in the bot.
 
 ### Authentication
 

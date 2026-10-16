@@ -132,14 +132,6 @@ app = FastAPI(
 )
 app.include_router(api_router)
 
-# Vanilla-JS admin panel (admin_panel/) — separate from /api/v1/admin/* (the API
-# it consumes). No CORS needed: same origin as the API.
-app.mount(
-    "/admin-panel",
-    StaticFiles(directory=Path(__file__).parent.parent / "admin_panel", html=True),
-    name="admin_panel",
-)
-
 # Android APK, manually placed on the server at deploy time (see CLAUDE.md) —
 # /api/v1/public/app/android redirects here so the public link stays stable
 # across file/version changes.

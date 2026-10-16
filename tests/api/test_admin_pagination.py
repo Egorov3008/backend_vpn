@@ -4,7 +4,7 @@
 pattern as keys.py/payments.py (see tests/api/test_keys.py,
 tests/api/test_payments.py); covered separately here since these are a
 different router/handler set and are the actual paginating consumer
-behind admin_panel/js/api.js."""
+behind the web admin (platform-web, src/admin/api.ts)."""
 from unittest.mock import AsyncMock
 
 import pytest
