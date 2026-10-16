@@ -177,7 +177,7 @@ class TelegramBotNotifier(INotifier):
             )
 
         message = (
-            f"✅ Ваш ключ <a href='https://t.me/VPNBot'>{email}</a> продлён!\n\n"
+            f"✅ Ваш ключ <code>{email}</code> продлён!\n\n"
             f"📅 До: <b>{new_expiry}</b>\n"
             f"По тарифу: <b>{tariff_name}</b>"
         )

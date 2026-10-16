@@ -674,7 +674,7 @@ class XUISession:
                 enable=True,
                 limitIp=int(key_details.limit_ip) if key_details.limit_ip is not None else 1,
             )
-            # reset_traffic НЕ вызываем — 3x-ui обнуляет totalGB и expiryTime (баг #6cx7ah)
+            # reset_traffic НЕ вызываем — 3x-ui обнуляет totalGB и expiryTime (баг #testkey1)
             # Сброс трафика происходит через БД (used_traffic=0) после продления
 
             # externalLinks в панели — decorative-ссылка на EXTERNAL_SUB_URL,

@@ -133,7 +133,7 @@ async def test_build_deep_links_happ_subscription_url(monkeypatch):
 
     monkeypatch.setattr(telegram_bot, "_username_cache", "test_bot")
 
-    subscription_url = "https://tds-pro.space:2096/TolkoDlyaSv0ih_Bot/token123"
+    subscription_url = "https://vpn.example.com:2096/sub/token123"
     deep_link_happ, _ = await _build_deep_links(subscription_url, "uid123")
 
     assert deep_link_happ == f"happ://add/{subscription_url}"

@@ -55,7 +55,11 @@ class _TelegramBot:
         if username:
             self._username_cache = username
             return username
-        logger.warning("Telegram getMe вернул пустой username, использую fallback", fallback=fallback)
+        if not fallback:
+            # Ссылки t.me/<бот> без username битые — это ошибка конфигурации.
+            logger.error("Не удалось узнать username бота: проверьте BOT_TOKEN или задайте BOT_NAME")
+        else:
+            logger.warning("Telegram getMe вернул пустой username, использую fallback", fallback=fallback)
         return fallback
 
     async def send_message(self, chat_id: int, text: str, **kwargs) -> None:

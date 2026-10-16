@@ -61,7 +61,7 @@ LANDING_KEY_DURATION_HOURS = 24
 LANDING_KEY_LIMIT_IP = 1
 LANDING_COOKIE_MAX_AGE = 90 * 24 * 3600  # 90 дней
 EXPIRING_THRESHOLD_HOURS = 6
-LANDING_BOT_LINK_PREFIX = "https://t.me/"  # дополняется settings.bot_name
+LANDING_BOT_LINK_PREFIX = "https://t.me/"  # дополняется username бота (getMe)
 
 # Referral cookie (tg_ref) — фиксирует «от кого пришёл» пользователь при заходе
 # на лендинг с ?ref=… Зеркалит tg_landing_id (тот же секрет, тот же формат).
@@ -443,7 +443,7 @@ async def _bot_url() -> str:
     этот URL вместо статически зашитого в HTML значения, так что смена бота
     требует только смены BOT_TOKEN на backend.
     """
-    username = await telegram_bot.get_username(fallback=settings.bot_name or "TolkoDlyaSv0ih_Bot")
+    username = await telegram_bot.get_username(fallback=settings.bot_name)
     return f"{LANDING_BOT_LINK_PREFIX}{username}"
 
 

@@ -56,7 +56,7 @@ auth_srv = AuthService()
 # async def main():
 #     async with asyncpg.create_pool(dsn=DATABASE_URL) as pool:
 #         async with pool.acquire() as conn:
-#             check = await auth_srv.check_user_in_db_srv(conn, 836250705)
+#             check = await auth_srv.check_user_in_db_srv(conn, <tg_id>)
 #             logger.debug(check)
 #
 # asyncio.run(main())

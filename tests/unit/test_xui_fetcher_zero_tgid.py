@@ -3,7 +3,7 @@ Regression-тест: клиенты с tgId=0 на панели НЕ должн�
 при извлечении, иначе синхронизатор ошибочно посчитает их
 "удалёнными с панели" и удалит из БД.
 
-Воспроизводит баг с пользователем 397349989 (email=6cx7ah на панели),
+Воспроизводит баг с пользователем 100000001 (email=testkey1 на панели),
 у которого на панели tgId=0 (потерян/обнулён), но ключ живой.
 """
 from unittest.mock import AsyncMock
@@ -18,11 +18,11 @@ async def test_extract_clients_includes_zero_tgid():  # noqa: PT006
 
     fetcher = XUIFetcher()
 
-    # Эмулируем raw ответ от 3x-ui standalone API: клиент 6cx7ah с tgId=0
+    # Эмулируем raw ответ от 3x-ui standalone API: клиент testkey1 с tgId=0
     raw = [
         {
             "id": "26af8d99-dbcd-4564-ab14-a5805298262c",
-            "email": "6cx7ah",
+            "email": "testkey1",
             "tgId": 0,            # <-- потерян/обнулён на панели
             "totalGB": 0,
             "expiryTime": 1783337068246,
@@ -40,7 +40,7 @@ async def test_extract_clients_includes_zero_tgid():  # noqa: PT006
         "Клиент с tgId=0, но валидным email не должен отбрасываться — "
         "иначе синхронизатор удалит его из БД как orphaned"
     )
-    assert result[0].email == "6cx7ah"
+    assert result[0].email == "testkey1"
     assert result[0].tg_id == 0
 
 
