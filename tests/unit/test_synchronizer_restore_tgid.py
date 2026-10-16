@@ -49,17 +49,17 @@ async def test_sync_restores_tg_id_on_panel_when_db_has_it():
     # Клиент с панели: tgId=0, expiry_time=1783337068246
     panel_client = PanelClient(
         id="4a4d2919-bfbd-482e-9426-06800c27e22e",
-        email="6cx7ah",
+        email="testkey1",
         tg_id=0,
         expiry_time=1783337068246,
         inbound_ids=[39, 51, 64],
     )
     xui_fetcher.extract_clients = AsyncMock(return_value=[panel_client])
 
-    # В кэше (БД) ключ 6cx7ah с tg_id=397349989
+    # В кэше (БД) ключ testkey1 с tg_id=100000001
     db_key = MagicMock()
-    db_key.email = "6cx7ah"
-    db_key.tg_id = 397349989
+    db_key.email = "testkey1"
+    db_key.tg_id = 100000001
     model_data.keys.get_all = AsyncMock(return_value=[db_key])
     model_data.users.get_all = AsyncMock(return_value=[])
     model_data.keys.get_data = AsyncMock(return_value=db_key)
@@ -84,12 +84,12 @@ async def test_sync_restores_tg_id_on_panel_when_db_has_it():
 
     result = await sync.sync_data(xui_session)
 
-    # ГЛАВНОЕ: должен вызваться update_standalone_client('6cx7ah', panel_client=panel_client, tgId=397349989)
+    # ГЛАВНОЕ: должен вызваться update_standalone_client('testkey1', panel_client=panel_client, tgId=100000001)
     xui_session.update_standalone_client.assert_awaited_once()
     call_args = xui_session.update_standalone_client.await_args
-    assert call_args.args[0] == "6cx7ah"
+    assert call_args.args[0] == "testkey1"
     assert call_args.kwargs.get("panel_client") is panel_client
-    assert call_args.kwargs.get("tgId") == 397349989
+    assert call_args.kwargs.get("tgId") == 100000001
     # Больше не разбрасываем identity-поля отдельными kwargs — они берутся из panel_client
     assert call_args.kwargs.get("enable") is None
     assert call_args.kwargs.get("expiryTime") is None
@@ -104,20 +104,20 @@ async def test_restore_tg_id_does_not_disable_key():
 
     panel_client = PanelClient(
         id="4a4d2919-bfbd-482e-9426-06800c27e22e",
-        email="6cx7ah",
+        email="testkey1",
         tg_id=0,
         enable=True,
         expiry_time=1783337068246,
         limit_ip=2,
         flow="xtls-rprx-vision",
-        sub_id="sub-6cx7ah",
+        sub_id="sub-testkey1",
         inbound_ids=[39, 51, 64],
     )
     xui_fetcher.extract_clients = AsyncMock(return_value=[panel_client])
 
     db_key = MagicMock()
-    db_key.email = "6cx7ah"
-    db_key.tg_id = 397349989
+    db_key.email = "testkey1"
+    db_key.tg_id = 100000001
     model_data.keys.get_all = AsyncMock(return_value=[db_key])
     model_data.users.get_all = AsyncMock(return_value=[])
     model_data.keys.get_data = AsyncMock(return_value=db_key)
@@ -141,7 +141,7 @@ async def test_restore_tg_id_does_not_disable_key():
     xui_session.update_standalone_client.assert_awaited_once()
     call_kwargs = xui_session.update_standalone_client.await_args.kwargs
     assert call_kwargs["panel_client"] is panel_client
-    assert call_kwargs["tgId"] == 397349989
+    assert call_kwargs["tgId"] == 100000001
     # identity-поля больше не передаются отдельными kwargs
     assert call_kwargs.get("enable") is None
     assert call_kwargs.get("expiryTime") is None

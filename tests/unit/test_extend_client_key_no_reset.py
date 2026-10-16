@@ -1,7 +1,7 @@
 """
 Regression-тест: extend_client_key НЕ должен вызывать reset_traffic.
 
-Воспроизводит баг с ключом 6cx7ah: после продления expiry_time становился 0
+Воспроизводит баг с ключом testkey1: после продления expiry_time становился 0
 (1 января 1970), потому что 3x-ui resetTraffic обнуляет totalGB и expiryTime.
 
 Баг: extend_client_key вызывал update(..., expiryTime=..., totalGB=...),

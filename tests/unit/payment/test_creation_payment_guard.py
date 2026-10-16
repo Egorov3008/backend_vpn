@@ -29,7 +29,7 @@ def make_key(email: str, payment_id: str) -> Key:
         client_id="cid",
         email=email,
         expiry_time=1794340318317,
-        key=f"https://tds-pro.space:2096/TolkoDlyaSv0ih_Bot/{email}",
+        key=f"https://vpn.example.com:2096/sub/{email}",
         inbound_id=14,
         payment_id=payment_id,
     )

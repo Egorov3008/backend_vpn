@@ -1,5 +1,6 @@
 import ast
 import os
+from ipaddress import ip_network
 from pathlib import Path
 
 from pydantic import Field, field_validator
@@ -101,7 +102,9 @@ class Settings(BaseSettings):
 
     # Telegram
     bot_token: str = ""
-    bot_name: str = "VPNBot"
+    # Username бота берётся у Telegram (getMe по BOT_TOKEN); BOT_NAME — только
+    # запасной вариант, если getMe недоступен. Никакого вшитого имени.
+    bot_name: str = ""
     support_chat_url: str = ""
 
     # Bot behaviour
@@ -137,6 +140,25 @@ class Settings(BaseSettings):
     daily_payments_report_enabled: bool = Field(default=True, alias="DAILY_PAYMENTS_REPORT_ENABLED")
     daily_payments_report_hour: int = Field(default=18, ge=0, le=23, alias="DAILY_PAYMENTS_REPORT_HOUR")
     daily_payments_report_tz: str = Field(default="Europe/Moscow", alias="DAILY_PAYMENTS_REPORT_TZ")
+
+    # Прокси, которым верим X-Forwarded-For/X-Real-IP (app/client_ip.py):
+    # список CIDR через запятую. По умолчанию loopback и частные сети docker.
+    trusted_proxy_cidrs_raw: str = Field(
+        default="127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7",
+        alias="TRUSTED_PROXY_CIDRS",
+    )
+
+    @property
+    def trusted_proxy_cidrs(self) -> list[str]:
+        return [c.strip() for c in self.trusted_proxy_cidrs_raw.split(",") if c.strip()]
+
+    @field_validator("trusted_proxy_cidrs_raw")
+    @classmethod
+    def _validate_trusted_proxies(cls, value: str) -> str:
+        for cidr in (c.strip() for c in value.split(",")):
+            if cidr:
+                ip_network(cidr, strict=False)  # ValueError на опечатке — падаем при старте
+        return value
 
     @field_validator("daily_payments_report_tz")
     @classmethod
