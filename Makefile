@@ -1,4 +1,4 @@
-.PHONY: test test-fast test-cov test-module lint formatting
+.PHONY: test test-fast test-cov test-module lint formatting e2e
 
 test:
 	@echo "Running all tests..." && pytest
@@ -18,3 +18,7 @@ lint:
 formatting:
 	@echo "Running Ruff..." && ruff check . --fix
 	@echo "Running Ruff format..." && ruff format .
+
+# Сквозные тесты всей системы (backend + бот + веб + мини-апп), см. e2e/README.md
+e2e:
+	@echo "Running e2e suite..." && cd e2e && python -m pytest

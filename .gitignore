@@ -10,3 +10,8 @@ __pycache__/
 .ruff_cache/
 htmlcov/
 static/downloads/*.apk
+
+# e2e: логи и скриншоты прогонов
+e2e/.artifacts/
+.venv/
+e2e/.venv/
