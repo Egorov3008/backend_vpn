@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     api_url: str = Field(default="", alias="XUI_API_URL")
     xui_subscription_url: str = Field(default="", alias="XUI_SUB")
     external_subscription_url: str = Field(default="", alias="EXTERNAL_SUB_URL")
+    # Сколько дней после окончания подписки отдавать в подписке только
+    # EXTERNAL_SUB_URL (доступ к Telegram). 0 — выключено.
+    # См. services/core/keys/utils/telegram_grace.py.
+    telegram_grace_days: int = Field(default=7, ge=0, alias="TELEGRAM_GRACE_DAYS")
     admin_username: str = Field(default="", alias="XUI_LOGIN")
     admin_password: str = Field(default="", alias="XUI_PASSWORD")
     xui_server_id: int = Field(default=1, alias="XUI_SERVER_ID")

@@ -155,6 +155,19 @@ def _panel_client_from_raw(raw: dict) -> "PanelClient":
     )
 
 
+def _attached_inbound_ids(raw: Any, panel_client: "PanelClient") -> list:
+    """Инбаунды клиента из ответа /api/clients/get.
+
+    3x-ui кладёт inboundIds на уровень obj (рядом с client), см. set_inbounds;
+    client.inboundIds — запасной вариант для старых ответов.
+    """
+    obj = raw.get("obj", {}) if isinstance(raw, dict) else {}
+    ids = obj.get("inboundIds") if isinstance(obj, dict) else None
+    if ids is None:
+        ids = panel_client.inbound_ids
+    return list(ids or [])
+
+
 def _build_panel_update_payload(panel_client: "PanelClient", **overrides) -> dict:
     """Build a full client update payload for 3x-ui v3.2.0 standalone API.
 
@@ -657,6 +670,9 @@ class XUISession:
             except Exception:
                 logger.warning("Клиент не найден", extra={"email": key_details.email})
                 return False
+            # Клиент без инбаундов — ключ в окне «только Telegram» (telegram_grace.py)
+            # или вышел из него. Продление должно вернуть полный доступ.
+            in_telegram_grace = not _attached_inbound_ids(raw_client, panel_client)
 
             # Расчет нового времени expiry
             expiry_datetime = datetime.fromtimestamp(key_details.expiry_time / 1000)
@@ -676,6 +692,19 @@ class XUISession:
             )
             # reset_traffic НЕ вызываем — 3x-ui обнуляет totalGB и expiryTime (баг #testkey1)
             # Сброс трафика происходит через БД (used_traffic=0) после продления
+
+            if in_telegram_grace:
+                # Ленивый импорт: inbounds.py читает config, держим client.py без лишних связей.
+                from services.core.keys.utils.inbounds import paid_inbound_ids
+
+                if not await self.set_inbounds(key_details.email, paid_inbound_ids()):
+                    logger.error(
+                        "Продление: не удалось вернуть инбаунды после окна Telegram",
+                        extra={"email": key_details.email},
+                    )
+                    return False
+            # Вызывающий код сохраняет ключ в БД после продления: окно закрыто.
+            key_details.telegram_grace_until = None
 
             # externalLinks в панели — decorative-ссылка на EXTERNAL_SUB_URL,
             # НЕ key_details.key (реальная рабочая ссылка подписки на XUI_SUB).

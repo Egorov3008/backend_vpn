@@ -37,6 +37,11 @@ class Key:
     # Платёж, по которому создан ключ (NULL для trial/админских/лендинговых ключей).
     # Уникален в БД (uq_keys_payment_id) — второй ключ по тому же платежу не запишется.
     payment_id: Optional[str] = None
+    # Окно «только Telegram» после окончания подписки: до этого момента (мс) клиент
+    # в панели отвязан от инбаундов, а его expiryTime сдвинут сюда, чтобы 3x-ui
+    # продолжал отдавать внешнюю подписку. expiry_time остаётся сроком оплаты.
+    # NULL — ключ не в окне. См. services/core/keys/utils/telegram_grace.py.
+    telegram_grace_until: Optional[int] = None
     _name: str = "key"
 
     def __post_init__(self):
@@ -61,6 +66,7 @@ class Key:
             "converted_tg_id",
             "landing_uid",
             "payment_id",
+            "telegram_grace_until",
         }
     )
 

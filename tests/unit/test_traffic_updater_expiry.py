@@ -91,3 +91,32 @@ async def test_no_traffic_data_skips_update(updater):
     assert result is False
     assert key.expiry_time == 1_700_000_000_000
     updater.model_data.keys.update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_telegram_grace_panel_expiry_does_not_overwrite_paid_expiry(updater):
+    """В окне «только Telegram» expiryTime в панели — конец окна, а не срок оплаты."""
+    key = _key(expiry_time=1_700_000_000_000)
+    key.telegram_grace_until = 1_700_604_800_000
+    client = _client(expiry_time=1_700_604_800_000)
+
+    await updater.update_key_with_traffic(
+        pool=MagicMock(), key=key, client=client, traffic_data=_traffic_data()
+    )
+
+    assert key.expiry_time == 1_700_000_000_000
+    assert key.telegram_grace_until == 1_700_604_800_000
+
+
+@pytest.mark.asyncio
+async def test_panel_expiry_changed_outside_backend_closes_grace(updater):
+    key = _key(expiry_time=1_700_000_000_000)
+    key.telegram_grace_until = 1_700_604_800_000
+    client = _client(expiry_time=1_900_000_000_000)
+
+    await updater.update_key_with_traffic(
+        pool=MagicMock(), key=key, client=client, traffic_data=_traffic_data()
+    )
+
+    assert key.expiry_time == 1_900_000_000_000
+    assert key.telegram_grace_until is None

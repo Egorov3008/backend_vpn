@@ -165,7 +165,14 @@ class TrafficUpdater:
             # и limit_ip.
             key.used_traffic = traffic_info["used_bytes"]
             key.limit_ip = client.limit_ip
-            key.expiry_time = client.expiry_time
+            # Окно «только Telegram» (telegram_grace.py): в панели expiryTime сдвинут
+            # на конец окна, а в БД остаётся срок оплаты — его не трогаем.
+            grace_until = getattr(key, "telegram_grace_until", None)
+            if not (grace_until and client.expiry_time == grace_until):
+                if grace_until:
+                    # Срок в панели изменили в обход бэкенда — окна больше нет.
+                    key.telegram_grace_until = None
+                key.expiry_time = client.expiry_time
 
             await self.model_data.keys.update(pool, key, {"email": key.email})
 

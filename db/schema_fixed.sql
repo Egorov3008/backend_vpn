@@ -178,6 +178,8 @@ CREATE INDEX IF NOT EXISTS idx_keys_landing_uid ON keys(landing_uid)
 -- Существующие БД: CREATE TABLE IF NOT EXISTS выше не добавляет колонки в уже созданную таблицу,
 -- поэтому колонку дописываем явно (идемпотентно).
 ALTER TABLE keys ADD COLUMN IF NOT EXISTS payment_id TEXT;
+-- Конец окна «только Telegram» после окончания подписки (мс), см. 20261018_keys_telegram_grace.sql.
+ALTER TABLE keys ADD COLUMN IF NOT EXISTS telegram_grace_until BIGINT;
 
 -- Один ключ на один платёж: защита от двойного создания ключа при гонке
 -- вебхука и поллинга (см. db/migrations/20261011_payment_claim_and_key_payment_id.sql).

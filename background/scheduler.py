@@ -371,6 +371,24 @@ class SyncScheduler:
         except Exception as e:
             logger.error("Ошибка в цикле уведомлений", error=str(e), exc_info=True)
 
+    async def run_telegram_grace(self) -> None:
+        """Открывает окно «только Telegram» ключам с истёкшей подпиской (telegram_grace.py)."""
+        from client import XUISession
+        from database.service import DataService
+        from services.cache.loader import LoadingService
+        from services.core.keys.utils.telegram_grace import TelegramGrace
+
+        try:
+            loader = LoadingService(
+                cache=self._service_data.cache_service,
+                data_service=DataService(),
+                pool=self._pool,
+            )
+            xui = XUISession(model_service=self._service_data, loading=loader)
+            await TelegramGrace(self._service_data, xui, self._pool).run()
+        except Exception as e:
+            logger.error("Ошибка в окне Telegram", error=str(e), exc_info=True)
+
     async def run_daily_payments_report(self) -> None:
         """Сводка успешных платежей за последние 24 часа, отправка админам из ADMIN_ID.
 
@@ -452,6 +470,17 @@ def create_scheduler(
         hours=1,
         id="notifications",
         replace_existing=True,
+    )
+
+    # Окно «только Telegram» после окончания подписки (TELEGRAM_GRACE_DAYS).
+    # Раз в 15 минут: на столько после срока оплаты подписка может остаться пустой.
+    scheduler.add_job(
+        sync_scheduler.run_telegram_grace,
+        "interval",
+        minutes=15,
+        id="telegram_grace",
+        replace_existing=True,
+        coalesce=True,
     )
 
     # Фонового опроса pending-платежей нет: ключ выдаётся только по вебхуку ЮKassa.
