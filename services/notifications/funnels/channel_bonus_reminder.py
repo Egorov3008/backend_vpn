@@ -17,6 +17,7 @@ from models.keys.key import Key
 from models.users.user import User
 from services.core.keys.utils.status import KeyStatus
 from services.core.promotions.channel_bonus_service import is_channel_bonus_claimed
+from services.core.promotions.channel_subscription import SUBSCRIBED_STATUSES, extract_channel_username
 from services.notifications.models import NotificationContext, NotificationResult
 from services.notifications.rate_limiter import RateLimiter
 from services.notifications.step_state import StepState, MAX_STEPS
@@ -36,37 +37,10 @@ _STATE_TTL = timedelta(days=30)
 # TTL терминальной записи (всё отправлено / бонус получен).
 _TERMINAL_TTL = timedelta(days=30)
 
-_SUBSCRIBED_STATUSES = {"member", "administrator", "creator"}
-
 
 def _now_ms() -> int:
     """Текущее время в ms. Patchable в тестах."""
     return int(time.time() * 1000)
-
-
-def _extract_channel_username(channel_url: str | None) -> str | None:
-    """Извлекает username канала из URL (тот же парсер, что в боте).
-
-    Поддерживает https://t.me/<name>, https://telegram.me/<name>,
-    @<name>, <name>.
-    """
-    if not channel_url:
-        return None
-    s = channel_url.strip()
-    if s.startswith("https://"):
-        s = s[8:]
-    elif s.startswith("http://"):
-        s = s[7:]
-    for domain in ("telegram.me/", "t.me/", "telegram.me", "t.me"):
-        if s.startswith(domain):
-            s = s[len(domain):]
-            break
-    if s.startswith("@"):
-        s = s[1:]
-    s = s.split("?")[0].split("/")[0]
-    if s and s.replace("_", "").replace("-", "").isalnum():
-        return s
-    return None
 
 
 def _select_anchor_key(keys: list[Key]) -> Optional[Key]:
@@ -91,7 +65,7 @@ class ChannelBonusReminderFunnel:
 
     async def should_send(self, ctx: NotificationContext) -> bool:
         channel_url = getattr(settings, "canall_url", "")
-        channel = _extract_channel_username(channel_url)
+        channel = extract_channel_username(channel_url)
         if not channel:
             return False
 
@@ -123,7 +97,7 @@ class ChannelBonusReminderFunnel:
         if member is None:
             # не удалось проверить — skip цикла, шаг не двигаем
             return False
-        return member.get("status") not in _SUBSCRIBED_STATUSES
+        return member.get("status") not in SUBSCRIBED_STATUSES
 
     async def process(self, ctx: NotificationContext) -> NotificationResult:
         result = NotificationResult(tg_id=ctx.user.tg_id, funnel_id=self.funnel_id)
