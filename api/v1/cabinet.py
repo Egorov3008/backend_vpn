@@ -58,6 +58,10 @@ from config import AVAILABLE_RATES_LIST
 from services.cache.key_manager import CacheKeyManager
 from services.cache.service import CacheService
 from services.core.data.service import ServiceDataModel
+from services.core.promotions.channel_subscription import (
+    ChannelSubscriptionChecker,
+    get_channel_subscription_checker,
+)
 
 PrincipalDependency = Callable[..., Awaitable[UserPrincipal]]
 
@@ -173,9 +177,19 @@ def build_cabinet_router(
         pool: asyncpg.Pool = Depends(get_pool),
         service_data: ServiceDataModel = Depends(get_service_data),
         cache: CacheService = Depends(get_cache),
+        subscription: ChannelSubscriptionChecker = Depends(get_channel_subscription_checker),
     ):
         if email:
             await require_own_key(email, principal.tg_id, service_data, pool)
+        # Бот проверяет подписку сам, а кабинет ходит сюда напрямую — без этой
+        # проверки бонус получал любой, не подписываясь на канал.
+        if not subscription.configured:
+            raise HTTPException(status_code=503, detail="Channel bonus is not configured")
+        subscribed = await subscription.is_subscribed(principal.tg_id)
+        if subscribed is None:
+            raise HTTPException(status_code=503, detail="Could not check channel subscription")
+        if not subscribed:
+            return ChannelBonusResponse(status="not_subscribed")
         return await claim_channel_bonus(
             tg_id=principal.tg_id,
             email=email,

@@ -319,3 +319,65 @@ async def test_create_payment_rejects_tariff_outside_available_rates(
     assert r.status_code == 404
     assert r.json()["detail"] == "Tariff not found"
     assert called["create"] is False
+
+
+# --- channel bonus: подписку проверяет backend ------------------------------
+
+
+class _Members:
+    def __init__(self, member):
+        self.member = member
+        self.calls = []
+
+    async def get_chat_member(self, chat_id, user_id):
+        self.calls.append((chat_id, user_id))
+        return self.member
+
+
+@pytest.fixture
+def channel(monkeypatch):
+    from services.core.promotions.channel_subscription import (
+        ChannelSubscriptionChecker,
+        get_channel_subscription_checker,
+    )
+
+    members = _Members({"status": "left"})
+    app.dependency_overrides[get_channel_subscription_checker] = lambda: ChannelSubscriptionChecker(
+        members, "https://t.me/my_channel"
+    )
+    claim = AsyncMock()
+    monkeypatch.setattr("api.v1.cabinet.claim_channel_bonus", claim)
+    yield members, claim
+    app.dependency_overrides.pop(get_channel_subscription_checker, None)
+
+
+@pytest.mark.asyncio
+async def test_channel_bonus_not_subscribed_does_not_claim(miniapp_client, channel):
+    members, claim = channel
+    r = await miniapp_client.post("/api/v1/miniapp/keys/channel-bonus", headers=bearer(TG_ID))
+    assert r.status_code == 200
+    assert r.json()["status"] == "not_subscribed"
+    assert members.calls == [("@my_channel", TG_ID)]
+    claim.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_channel_bonus_unknown_subscription_is_503(miniapp_client, channel):
+    members, claim = channel
+    members.member = None  # Telegram недоступен
+    r = await miniapp_client.post("/api/v1/miniapp/keys/channel-bonus", headers=bearer(TG_ID))
+    assert r.status_code == 503
+    claim.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_channel_bonus_subscribed_claims(miniapp_client, channel):
+    from app.schemas.keys import ChannelBonusResponse
+
+    members, claim = channel
+    members.member = {"status": "member"}
+    claim.return_value = ChannelBonusResponse(status="granted", email="k@x")
+    r = await miniapp_client.post("/api/v1/miniapp/keys/channel-bonus", headers=bearer(TG_ID))
+    assert r.status_code == 200
+    assert r.json()["status"] == "granted"
+    assert claim.await_args.kwargs["tg_id"] == TG_ID

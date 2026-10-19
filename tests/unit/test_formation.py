@@ -49,6 +49,17 @@ async def test_trial_tariff_period_preserved():
 
 
 @pytest.mark.asyncio
+async def test_landing_tariff_period_preserved():
+    """Regression: 24-часовой ключ лендинга (period=1) не растягивается до 30 дней."""
+    f, _, expiry = _formation()
+    landing_tariff = MagicMock(id=999, amount=0.0, period=1, limit_ip=1, name_tariff="landing_24h")
+    key = await f.form_new_key(tg_id=-1, tariff=landing_tariff, server_id=1,
+                               number_of_months=1, inbound_id_override=7)
+    assert key is not None
+    expiry.key_duration_new_key.assert_called_once_with(1, 1)
+
+
+@pytest.mark.asyncio
 async def test_landing_override_key_uses_override_inbound():
     f, _, _ = _formation()
     # landing uses inbound_id_override and a free-ish tariff; is_subscription False

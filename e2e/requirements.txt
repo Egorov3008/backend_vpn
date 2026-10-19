@@ -1,0 +1,8 @@
+# Зависимости e2e-набора (отдельное окружение от backend и бота)
+pytest==9.1.1
+playwright==1.56.0
+httpx==0.28.1
+fastapi==0.146.0
+uvicorn==0.54.0
+python-multipart==0.0.32
+asyncpg==0.32.0
