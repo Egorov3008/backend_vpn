@@ -74,6 +74,16 @@ class Settings(BaseSettings):
     miniapp_session_ttl_seconds: int = Field(default=3600, alias="MINIAPP_SESSION_TTL_SECONDS")
     # Max age of Telegram.WebApp.initData accepted by POST /miniapp/auth.
     miniapp_init_data_max_age_seconds: int = Field(default=86400, alias="MINIAPP_INIT_DATA_MAX_AGE_SECONDS")
+    # Public URL of the Mini App frontend. When set, the "renew key" button in
+    # expiry notifications opens its pay screen as a WebApp; empty keeps the bot callback.
+    miniapp_url: str = Field(default="", alias="MINIAPP_URL")
+
+    @field_validator("miniapp_url")
+    @classmethod
+    def _validate_miniapp_url(cls, value: str) -> str:
+        from shared.miniapp_url import normalize_miniapp_url
+
+        return normalize_miniapp_url(value)
 
     # Web cabinet (/api/v1/web). Session tokens are signed with
     # MINIAPP_SESSION_SECRET under a separate label (app/core/miniapp_session.py).

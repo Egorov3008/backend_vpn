@@ -399,5 +399,6 @@ All settings are defined in `config.py` (`Settings`, pydantic-settings, loads `.
 - `BOT_TOKEN` — for sending user notifications and (via `services/core/referral`) channel-subscription checks against `CANALL_URL`
 - `LOG_LEVEL` / `LOG_FILE` / `LOG_FORMAT` — see Logging below
 - `MVP_APP_SECRET` / `MVP_SHARED_KEY_EMAIL` — see Mobile MVP endpoint above (empty `MVP_SHARED_KEY_EMAIL` by default; endpoint returns 500 until set)
+- `MINIAPP_URL` — public https URL of the Mini App (no `#`, validated at startup). When set, «🔄 Продлить ключ» in expiry notifications (24h, 10h, grace) is a `web_app` button to `?screen=pay&renew=<email>` (`services/notifications/miniapp_buttons.py`); empty keeps the bot callback `renew_key|<email>`.
 - `LANDING_COOKIE_SECRET` / `LANDING_PUBLIC_URL` / `CHANNEL_BONUS_DAYS` — landing-page and channel-subscription-bonus flow
 - `PAYMENT_SWEEP_MAX_AGE_MINUTES` / `PAYMENT_SWEEP_EXCLUDE_IDS` — window of fresh pending payments (used by `create_payment` to find an open invoice for the same purchase) and defaults for the manual `scripts/sweep_pending_payments.py`. There is no background poller: keys are issued only from the YooKassa webhook; a missed webhook is recovered with that script.
