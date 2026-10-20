@@ -20,6 +20,16 @@ BOT_SECRET = "t_bot_secret_web_1"
 INTERNAL_SECRET = "t_internal_secret_web_1"
 
 
+@pytest.fixture(autouse=True)
+def _reset_rate_limits():
+    """Лимиты в памяти общие на процесс: без сброса тесты входа упираются в 429."""
+    from app import rate_limit
+
+    rate_limit._buckets.clear()
+    yield
+    rate_limit._buckets.clear()
+
+
 @pytest.fixture
 def login_service():
     return WebLoginService(FakeStore(), ttl_seconds=600)
@@ -269,3 +279,87 @@ async def test_anonymous_key_issued_for_new_browser(client, monkeypatch):
 async def test_anonymous_key_requires_csrf_header(client):
     r = await client.post("/api/v1/web/anonymous/key")
     assert r.status_code == 403
+
+
+# --- Лендинг: тарифы и реферальные ссылки ---------------------------------------
+
+
+async def test_anonymous_tariffs_need_no_session_and_hide_free_and_unlisted(client, mock_service_data):
+    mock_service_data.tariffs.get_all = AsyncMock(return_value=[
+        Tariff(id=1, name_tariff="Free", amount=0.0),
+        Tariff(id=2, name_tariff="Std", amount=200.0, limit_ip=3),
+        Tariff(id=3, name_tariff="Hidden", amount=300.0),
+    ])
+    r = await client.get("/api/v1/web/anonymous/tariffs")
+    assert r.status_code == 200
+    assert [t["id"] for t in r.json()] == [2]
+    assert r.json()[0]["limit_ip"] == 3
+
+
+REF_TOKEN = "ref_abc123def456"
+
+
+def _ref_link(referrer=777):
+    link = MagicMock()
+    link.referrer_tg_id = referrer
+    return link
+
+
+async def test_anonymous_ref_sets_signed_strict_cookie(client, mock_service_data):
+    mock_service_data.referral_links.get_by = AsyncMock(return_value=_ref_link())
+    r = await client.post("/api/v1/web/anonymous/ref", json={"ref_token": "abc123def456"}, headers=CSRF)
+    assert r.status_code == 204
+    mock_service_data.referral_links.get_by.assert_awaited_once_with(token=REF_TOKEN)
+    cookie = r.headers["set-cookie"].lower()
+    assert "tg_ref=" in cookie
+    assert "httponly" in cookie and "samesite=strict" in cookie and "path=/api/v1/web" in cookie
+    assert web_mod.landing._verify_ref_cookie(client.cookies.get("tg_ref")) == REF_TOKEN
+
+
+@pytest.mark.parametrize("token, status", [("not-a-token", 400), (REF_TOKEN, 404)])
+async def test_anonymous_ref_rejects_bad_or_unknown_token(client, mock_service_data, token, status):
+    mock_service_data.referral_links.get_by = AsyncMock(return_value=None)
+    r = await client.post("/api/v1/web/anonymous/ref", json={"ref_token": token}, headers=CSRF)
+    assert r.status_code == status
+    assert "tg_ref=" not in r.headers.get("set-cookie", "")
+
+
+async def test_anonymous_ref_requires_csrf_header(client):
+    r = await client.post("/api/v1/web/anonymous/ref", json={"ref_token": REF_TOKEN})
+    assert r.status_code == 403
+
+
+async def _confirmed_login(client):
+    _, token = await _start_login(client)
+    await client.post(f"/api/v1/auth/web-login/{token}/confirm", json={"tg_id": TG_ID}, headers=_bot_headers())
+    return await client.post("/api/v1/web/auth/bot-login/complete", headers=CSRF)
+
+
+async def test_login_attaches_referral_from_cookie(client, monkeypatch):
+    attach = AsyncMock(return_value=777)
+    monkeypatch.setattr(web_mod.landing, "_attach_referral_if_any", attach)
+    client.cookies.set("tg_ref", web_mod.landing._sign_ref_cookie(REF_TOKEN))
+
+    r = await _confirmed_login(client)
+
+    assert r.json()["status"] == "confirmed"
+    tg_ref, tg_id = attach.await_args.args[3:]
+    assert web_mod.landing._verify_ref_cookie(tg_ref) == REF_TOKEN
+    assert tg_id == TG_ID
+    assert "tg_ref=" in r.headers.get("set-cookie", "")  # кука снята
+
+
+async def test_login_without_ref_cookie_skips_referral(client, monkeypatch):
+    attach = AsyncMock()
+    monkeypatch.setattr(web_mod.landing, "_attach_referral_if_any", attach)
+    r = await _confirmed_login(client)
+    assert r.json()["status"] == "confirmed"
+    attach.assert_not_awaited()
+
+
+async def test_referral_failure_does_not_break_login(client, monkeypatch):
+    monkeypatch.setattr(web_mod.landing, "_attach_referral_if_any", AsyncMock(side_effect=RuntimeError("db down")))
+    client.cookies.set("tg_ref", web_mod.landing._sign_ref_cookie(REF_TOKEN))
+    r = await _confirmed_login(client)
+    assert r.json()["status"] == "confirmed"
+    assert "web_session=" in r.headers.get("set-cookie", "")

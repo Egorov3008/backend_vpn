@@ -5,6 +5,9 @@
 1. Анонимный старт: ``POST /web/anonymous/key`` выдаёт 24-часовой ключ через
    механику лендинга (`api/v1/landing.py`), аккаунт живёт в cookie
    ``tg_landing_id``. ``GET /web/anonymous/state`` — его состояние.
+   Для лендинга без входа: ``GET /web/anonymous/tariffs`` (платные тарифы) и
+   ``POST /web/anonymous/ref`` (реферер из ``?ref=…`` в cookie ``tg_ref``,
+   засчитывается при входе через бота).
 2. Вход (и привязка анонимного ключа): ``POST /web/auth/bot-login`` даёт
    ссылку ``t.me/<бот>?start=weblogin_<token>``. Пользователь подтверждает
    вход в боте, бот вызывает ``POST /auth/web-login/{token}/confirm``
@@ -15,14 +18,15 @@
 
 Секретов у веб-клиента нет: nginx веба только проксирует ``/api/v1/web/``.
 """
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 
 import asyncpg
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from api.v1 import landing
-from api.v1.cabinet import build_cabinet_router
+from api.v1.cabinet import available_rates, build_cabinet_router
+from api.v1.tariffs import list_tariffs
 from app.auth import (
     WEB_SESSION_COOKIE,
     require_web_csrf_header,
@@ -33,6 +37,7 @@ from app.auth import (
 from app.core.miniapp_session import web_sessions
 from app.dependencies import get_cache, get_pool, get_service_data
 from app.rate_limit import rate_limit
+from app.schemas.tariffs import TariffResponse
 from config import settings
 from logger import logger
 from services.cache.service import CacheService
@@ -140,6 +145,60 @@ async def web_anonymous_key(
     )
 
 
+@router.get(
+    "/anonymous/tariffs",
+    response_model=List[TariffResponse],
+    dependencies=[Depends(rate_limit("web-anon-tariffs", times=60, seconds=60))],
+)
+async def web_anonymous_tariffs(
+    service_data: ServiceDataModel = Depends(get_service_data),
+    pool: asyncpg.Pool = Depends(get_pool),
+) -> List[TariffResponse]:
+    """Платные тарифы для лендинга, без входа: те же, что покупаются в кабинете."""
+    tariffs = await list_tariffs(service_data=service_data, pool=pool)
+    allowed = available_rates()
+    return [t for t in tariffs if t.id in allowed and t.amount > 0]
+
+
+class AnonymousRefRequest(BaseModel):
+    ref_token: str = Field(max_length=64)
+
+
+@router.post(
+    "/anonymous/ref",
+    status_code=204,
+    dependencies=[
+        Depends(require_web_csrf_header),
+        Depends(rate_limit("web-anon-ref", times=30, seconds=600)),
+    ],
+)
+async def web_anonymous_ref(
+    body: AnonymousRefRequest,
+    response: Response,
+    service_data: ServiceDataModel = Depends(get_service_data),
+) -> Response:
+    """Гость пришёл на сайт по ``?ref=…``: запомнить реферера в подписанной cookie ``tg_ref``.
+
+    Приглашение засчитывается при входе через бота (``/auth/bot-login/complete``),
+    теми же правилами, что на старом лендинге (`landing._attach_referral_if_any`)."""
+    token = landing._normalize_ref_token(body.ref_token)
+    if not token:
+        raise HTTPException(status_code=400, detail="invalid ref_token format")
+    # Куку на несуществующий токен не ставим.
+    link = await service_data.referral_links.get_by(token=token)
+    if not link:
+        raise HTTPException(status_code=404, detail="ref_token not found")
+    _set_cookie(
+        response,
+        landing.TG_REF_COOKIE_NAME,
+        landing._sign_ref_cookie(token),
+        max_age=landing.TG_REF_COOKIE_MAX_AGE,
+        path=_WEB_PATH,
+    )
+    response.status_code = 204
+    return response
+
+
 # --- Вход через бота ---------------------------------------------------------
 
 
@@ -196,19 +255,49 @@ async def web_bot_login_start(
 async def web_bot_login_complete(
     response: Response,
     web_login_poll: Optional[str] = Cookie(None),
+    tg_ref: Optional[str] = Cookie(None),
     service: WebLoginService = Depends(get_web_login_service),
+    pool: asyncpg.Pool = Depends(get_pool),
+    service_data: ServiceDataModel = Depends(get_service_data),
+    cache: CacheService = Depends(get_cache),
 ) -> BotLoginCompleteResponse:
-    """Опрос: после подтверждения в боте ставит cookie ``web_session`` (один раз)."""
+    """Опрос: после подтверждения в боте ставит cookie ``web_session`` (один раз).
+
+    Если гость пришёл по ``?ref=…`` (cookie ``tg_ref``), здесь же засчитывается приглашение."""
     result = await service.complete(web_login_poll)
     if result.status == PollStatus.CONFIRMED:
         token, ttl = web_sessions.issue(result.tg_id)
         _set_cookie(response, WEB_SESSION_COOKIE, token, max_age=ttl, path=_WEB_PATH)
         _delete_cookie(response, WEB_LOGIN_POLL_COOKIE, path=_WEB_AUTH_PATH)
+        if tg_ref:
+            await _attach_referral(response, tg_ref, result.tg_id, pool, service_data, cache)
         logger.info("Web login completed", tg_id=result.tg_id)
         return BotLoginCompleteResponse(status="confirmed", tg_id=result.tg_id)
     if result.status == PollStatus.EXPIRED:
         _delete_cookie(response, WEB_LOGIN_POLL_COOKIE, path=_WEB_AUTH_PATH)
     return BotLoginCompleteResponse(status=result.status.value)
+
+
+async def _attach_referral(
+    response: Response,
+    tg_ref: str,
+    tg_id: int,
+    pool: asyncpg.Pool,
+    service_data: ServiceDataModel,
+    cache: CacheService,
+) -> None:
+    """Засчитать приглашение из cookie ``tg_ref``; сбой не мешает входу.
+
+    Cookie снимаем только после успеха: если пользователь ещё не создан ботом
+    или реферер уже есть, кука просто истечёт сама."""
+    try:
+        referrer = await landing._attach_referral_if_any(pool, service_data, cache, tg_ref, tg_id)
+    except Exception as e:
+        logger.error("Web referral attach failed", tg_id=tg_id, error=str(e))
+        return
+    if referrer is not None:
+        _delete_cookie(response, landing.TG_REF_COOKIE_NAME, path=_WEB_PATH)
+        logger.info("Web referral attached", tg_id=tg_id, referrer=referrer)
 
 
 @router.post("/auth/logout", status_code=204, dependencies=[Depends(require_web_csrf_header)])
