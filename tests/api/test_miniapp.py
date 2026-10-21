@@ -357,8 +357,23 @@ async def test_channel_bonus_not_subscribed_does_not_claim(miniapp_client, chann
     r = await miniapp_client.post("/api/v1/miniapp/keys/channel-bonus", headers=bearer(TG_ID))
     assert r.status_code == 200
     assert r.json()["status"] == "not_subscribed"
+    # Кабинет показывает окно с кнопкой на канал — ссылка берётся из конфига.
+    assert r.json()["channel_url"] == "https://t.me/my_channel"
     assert members.calls == [("@my_channel", TG_ID)]
     claim.assert_not_awaited()
+
+
+@pytest.mark.parametrize("configured", ["@my_channel", "my_channel", "https://telegram.me/my_channel?x=1"])
+def test_channel_url_normalized_from_config(configured):
+    from services.core.promotions.channel_subscription import ChannelSubscriptionChecker
+
+    assert ChannelSubscriptionChecker(_Members(None), configured).channel_url == "https://t.me/my_channel"
+
+
+def test_channel_url_absent_when_not_configured():
+    from services.core.promotions.channel_subscription import ChannelSubscriptionChecker
+
+    assert ChannelSubscriptionChecker(_Members(None), "").channel_url is None
 
 
 @pytest.mark.asyncio

@@ -61,6 +61,8 @@ class KeyRenewRequest(BaseModel):
 
 class ChannelBonusResponse(BaseModel):
     status: str
+    # Только при status="not_subscribed" в кабинете: ссылка на канал (из CANALL_URL).
+    channel_url: Optional[str] = None
     email: Optional[str] = None
     new_expiry_time: Optional[int] = None
     new_expiry_date: Optional[str] = None
