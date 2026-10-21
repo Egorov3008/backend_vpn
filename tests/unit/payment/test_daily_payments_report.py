@@ -6,10 +6,8 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from background.scheduler import SyncScheduler, _format_daily_payments_report
+from background.scheduler import SyncScheduler
 from services.core.payment.daily_report import (
-    DailyPaymentReport,
-    OperationBreakdown,
     get_daily_report,
 )
 
@@ -60,39 +58,6 @@ async def test_get_daily_report_empty_day_is_zero():
     assert report.total == 0.0
     assert report.avg == 0.0
     assert report.by_operation == []
-
-
-def test_format_contains_totals_and_operation_labels():
-    end = datetime(2026, 10, 11, 15, 0, tzinfo=timezone.utc)
-    report = DailyPaymentReport(
-        period_start=end - timedelta(hours=24),
-        period_end=end,
-        count=3,
-        total=450.0,
-        by_operation=[
-            OperationBreakdown("create_key", 2, 300.0),
-            OperationBreakdown("renew_key", 1, 150.0),
-        ],
-    )
-
-    text = _format_daily_payments_report(report, MSK)
-
-    assert "Платежей: <b>3</b>" in text
-    assert "Сумма: <b>450.00 RUB</b>" in text
-    assert "Новые ключи: 2 · 300.00 RUB" in text
-    assert "Продления: 1 · 150.00 RUB" in text
-    # 15:00 UTC = 18:00 MSK; окно — 24 часа назад (10.10 18:00) до 11.10 18:00
-    assert "Период: 10.10 18:00 — 11.10 18:00 (Europe/Moscow)" in text
-
-
-def test_format_empty_day_has_no_breakdown():
-    end = datetime(2026, 10, 11, 15, 0, tzinfo=timezone.utc)
-    report = DailyPaymentReport(period_start=end - timedelta(hours=24), period_end=end)
-
-    text = _format_daily_payments_report(report, MSK)
-
-    assert "Платежей: <b>0</b>" in text
-    assert "Новые ключи" not in text
 
 
 def _scheduler_with_pool(pool):

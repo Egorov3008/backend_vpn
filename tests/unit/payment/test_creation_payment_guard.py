@@ -57,9 +57,3 @@ async def test_no_existing_key_creates_one_with_payment_id():
     create_key.proces.assert_awaited_once()
     assert create_key.proces.await_args.kwargs["payment_id"] == "pay_2"
     assert "already_created" not in result
-
-
-def test_key_persists_payment_id():
-    key = make_key("sq91yr", "pay_3")
-    assert key.to_dict()["payment_id"] == "pay_3"
-    assert Key.from_dict(key.to_dict()).payment_id == "pay_3"

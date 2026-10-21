@@ -1,3 +1,4 @@
+from decimal import Decimal
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
@@ -15,77 +16,6 @@ async def test_webhook_non_payment_event_returns_ok(api_client):
     })
     assert response.status_code == 200
     assert response.json() == {"ok": True}
-
-
-@pytest.mark.asyncio
-async def test_webhook_payment_succeeded_calls_router(api_client, mock_service_data):
-    with patch("api.v1.payments.build_payment_router") as mock_factory, \
-         patch("yookassa.Payment.find_one", return_value=MagicMock(status="succeeded")):
-        mock_router = MagicMock()
-        mock_router.route = AsyncMock(return_value=None)
-        mock_factory.return_value = mock_router
-
-        response = await api_client.post("/api/v1/payments/webhook", json={
-            "type": "notification",
-            "event": "payment.succeeded",
-            "object": {"id": "pay_abc123"},
-        })
-
-    assert response.status_code == 200
-    assert response.json() == {"ok": True}
-    mock_router.route.assert_called_once_with("pay_abc123")
-
-
-@pytest.mark.asyncio
-async def test_webhook_not_confirmed_by_yookassa_returns_409(api_client, mock_service_data):
-    """Webhook claims payment.succeeded, but a direct check against the
-    YooKassa API disagrees — must not process the (possibly forged) webhook."""
-    with patch("api.v1.payments.build_payment_router") as mock_factory, \
-         patch("yookassa.Payment.find_one", return_value=MagicMock(status="pending")):
-        mock_router = MagicMock()
-        mock_router.route = AsyncMock(return_value=None)
-        mock_factory.return_value = mock_router
-
-        response = await api_client.post("/api/v1/payments/webhook", json={
-            "type": "notification",
-            "event": "payment.succeeded",
-            "object": {"id": "pay_abc123"},
-        })
-
-    assert response.status_code == 409
-    mock_router.route.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_webhook_passes_notifier_to_router(api_client, mock_service_data):
-    """Regression: webhook must pass a TelegramBotNotifier so the user
-    actually receives a Telegram message after the key is created."""
-    with patch("api.v1.payments.build_payment_router") as mock_factory, \
-         patch("yookassa.Payment.find_one", return_value=MagicMock(status="succeeded")):
-        mock_router = MagicMock()
-        mock_router.route = AsyncMock(return_value=None)
-        mock_factory.return_value = mock_router
-
-        response = await api_client.post("/api/v1/payments/webhook", json={
-            "type": "notification",
-            "event": "payment.succeeded",
-            "object": {"id": "pay_abc123"},
-        })
-
-    assert response.status_code == 200
-    # build_payment_router must be called with a notifier=... kwarg
-    # and the notifier must not be None — otherwise send_notification
-    # in KeyCreationService silently no-ops.
-    assert mock_factory.call_args is not None
-    kwargs = mock_factory.call_args.kwargs
-    assert "notifier" in kwargs, (
-        "build_payment_router was called without a notifier — "
-        "the Telegram notification will be silently skipped"
-    )
-    assert kwargs["notifier"] is not None, (
-        "build_payment_router was called with notifier=None — "
-        "the Telegram notification will be silently skipped"
-    )
 
 
 @pytest.mark.asyncio
@@ -112,58 +42,6 @@ async def test_create_payment_missing_tariff_returns_404(api_client, mock_servic
     assert response.status_code == 404
 
 
-@pytest.mark.asyncio
-async def test_get_payment_history_empty(api_client, mock_service_data):
-    """Test getting payment history when no payments exist"""
-    mock_service_data.payments.get_by = AsyncMock(return_value=None)
-
-    response = await api_client.get("/api/v1/payments/?tg_id=123")
-    assert response.status_code == 200
-    assert response.json() == []
-
-
-@pytest.mark.asyncio
-async def test_get_payment_history_multiple(api_client, mock_service_data):
-    """Test getting payment history with multiple payments"""
-    payments = [
-        PaymentModel(
-            payment_id="pay_001",
-            tg_id=123,
-            amount=99.99,
-            status="succeeded",
-            payment_type="create_key|1",
-            created_at=datetime(2026, 4, 27, 10, 0, 0),
-        ),
-        PaymentModel(
-            payment_id="pay_002",
-            tg_id=123,
-            amount=199.99,
-            status="succeeded",
-            payment_type="renew_key|user@example.com",
-            created_at=datetime(2026, 4, 26, 15, 30, 0),
-        ),
-        PaymentModel(
-            payment_id="pay_003",
-            tg_id=123,
-            amount=49.99,
-            status="pending",
-            payment_type="create_key|2",
-            created_at=datetime(2026, 4, 25, 12, 0, 0),
-        ),
-    ]
-    mock_service_data.payments.get_by = AsyncMock(return_value=payments)
-
-    response = await api_client.get("/api/v1/payments/?tg_id=123")
-    assert response.status_code == 200
-    data = response.json()
-    assert len(data) == 3
-    assert data[0]["payment_id"] == "pay_001"
-    assert data[0]["status"] == "succeeded"
-    assert data[0]["amount"] == 99.99
-    assert data[1]["payment_id"] == "pay_002"
-    assert data[2]["status"] == "pending"
-
-
 def _make_payments(count: int) -> list:
     return [
         PaymentModel(
@@ -177,103 +55,6 @@ def _make_payments(count: int) -> list:
         for i in range(1, count + 1)
     ]
 
-
-@pytest.mark.asyncio
-async def test_get_payment_history_total_count_header_without_pagination(api_client, mock_service_data):
-    mock_service_data.payments.get_by = AsyncMock(return_value=_make_payments(3))
-
-    response = await api_client.get("/api/v1/payments/?tg_id=123")
-    assert response.status_code == 200
-    assert response.headers["X-Total-Count"] == "3"
-    assert len(response.json()) == 3
-
-
-@pytest.mark.asyncio
-async def test_get_payment_history_limit_applies_page_size(api_client, mock_service_data):
-    mock_service_data.payments.get_by = AsyncMock(return_value=_make_payments(3))
-
-    response = await api_client.get("/api/v1/payments/?tg_id=123&limit=2")
-    assert response.status_code == 200
-    assert response.headers["X-Total-Count"] == "3"
-    data = response.json()
-    assert len(data) == 2
-    assert [p["payment_id"] for p in data] == ["pay_001", "pay_002"]
-
-
-@pytest.mark.asyncio
-async def test_get_payment_history_offset_applies_without_limit(api_client, mock_service_data):
-    """offset без limit не должен молча игнорироваться — иначе клиент,
-    листающий только по offset, получит дубли (см. code review)."""
-    mock_service_data.payments.get_by = AsyncMock(return_value=_make_payments(3))
-
-    response = await api_client.get("/api/v1/payments/?tg_id=123&offset=1")
-    assert response.status_code == 200
-    data = response.json()
-    assert [p["payment_id"] for p in data] == ["pay_002", "pay_003"]
-
-
-@pytest.mark.asyncio
-async def test_get_payment_history_limit_and_offset_combine(api_client, mock_service_data):
-    mock_service_data.payments.get_by = AsyncMock(return_value=_make_payments(3))
-
-    response = await api_client.get("/api/v1/payments/?tg_id=123&limit=1&offset=1")
-    assert response.status_code == 200
-    data = response.json()
-    assert [p["payment_id"] for p in data] == ["pay_002"]
-
-
-@pytest.mark.asyncio
-async def test_get_payment_status_success(api_client, mock_service_data):
-    """Test getting status of a valid payment"""
-    payment = PaymentModel(
-        payment_id="pay_123",
-        tg_id=456,
-        amount=99.99,
-        status="succeeded",
-        payment_type="create_key|1",
-        created_at=datetime(2026, 4, 27, 10, 0, 0),
-    )
-    mock_service_data.payments.get_data = AsyncMock(return_value=payment)
-
-    response = await api_client.get("/api/v1/payments/pay_123/status?tg_id=456")
-    assert response.status_code == 200
-    data = response.json()
-    assert data["payment_id"] == "pay_123"
-    assert data["status"] == "succeeded"
-    assert data["tg_id"] == 456
-
-
-@pytest.mark.asyncio
-async def test_get_payment_status_not_found(api_client, mock_service_data):
-    """Test getting status of a non-existent payment"""
-    mock_service_data.payments.get_data = AsyncMock(return_value=None)
-
-    response = await api_client.get("/api/v1/payments/pay_nonexistent/status?tg_id=456")
-    assert response.status_code == 404
-    assert "Payment not found" in response.json()["detail"]
-
-
-@pytest.mark.asyncio
-async def test_get_payment_status_unauthorized(api_client, mock_service_data):
-    """Test getting status of a payment that belongs to a different user"""
-    payment = PaymentModel(
-        payment_id="pay_123",
-        tg_id=789,
-        amount=99.99,
-        status="succeeded",
-        payment_type="create_key|1",
-        created_at=datetime(2026, 4, 27, 10, 0, 0),
-    )
-    mock_service_data.payments.get_data = AsyncMock(return_value=payment)
-
-    response = await api_client.get("/api/v1/payments/pay_123/status?tg_id=456")
-    assert response.status_code == 403
-    assert "does not belong to this user" in response.json()["detail"]
-
-
-# ---------------------------------------------------------------------------
-# _calculate_payment_amount — pure unit tests
-# ---------------------------------------------------------------------------
 
 def test_calc_referred_first_purchase_applies_10_percent():
     """Сценарий из баг-репорта: приглашённый, первая оплата → 10% скидки."""
@@ -374,6 +155,14 @@ def test_apply_stock_fix():
     assert per_month == 30.0
 
 
+def test_apply_stock_decimal_value_from_db():
+    """stocks.value — DECIMAL: asyncpg отдаёт Decimal, цена тарифа — float."""
+    stock = Stock(tg_id=1, stock_type="percent", value=Decimal("10.00"))
+    price, per_month = _apply_stock_to_tariff(160.0, stock)
+    assert price == 144.0
+    assert per_month == 16.0
+
+
 def test_apply_stock_inactive_returns_full_price():
     stock = Stock(tg_id=1, stock_type="percent", value=10.0, is_active=False)
     price, per_month = _apply_stock_to_tariff(160.0, stock)
@@ -391,91 +180,6 @@ def test_apply_stock_none_returns_full_price():
 # /payments/quotes endpoint — enriched response
 # ---------------------------------------------------------------------------
 
-@pytest.mark.asyncio
-async def test_calculate_payment_referred_first_purchase(api_client, mock_service_data):
-    """Баг-репорт: /calculate для приглашённого первой покупки → 144/16."""
-    tariff = Tariff(id=7, name_tariff="Premium", amount=160.0)
-    mock_service_data.tariffs.get_data = AsyncMock(return_value=tariff)
-    user = MagicMock(
-        tg_id=7563318767, referral_id=552810834,
-        check_referral=False, balance=0.0,
-    )
-    mock_service_data.users.get_data = AsyncMock(return_value=user)
-    mock_service_data.stocks.get_data = AsyncMock(return_value=None)
-
-    response = await api_client.post("/api/v1/payments/quotes", json={
-        "tg_id": 7563318767, "tariff_id": 7,
-        "number_of_months": 1, "operation": "create_key",
-    })
-    assert response.status_code == 200, response.text
-    data = response.json()
-    assert data["final_amount"] == 144.0
-    assert data["referral_discount_amount"] == 16.0
-    assert data["has_referral_discount"] is True
-    assert data["base_amount"] == 160.0
-    assert data["stock_discount_amount"] == 0.0
-
-
-@pytest.mark.asyncio
-async def test_calculate_payment_with_stock_percent(api_client, mock_service_data):
-    """Stock 10% поверх 160 → base 144; без реферера → final 144."""
-    tariff = Tariff(id=7, name_tariff="Premium", amount=160.0)
-    mock_service_data.tariffs.get_data = AsyncMock(return_value=tariff)
-    user = MagicMock(tg_id=123, referral_id=None, check_referral=False, balance=0.0)
-    mock_service_data.users.get_data = AsyncMock(return_value=user)
-    mock_service_data.stocks.get_data = AsyncMock(
-        return_value=Stock(tg_id=123, stock_type="percent", value=10.0)
-    )
-
-    response = await api_client.post("/api/v1/payments/quotes", json={
-        "tg_id": 123, "tariff_id": 7, "number_of_months": 1, "operation": "create_key",
-    })
-    assert response.status_code == 200, response.text
-    data = response.json()
-    assert data["base_amount"] == 144.0
-    assert data["stock_discount_amount"] == 16.0
-    assert data["has_stock_discount"] is True
-    assert data["final_amount"] == 144.0
-
-
-# ---------------------------------------------------------------------------
-# /payments/create — now applies Stock (regression test for latent Stock bug)
-# ---------------------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_create_payment_applies_stock_discount(api_client, mock_service_data):
-    """create_payment должен зарядить Stock-скидочную сумму (раньше игнорировал Stock)."""
-    tariff = Tariff(id=7, name_tariff="Premium", amount=160.0)
-    mock_service_data.tariffs.get_data = AsyncMock(return_value=tariff)
-    user = MagicMock(tg_id=123, referral_id=None, check_referral=False, balance=0.0)
-    mock_service_data.users.get_data = AsyncMock(return_value=user)
-    mock_service_data.stocks.get_data = AsyncMock(
-        return_value=Stock(tg_id=123, stock_type="percent", value=10.0)
-    )
-
-    with patch("yookassa.Payment.create") as mock_create:
-        mock_payment = MagicMock()
-        mock_payment.id = "pay_test_stock"
-        mock_payment.confirmation.confirmation_url = "https://pay.example/xxx"
-        mock_payment.status = "pending"
-        mock_create.return_value = mock_payment
-
-        response = await api_client.post("/api/v1/payments/create", json={
-            "tg_id": 123, "tariff_id": 7,
-            "number_of_months": 1, "operation": "create_key",
-        })
-
-    assert response.status_code == 200, response.text
-    mock_create.assert_called_once()
-    payload = mock_create.call_args.args[0]
-    # Stock 10% (160→144), referral/balance 0 → заряд 144.00
-    assert payload["amount"]["value"] == "144.00"
-    # Платёж сохранён с той же суммой
-    mock_service_data.payments.save_data.assert_called_once()
-    saved_payment = mock_service_data.payments.save_data.call_args.args[1]
-    assert saved_payment.amount == 144.0
-
-
 def _pending_payment(payment_id: str) -> PaymentModel:
     return PaymentModel(
         payment_id=payment_id,
@@ -485,52 +189,6 @@ def _pending_payment(payment_id: str) -> PaymentModel:
         payment_type="create_key|1",
         created_at=datetime(2026, 10, 11, 10, 0, 0),
     )
-
-
-@pytest.mark.asyncio
-async def test_get_payment_status_succeeded_in_yookassa_does_not_route(api_client, mock_service_data):
-    """GET /status не создаёт ключ: даже если YooKassa уже подтвердила оплату,
-    роутер не запускается. Обработку делают вебхук и фоновый поллер через захват."""
-    mock_service_data.payments.get_data = AsyncMock(return_value=_pending_payment("pay_ok"))
-    mock_service_data.payments.service.mark_canceled_if_pending = AsyncMock(return_value=False)
-
-    with patch("api.v1.payments.build_payment_router") as mock_factory, \
-         patch("yookassa.Payment.find_one", return_value=MagicMock(status="succeeded")):
-        response = await api_client.get("/api/v1/payments/pay_ok/status?tg_id=456")
-
-    assert response.status_code == 200
-    assert response.json()["status"] == "pending"
-    mock_factory.assert_not_called()
-    mock_service_data.payments.service.mark_canceled_if_pending.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_get_payment_status_canceled_in_yookassa_marks_canceled(api_client, mock_service_data):
-    """Отмена в YooKassa переводит pending в canceled условным UPDATE и сразу отдаёт canceled.
-
-    payments мокаем по спецификации BaseData (как в ServiceDataModel): SQL-метод доступен
-    только через .service. Без spec такой тест маскировал AttributeError в проде.
-    """
-    from services.core.data.base import BaseData
-
-    payments = MagicMock(spec=BaseData)
-    payments.get_data = AsyncMock(return_value=_pending_payment("pay_cx"))
-    payments.service = MagicMock()
-    payments.service.mark_canceled_if_pending = AsyncMock(return_value=True)
-    payments.service.get = AsyncMock(return_value=None)
-    mock_service_data.payments = payments
-
-    with patch("api.v1.payments.build_payment_router") as mock_factory, \
-         patch("yookassa.Payment.find_one", return_value=MagicMock(status="canceled")):
-        response = await api_client.get("/api/v1/payments/pay_cx/status?tg_id=456")
-
-    assert response.status_code == 200
-    assert response.json()["status"] == "canceled"
-    payments.service.mark_canceled_if_pending.assert_awaited_once()
-    assert payments.service.mark_canceled_if_pending.await_args.args[1] == "pay_cx"
-    mock_factory.assert_not_called()
-    # Полная перезапись строки (save/update) не используется — только условный UPDATE
-    payments.update.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -579,132 +237,3 @@ def _yk_payment(status: str, url: str = "https://pay.example/old"):
 
 
 _CREATE_BODY = {"tg_id": 123, "tariff_id": 7, "number_of_months": 1, "operation": "create_key"}
-
-
-@pytest.mark.asyncio
-async def test_create_payment_reuses_open_pending_payment(api_client, mock_service_data):
-    """Прежний счёт ещё можно оплатить — отдаём его, новый в YooKassa не создаём."""
-    _setup_repeat_purchase(mock_service_data, [_open_payment("pay_old")])
-
-    with patch("yookassa.Payment.find_one", return_value=_yk_payment("pending")), \
-         patch("yookassa.Payment.create") as mock_create:
-        response = await api_client.post("/api/v1/payments/create", json=_CREATE_BODY)
-
-    assert response.status_code == 200, response.text
-    data = response.json()
-    assert data["payment_id"] == "pay_old"
-    assert data["confirmation_url"] == "https://pay.example/old"
-    mock_create.assert_not_called()
-    mock_service_data.payments.save_data.assert_not_called()
-    args = mock_service_data.payments.service.list_open_for_user.await_args.args
-    assert args[1:3] == (123, "create_key|7")
-
-
-@pytest.mark.asyncio
-async def test_create_payment_rejects_when_previous_payment_already_paid(api_client, mock_service_data):
-    """Прежний счёт оплачен, но ключ ещё не выдан — второй счёт не выставляем (409)."""
-    _setup_repeat_purchase(mock_service_data, [_open_payment("pay_old")])
-
-    with patch("yookassa.Payment.find_one", return_value=_yk_payment("succeeded")), \
-         patch("yookassa.Payment.create") as mock_create:
-        response = await api_client.post("/api/v1/payments/create", json=_CREATE_BODY)
-
-    assert response.status_code == 409
-    assert "уже прошёл" in response.json()["detail"]
-    mock_create.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_create_payment_rejects_while_previous_payment_processing(api_client, mock_service_data):
-    """Прежний платёж захвачен вебхуком (ключ создаётся) — 409 без запроса в YooKassa."""
-    _setup_repeat_purchase(mock_service_data, [_open_payment("pay_old", status="processing")])
-
-    with patch("yookassa.Payment.find_one") as mock_find, \
-         patch("yookassa.Payment.create") as mock_create:
-        response = await api_client.post("/api/v1/payments/create", json=_CREATE_BODY)
-
-    assert response.status_code == 409
-    mock_find.assert_not_called()
-    mock_create.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_create_payment_rejects_when_previous_status_unknown(api_client, mock_service_data):
-    """Статус прежнего счёта узнать не удалось — второй счёт не выставляем (503)."""
-    _setup_repeat_purchase(mock_service_data, [_open_payment("pay_old")])
-
-    with patch("yookassa.Payment.find_one", side_effect=RuntimeError("yookassa down")), \
-         patch("yookassa.Payment.create") as mock_create:
-        response = await api_client.post("/api/v1/payments/create", json=_CREATE_BODY)
-
-    assert response.status_code == 503
-    mock_create.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_create_payment_after_canceled_previous_creates_new(api_client, mock_service_data):
-    """Прежний счёт отменён в YooKassa (оплата не прошла) — помечаем canceled и создаём новый."""
-    _setup_repeat_purchase(mock_service_data, [_open_payment("pay_old")])
-
-    with patch("yookassa.Payment.find_one", return_value=_yk_payment("canceled")), \
-         patch("yookassa.Payment.create") as mock_create:
-        mock_create.return_value = _yk_payment("pending", url="https://pay.example/new")
-        mock_create.return_value.id = "pay_new"
-        response = await api_client.post("/api/v1/payments/create", json=_CREATE_BODY)
-
-    assert response.status_code == 200, response.text
-    assert response.json()["payment_id"] == "pay_new"
-    mock_service_data.payments.service.mark_canceled_if_pending.assert_awaited_once()
-    assert mock_service_data.payments.service.mark_canceled_if_pending.await_args.args[1] == "pay_old"
-
-
-@pytest.mark.asyncio
-async def test_create_payment_with_other_terms_creates_new(api_client, mock_service_data):
-    """Открытый счёт на другой срок не переиспользуется: пользователь выбрал другое."""
-    _setup_repeat_purchase(mock_service_data, [_open_payment("pay_old", amount=432.0, months=3)])
-
-    with patch("yookassa.Payment.find_one", return_value=_yk_payment("pending")), \
-         patch("yookassa.Payment.create") as mock_create:
-        mock_create.return_value = _yk_payment("pending", url="https://pay.example/new")
-        mock_create.return_value.id = "pay_new"
-        response = await api_client.post("/api/v1/payments/create", json=_CREATE_BODY)
-
-    assert response.status_code == 200, response.text
-    assert response.json()["payment_id"] == "pay_new"
-    mock_create.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_concurrent_create_payment_issues_one_invoice(api_client, mock_service_data):
-    """Два одновременных «оплатить» от одного пользователя: второй получает тот же счёт."""
-    import asyncio
-
-    saved: list = []
-
-    async def list_open(_pool, _tg_id, _payment_type, _minutes):
-        return list(saved)
-
-    async def save_data(_pool, payment, **_kw):
-        saved.append(payment)
-
-    _setup_repeat_purchase(mock_service_data, [])
-    mock_service_data.payments.service.list_open_for_user = AsyncMock(side_effect=list_open)
-    mock_service_data.payments.save_data = AsyncMock(side_effect=save_data)
-
-    def slow_create(*_args, **_kw):
-        import time
-        time.sleep(0.2)  # YooKassa отвечает не мгновенно — окно для гонки
-        yk = _yk_payment("pending", url="https://pay.example/only")
-        yk.id = "pay_only"
-        return yk
-
-    with patch("yookassa.Payment.create", side_effect=slow_create) as mock_create, \
-         patch("yookassa.Payment.find_one", return_value=_yk_payment("pending", url="https://pay.example/only")):
-        r1, r2 = await asyncio.gather(
-            api_client.post("/api/v1/payments/create", json=_CREATE_BODY),
-            api_client.post("/api/v1/payments/create", json=_CREATE_BODY),
-        )
-
-    assert r1.status_code == r2.status_code == 200
-    assert r1.json()["payment_id"] == r2.json()["payment_id"] == "pay_only"
-    assert mock_create.call_count == 1

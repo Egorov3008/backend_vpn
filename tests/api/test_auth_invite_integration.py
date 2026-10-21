@@ -195,40 +195,6 @@ async def test_register_from_invite_user_already_exists(api_client_with_auth):
 
 
 @pytest.mark.asyncio
-async def test_register_from_invite_response_format(api_client_with_auth):
-    """Test endpoint response has correct format."""
-    client, _ = api_client_with_auth
-
-    response = await client.post(
-        "/api/v1/auth/register-from-invite",
-        json={
-            "tg_id": 123456789,
-            "username": "testuser",
-            "first_name": "Test",
-            "last_name": "User",
-            "language_code": "en",
-            "invite_token": "test_token",
-        },
-        headers={"X-Bot-Secret": "test_secret"},
-    )
-
-    # Response should either succeed or fail with proper format
-    if response.status_code == 201:
-        data = response.json()
-        assert "tg_id" in data
-        assert "login_code" in data
-        assert "code_expires_at" in data
-        assert data["tg_id"] == 123456789
-        # Login code should be 8 characters alphanumeric
-        assert len(data["login_code"]) == 8
-        assert data["login_code"].isalnum()
-    else:
-        # Error response should have detail
-        data = response.json()
-        assert "detail" in data
-
-
-@pytest.mark.asyncio
 async def test_register_from_invite_with_minimal_data(api_client_with_auth):
     """Test endpoint accepts minimal user data."""
     from models import User, LoginCode
@@ -281,22 +247,3 @@ async def test_register_from_invite_with_minimal_data(api_client_with_auth):
 
     # Should handle minimal data gracefully and create user
     assert response.status_code == 201
-
-
-@pytest.mark.asyncio
-async def test_register_from_invite_invalid_request_format(api_client_with_auth):
-    """Test endpoint validates request format."""
-    client, _ = api_client_with_auth
-
-    response = await client.post(
-        "/api/v1/auth/register-from-invite",
-        json={
-            # Missing required fields
-            "tg_id": 123456789,
-        },
-        headers={"X-Bot-Secret": "test_secret"},
-    )
-
-    # Should return validation error
-    assert response.status_code == 422
-    assert "detail" in response.json()

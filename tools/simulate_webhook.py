@@ -6,17 +6,17 @@
 
 Использование:
     # Успешный платёж
-    python backend/tools/test_webhook.py --event succeeded --payment-id "test_001" --amount 300
+    python tools/simulate_webhook.py --event succeeded --payment-id "test_001" --amount 300
 
     # С автосозданием записи платежа в БД
-    python backend/tools/test_webhook.py --event succeeded --payment-id "test_002" --amount 300 \
+    python tools/simulate_webhook.py --event succeeded --payment-id "test_002" --amount 300 \
         --create-payment --tg-id 123456 --payment-type "create_key|10" --months 1
 
     # Отменённый платёж
-    python backend/tools/test_webhook.py --event canceled --payment-id "test_001"
+    python tools/simulate_webhook.py --event canceled --payment-id "test_001"
 
     # Возврат
-    python backend/tools/test_webhook.py --event refund --payment-id "test_004"
+    python tools/simulate_webhook.py --event refund --payment-id "test_004"
 """
 
 import argparse

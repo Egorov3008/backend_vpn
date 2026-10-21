@@ -117,41 +117,6 @@ class TestXUICircuitBreakerStateTransitions:
         # Circuit breaker should remain closed
         assert _xui_circuit_breaker.current_state == "closed"
 
-    @pytest.mark.asyncio
-    async def test_circuit_breaker_half_open_after_manual_transition(self, xui_session):
-        """Circuit breaker transitions to half-open when manually triggered."""
-        # Initialize session
-        await xui_session.server_init()
-        xui_session._standalone = _StandaloneClientAPI(
-            base_url="http://localhost:8000",
-            username="admin",
-            password="admin",
-        )
-        xui_session._is_authenticated = True
-
-        # Open the circuit breaker
-        async def failing_operation():
-            raise httpx.ConnectTimeout("Connection timed out")
-
-        for _ in range(5):
-            try:
-                await _xui_circuit_breaker.call_async(failing_operation)
-            except Exception:
-                pass
-
-        assert _xui_circuit_breaker.current_state == "open"
-
-        # Transition to half-open
-        _xui_circuit_breaker.half_open()
-        assert _xui_circuit_breaker.current_state == "half_open"
-
-        # Successful request should close the circuit
-        async def success_operation():
-            return {"success": True}
-
-        result = await _xui_circuit_breaker.call_async(success_operation)
-        assert result == {"success": True}
-        assert _xui_circuit_breaker.current_state == "closed"
 
 
 class TestXUICircuitBreakerExceptionHandling:

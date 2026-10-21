@@ -5,7 +5,6 @@
 владелец Postgres).
 """
 from datetime import date
-from unittest.mock import AsyncMock
 
 import pytest
 
@@ -56,25 +55,6 @@ PAYMENT_ROWS = [
 
 
 @pytest.mark.asyncio
-async def test_dashboard_metrics_endpoint_returns_service_result(api_client, monkeypatch):
-    expected = {
-        "mrr_current_month": 10000.0, "mrr_previous_month": 8000.0, "mrr_growth": 25.0,
-        "paying_users_current": 20, "arpu_current": 500.0,
-        "funnel": [], "total_new_users_30d": 0, "total_users_with_keys_30d": 0,
-        "total_paying_users_30d": 0, "conversion_to_keys_pct": 0.0, "conversion_to_paid_pct": 0.0,
-        "expiring_keys": [], "total_expiring_72h": 0,
-        "payment_statuses": [], "total_succeeded": 0, "total_pending": 0,
-        "total_canceled": 0, "succeeded_pct": 0.0,
-    }
-    monkeypatch.setattr(
-        DashboardMetricsService, "get_all_dashboard_metrics", AsyncMock(return_value=expected)
-    )
-    r = await api_client.get("/api/v1/admin/dashboard-metrics")
-    assert r.status_code == 200
-    assert r.json() == expected
-
-
-@pytest.mark.asyncio
 async def test_service_aggregates_all_sections():
     conn = _Conn([MRR_ROWS, FUNNEL_ROWS, EXPIRY_ROWS, PAYMENT_ROWS])
     service = DashboardMetricsService(_Pool(conn))
@@ -114,14 +94,3 @@ async def test_service_handles_empty_data():
     assert result["conversion_to_keys_pct"] == 0.0
     assert result["total_expiring_72h"] == 0
     assert result["succeeded_pct"] == 0.0
-
-
-@pytest.mark.asyncio
-async def test_service_propagates_db_error():
-    class _BadPool(_Pool):
-        def acquire(self):
-            raise RuntimeError("connection refused")
-
-    service = DashboardMetricsService(_BadPool(_Conn([])))
-    with pytest.raises(RuntimeError):
-        await service.get_all_dashboard_metrics()

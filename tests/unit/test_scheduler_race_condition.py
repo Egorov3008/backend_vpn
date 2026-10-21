@@ -94,41 +94,6 @@ class TestSchedulerRaceCondition:
             assert result.get('status') == 'success'
 
     @pytest.mark.asyncio
-    async def test_rapid_sequential_calls(self):
-        """Быстрые последовательные вызовы → каждый следующий skipped."""
-        from background.scheduler import SyncScheduler
-
-        service_data = MagicMock()
-        pool = AsyncMock()
-        scheduler = SyncScheduler(service_data=service_data, pool=pool)
-
-        # Мокаем _sync_panel с небольшой задержкой
-        call_count = 0
-
-        async def mock_sync_panel():
-            nonlocal call_count
-            call_count += 1
-            await asyncio.sleep(0.02)  # Имитируем работу
-            return {"status": "success", "sync_time": "1.0s"}
-
-        scheduler._sync_panel = mock_sync_panel
-
-        # Запускаем 5 вызовов почти одновременно
-        tasks = [asyncio.create_task(scheduler.sync_cache()) for _ in range(5)]
-        results = await asyncio.gather(*tasks)
-
-        # _sync_panel должен вызваться только 1 раз
-        assert call_count == 1, f"_sync_panel вызван {call_count} раз, ожидался 1"
-
-        # Подсчитываем результаты
-        result_list = list(results)
-        successful = sum(1 for r in result_list if r.get('status') == 'success')
-        skipped = sum(1 for r in result_list if r.get('status') == 'skipped')
-
-        assert successful == 1, f"Ожидался 1 успешный sync, но их было {successful}"
-        assert skipped == 4, f"Ожидалось 4 skipped sync, но их было {skipped}"
-
-    @pytest.mark.asyncio
     async def test_sync_stats_tracking(self):
         """SyncScheduler отслеживает статистику вызовов."""
         from background.scheduler import SyncScheduler

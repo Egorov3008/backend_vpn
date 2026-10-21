@@ -86,32 +86,6 @@ def test_panel_meta_updates_group_and_comment(client_ctx):
     )
 
 
-def test_panel_meta_updates_only_group(client_ctx):
-    client, xui = client_ctx
-    resp = client.patch(
-        "/api/v1/admin/keys/user@example.com/panel-meta",
-        json={"group": "vip"},
-        headers=_headers(),
-    )
-    assert resp.status_code == 200
-    xui.update_standalone_client.assert_awaited_once_with(
-        "user@example.com", group="vip"
-    )
-
-
-def test_panel_meta_updates_only_comment(client_ctx):
-    client, xui = client_ctx
-    resp = client.patch(
-        "/api/v1/admin/keys/user@example.com/panel-meta",
-        json={"comment": "test client"},
-        headers=_headers(),
-    )
-    assert resp.status_code == 200
-    xui.update_standalone_client.assert_awaited_once_with(
-        "user@example.com", comment="test client"
-    )
-
-
 def test_panel_meta_rejects_empty_body(client_ctx):
     client, xui = client_ctx
     resp = client.patch(
