@@ -314,7 +314,7 @@ class _StandaloneClientAPI:
             "POST", f"/api/clients/del/{email}", params=params
         )
         resp.raise_for_status()
-        return resp.json()
+        return self._check_success(resp.json(), "delete_client")
 
     async def get(self, email: str) -> dict:
         """GET /api/clients/get/{email}"""
@@ -330,7 +330,7 @@ class _StandaloneClientAPI:
             "POST", f"/api/clients/update/{email}", json=payload
         )
         resp.raise_for_status()
-        return resp.json()
+        return self._check_success(resp.json(), "update_client")
 
     async def reset_traffic(self, email: str) -> dict:
         """POST /api/clients/resetTraffic/{email}"""
