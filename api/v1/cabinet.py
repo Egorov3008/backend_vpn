@@ -189,7 +189,7 @@ def build_cabinet_router(
         if subscribed is None:
             raise HTTPException(status_code=503, detail="Could not check channel subscription")
         if not subscribed:
-            return ChannelBonusResponse(status="not_subscribed")
+            return ChannelBonusResponse(status="not_subscribed", channel_url=subscription.channel_url)
         return await claim_channel_bonus(
             tg_id=principal.tg_id,
             email=email,

@@ -49,6 +49,17 @@ class ChannelSubscriptionChecker:
     def configured(self) -> bool:
         return self._channel is not None
 
+    @property
+    def channel_url(self) -> Optional[str]:
+        """Публичная ссылка на канал для кнопки «Подписаться» в кабинете.
+
+        Строится из username, разобранного из CANALL_URL, поэтому в ответ
+        не попадает произвольная строка из конфига (например, `@name`).
+        """
+        if not self._channel:
+            return None
+        return f"https://t.me/{self._channel}"
+
     async def is_subscribed(self, tg_id: int) -> Optional[bool]:
         """True/False — подписан ли; None — проверить не удалось (канал не
         настроен, Telegram недоступен). None нельзя считать подпиской."""
