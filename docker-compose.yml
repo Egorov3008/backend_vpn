@@ -54,6 +54,9 @@ services:
     networks:
       - backend_net
       - backend_api
+      # Внешняя сеть платформы: bot, landing-pilot и platform-web ходят к API по имени `backend`.
+      # Имя сервиса задаёт alias, поэтому BACKEND_URL=http://backend работает без изменений.
+      - platform_default
 
 volumes:
   backend_postgres_data:
@@ -68,3 +71,5 @@ networks:
   backend_api:
     name: backend_api
     driver: bridge
+  platform_default:
+    external: true
