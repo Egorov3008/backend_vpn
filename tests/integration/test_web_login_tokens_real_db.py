@@ -1,37 +1,12 @@
 """Интеграционный тест: PostgresWebLoginTokenStore против живой БД.
 
 Проверяет условные переходы статуса (pending → confirmed → used) и истечение.
-Пропускается без TEST_DATABASE_URL:
-    TEST_DATABASE_URL=postgresql://test:test@localhost:55432/test pytest tests/integration
+База и запуск — см. tests/integration/conftest.py.
 """
 import asyncio
-import os
-from pathlib import Path
-
-import asyncpg
-import pytest
 
 from services.web_auth.service import ConfirmStatus, PollStatus, WebLoginService
 from services.web_auth.store import PostgresWebLoginTokenStore
-
-TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
-MIGRATION = Path(__file__).resolve().parents[2] / "db" / "migrations" / "20261015_web_login_tokens.sql"
-
-pytestmark = pytest.mark.skipif(not TEST_DATABASE_URL, reason="TEST_DATABASE_URL not set")
-
-
-@pytest.fixture
-async def pool():
-    pool = await asyncpg.create_pool(TEST_DATABASE_URL, min_size=1, max_size=5)
-    async with pool.acquire() as conn:
-        await conn.execute("DROP TABLE IF EXISTS web_login_tokens")
-        await conn.execute(MIGRATION.read_text())
-        # Повторный прогон миграции безопасен.
-        await conn.execute(MIGRATION.read_text())
-    yield pool
-    async with pool.acquire() as conn:
-        await conn.execute("DROP TABLE IF EXISTS web_login_tokens")
-    await pool.close()
 
 
 async def test_full_flow_on_real_db(pool):

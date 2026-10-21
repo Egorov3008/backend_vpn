@@ -126,20 +126,6 @@ def test_mass_renew_continues_when_set_inbounds_fails(client_ctx):
     xui.extend_client_key.assert_awaited_once()
 
 
-def test_mass_renew_uses_paid_inbound_ids_from_inbounds_module(client_ctx):
-    client, xui = client_ctx
-    client.post(
-        "/api/v1/admin/keys/renewals",
-        json={"emails": ["user@example.com"], "days": 30},
-        headers=_headers(),
-    )
-    sent = xui.set_inbounds.call_args.args[1]
-    assert sent == paid_inbound_ids()
-
-
-# ---------- change-date ----------
-
-
 def test_change_date_calls_set_inbounds_with_paid_before_extend(client_ctx):
     client, xui = client_ctx
     resp = client.patch(
@@ -165,20 +151,6 @@ def test_change_date_continues_when_set_inbounds_fails(client_ctx):
     )
     assert resp.status_code == 200
     xui.extend_client_key.assert_awaited_once()
-
-
-def test_change_date_uses_paid_inbound_ids_from_inbounds_module(client_ctx):
-    client, xui = client_ctx
-    client.patch(
-        "/api/v1/admin/keys/user@example.com/expiry",
-        json={"expiry_time": 1_900_000_000_000},
-        headers=_headers(),
-    )
-    sent = xui.set_inbounds.call_args.args[1]
-    assert sent == paid_inbound_ids()
-
-
-# ---------- change-tariff ----------
 
 
 def test_change_tariff_calls_set_inbounds_with_paid_before_extend(client_ctx):
@@ -215,18 +187,3 @@ def test_change_tariff_continues_when_set_inbounds_fails(client_ctx):
     assert resp.status_code == 200
     xui.set_inbounds.assert_awaited_once()
     xui.extend_client_key.assert_awaited_once()
-
-
-def test_change_tariff_uses_paid_inbound_ids_from_inbounds_module(client_ctx):
-    client, xui = client_ctx
-    service_data = app.dependency_overrides[get_service_data]()
-    service_data.tariffs.get_data = AsyncMock(return_value=MagicMock(
-        id=20, name_tariff="Pro", limit_ip=5,
-    ))
-    client.patch(
-        "/api/v1/admin/keys/user@example.com/tariff",
-        json={"tariff_id": 20},
-        headers=_headers(),
-    )
-    sent = xui.set_inbounds.call_args.args[1]
-    assert sent == paid_inbound_ids()

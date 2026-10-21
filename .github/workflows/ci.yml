@@ -49,6 +49,9 @@ jobs:
       - name: Test
         env:
           DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_db
+          # Интеграционные тесты (tests/integration) создают в этой базе свою схему test_<hex>
+          # и удаляют её в конце; без переменной они пропускаются.
+          TEST_DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_db
           # config.py отклоняет пустые и placeholder-секреты при импорте.
           # Это фиктивные значения только для тестов, не продовые секреты.
           BOT_SECRET_KEY: ci-bot-secret-not-for-production-0001

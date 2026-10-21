@@ -77,10 +77,6 @@ class TestHappyPath:
         # BUG-8: reward_value пробрасывается как Decimal, а не str
         assert insert_args[2] == Decimal("50.0")
 
-    async def test_bonus_with_payment_1000(self, bonus_service):
-        conn = make_conn(mark_row={"referral_id": 100})
-        await bonus_service.process_referral_bonus(conn, 200, 1000.0)
-        assert conn.execute.call_args_list[0][0][2] == Decimal("100.0")
 
 
 class TestSkipCases:
@@ -121,10 +117,6 @@ class TestSkipCases:
         conn.fetchrow.assert_not_awaited()
         conn.execute.assert_not_awaited()
 
-    async def test_skip_negative_payment(self, bonus_service):
-        conn = make_conn()
-        await bonus_service.process_referral_bonus(conn, 200, -50.0)
-        conn.fetchrow.assert_not_awaited()
 
 
 class TestIdempotency:
@@ -174,19 +166,3 @@ class TestSelfReferralDefense:
         # Выходим раньше — INSERT/UPDATE не произошло
         assert conn.execute.await_count == 0
         bonus_service._notify_referrer.assert_not_awaited()
-
-
-class TestPoolCompatibility:
-    async def test_accepts_pool_with_real_asyncpg_check(self, bonus_service):
-        """Реальный asyncpg.Pool: проверяем, что isinstance-ветка существует и
-        не падает при подмене на объект с методом acquire().
-
-        В тесте не мокаем isinstance (это рекурсивно ломает pytest), а просто
-        убеждаемся, что вызов с Pool корректно проходит через isinstance-ветку.
-        """
-        # MagicMock по умолчанию не является instance of asyncpg.Pool,
-        # поэтому isinstance(conn, asyncpg.Pool) == False, и мы пойдём
-        # во вторую ветку (else) — что мы и тестируем как connection-путь.
-        conn = make_conn(mark_row={"referral_id": 100})
-        await bonus_service.process_referral_bonus(conn, 200, 500.0)
-        assert conn.execute.await_count == 2

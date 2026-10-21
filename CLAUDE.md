@@ -327,48 +327,41 @@ Configurable via env vars:
 
 ## Testing Patterns
 
-Tests use `AsyncMock` for asyncpg, native XUI client, and yookassa clients.
+A test must catch broken behavior, not pin the implementation: check the result (rows in the DB,
+the client in the panel, the HTTP answer), not which mocks were called. No checks of exact texts
+or magic numbers.
 
-**Setup Pattern:**
+**Endpoints → integration tests on a test DB** (`tests/integration/`, see its `conftest.py`):
+
+- `TEST_DATABASE_URL` points at any Postgres where the user may `CREATE SCHEMA`. The session gets
+  its own schema `test_<hex>` (`db/schema_fixed.sql` + all `db/migrations/`), tables are truncated
+  before each test, the schema is dropped at the end. Without the variable the folder is skipped.
+  CI sets it to the job's Postgres service.
+- External services are the e2e fakes (`e2e/fakes.py`) started in a thread: 3x-UI, YooKassa (the
+  SDK points there) and Telegram (httpx calls to api.telegram.org are redirected).
+- The `backend` fixture gives the real app with real pool/cache/`ServiceDataModel`:
+  `backend.client` (httpx, bot secret set), `backend.pool`, `backend.fakes` (`panel_client(email)`,
+  `set_payment_status`, `fail_panel(...)`, `state()`), `backend.reload_cache()` after writing to the
+  DB directly. Helpers in `tests/integration/helpers.py`.
+
 ```python
-@pytest.fixture
-async def mock_service_data():
-    # Mock ServiceDataModel with all sub-services
-    service_data = MagicMock(spec=ServiceDataModel)
-    service_data.keys = AsyncMock()
-    service_data.users = AsyncMock()
-    service_data.tariffs = AsyncMock()
-    # ... etc
-    return service_data
+async def test_user_deletes_own_key(backend):
+    key = await issue_trial(backend, 1006)
 
-@pytest.fixture
-async def mock_pool():
-    return AsyncMock(spec=asyncpg.Pool)
+    resp = await backend.client.delete(f"/api/v1/keys/{key['email']}", params={"tg_id": 1006})
 
-# In test:
-app.dependency_overrides[get_service_data] = lambda: mock_service_data
-app.dependency_overrides[get_pool] = lambda: mock_pool
+    assert resp.status_code == 204
+    assert await db_key(backend, key["email"]) is None
+    assert backend.fakes.panel_client(key["email"]) is None
 ```
 
-**Example Test:**
-```python
-@pytest.mark.asyncio
-async def test_create_key_free_tariff(client, mock_service_data, mock_pool):
-    # Setup mocks
-    mock_service_data.tariffs.get_data.return_value = Mock(amount=0, id=1)
-    mock_service_data.users.get_data.return_value = Mock(tg_id=123, server_id=1)
-    
-    # Call endpoint
-    response = client.post(
-        "/api/v1/keys/",
-        json={"tg_id": 123, "tariff_id": 1},
-        headers={"X-Bot-Secret": "test_secret"},
-    )
-    
-    # Assert
-    assert response.status_code == 200
-    assert "email" in response.json()
+```bash
+TEST_DATABASE_URL=postgresql://user@127.0.0.1:5432/db pytest tests/integration
 ```
+
+Unit tests stay for cheap pure logic (price/discount math, cookie signing, filters). Older
+`tests/api/` files still use `MagicMock` `ServiceDataModel` via `app.dependency_overrides`; move
+them to `tests/integration/` when touching them.
 
 ## Factories
 

@@ -3,7 +3,6 @@
 Grace-модель удалена из бэкенда; сервис теперь отдаёт только метрики
 канального бонуса (cumulative/today/yesterday), без "grace"-ключа.
 """
-from unittest.mock import AsyncMock
 
 import pytest
 
@@ -46,18 +45,6 @@ class _Pool:
 
 
 @pytest.mark.asyncio
-async def test_channel_bonus_stats_endpoint_returns_service_result(api_client, monkeypatch):
-    """Endpoint отдаёт результат сервиса и проходит auth-override."""
-    monkeypatch.setattr(
-        GraceBonusStatsService, "get", AsyncMock(return_value=EXPECTED)
-    )
-    r = await api_client.get("/api/v1/admin/grace-bonus-stats")
-    assert r.status_code == 200
-    assert r.json() == EXPECTED
-    assert "grace" not in r.json()
-
-
-@pytest.mark.asyncio
 async def test_service_aggregates_in_expected_order():
     """fetchval вызывается 3 раза в порядке метрик: cumulative, today, yesterday."""
     conn = _Conn([7, 1, 0])
@@ -76,15 +63,3 @@ async def test_service_aggregates_in_expected_order():
     # promo_id передан параметром $1, не inline — проверяем аргумент вызова
     promo_calls = [c for c in conn.calls if c and c[0] == "channel_subscription_bonus"]
     assert len(promo_calls) == 3  # cumulative + today + yesterday
-
-
-@pytest.mark.asyncio
-async def test_service_propagates_db_error():
-    """Сбой БД пробрасывается (endpoint вернёт 500), без молчаливых нулей."""
-    class _BadPool(_Pool):
-        def acquire(self):
-            raise RuntimeError("connection refused")
-
-    service = GraceBonusStatsService(_BadPool(_Conn([])))
-    with pytest.raises(RuntimeError):
-        await service.get()

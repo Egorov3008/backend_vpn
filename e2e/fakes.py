@@ -54,6 +54,8 @@ class State:
         self.inbounds: list[int] = []
         self.clients: dict[str, dict] = {}  # email -> {"client": {...}, "inboundIds": [...]}
         self.panel_calls: list[dict] = []
+        # Пути панели, которые отвечают ошибкой (имитация сбоя 3x-UI)
+        self.panel_fail: list[str] = []
 
 
 S = State()
@@ -163,6 +165,25 @@ def _find_sent(chat_id: int, message_id: int) -> Optional[dict]:
         if item["chat_id"] == chat_id and item["message"]["message_id"] == message_id:
             return item
     return None
+
+
+@app.post("/_ctl/yk/{payment_id}/status")
+async def ctl_yk_status(payment_id: str, request: Request) -> dict:
+    """Сменить статус счёта без webhook: тест сам решает, когда звать backend."""
+    payment = S.payments.get(payment_id)
+    if not payment:
+        raise HTTPException(404, "payment not found")
+    status = (await request.json())["status"]
+    payment["status"] = status
+    payment["paid"] = status == "succeeded"
+    return _public_payment(payment)
+
+
+@app.post("/_ctl/panel/fail")
+async def ctl_panel_fail(request: Request) -> dict:
+    """Пути 3x-UI (префиксы), которые начнут отвечать ошибкой."""
+    S.panel_fail = list((await request.json()).get("paths") or [])
+    return {"ok": True}
 
 
 @app.post("/_ctl/yk/{payment_id}/succeed")
@@ -372,6 +393,8 @@ async def panel_api(path: str, request: Request):
     if request.method == "POST" and request.headers.get("content-type", "").startswith("application/json"):
         body = await request.json()
     S.panel_calls.append({"method": request.method, "path": path, "body": body})
+    if any(path.startswith(prefix) for prefix in S.panel_fail):
+        return {"success": False, "msg": "e2e fake: panel failure", "obj": None}
     parts = path.split("/")
 
     if path == "inbounds/list":

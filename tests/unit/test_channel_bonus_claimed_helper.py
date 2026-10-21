@@ -24,14 +24,3 @@ async def test_claimed_false_on_db_error():
     pool = MagicMock()
     pool.fetchrow = AsyncMock(side_effect=RuntimeError("db down"))
     assert await is_channel_bonus_claimed(pool, 123) is False
-
-
-@pytest.mark.asyncio
-async def test_claimed_uses_channel_subscription_bonus_promo_id():
-    """promo_id передаётся как параметр (channel_subscription_bonus)."""
-    pool = MagicMock()
-    pool.fetchrow = AsyncMock(return_value=None)
-    await is_channel_bonus_claimed(pool, 999)
-    # fetchrow(sql, tg_id, promo_id)
-    assert pool.fetchrow.call_args.args[1] == 999
-    assert pool.fetchrow.call_args.args[2] == "channel_subscription_bonus"

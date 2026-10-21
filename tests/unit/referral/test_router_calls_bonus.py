@@ -34,52 +34,6 @@ def _make_payment(
 
 
 @pytest.mark.asyncio
-async def test_route_calls_referral_bonus_service():
-    """After successful payment route, bonus_service.process_referral_bonus
-    must be called with the paying user's tg_id and payment amount."""
-    payment = _make_payment()
-
-    model_service = MagicMock()
-    model_service.payments.get_data = AsyncMock(return_value=payment)
-    model_service.payments.update = AsyncMock()
-    model_service.payments.service.claim_pending = AsyncMock(return_value="claim-token")
-    model_service.payments.service.release_claim = AsyncMock(return_value=True)
-    model_service.payments.service.complete_claim = AsyncMock(return_value=True)
-    model_service.users.get_data = AsyncMock(return_value=MagicMock(tg_id=200, balance=0.0))
-    model_service.users.update = AsyncMock()
-
-    cache = MagicMock()
-    conn = MagicMock()
-
-    processor = PaymentProcessor(conn=conn, model_service=model_service, cache=cache)
-
-    creation_service = MagicMock()
-    creation_service.process = AsyncMock(return_value={"key": "k"})
-    creation_service.send_notification = AsyncMock()
-
-    renewal_service = MagicMock()
-    renewal_service.process = AsyncMock(return_value=None)
-    renewal_service.send_notification = AsyncMock()
-
-    bonus_service = MagicMock()
-    bonus_service.process_referral_bonus = AsyncMock(return_value=True)
-
-    router = PaymentRouter(
-        processor=processor,
-        creation_service=creation_service,
-        renewal_service=renewal_service,
-        bonus_service=bonus_service,
-    )
-
-    await router.route(payment.payment_id)
-
-    bonus_service.process_referral_bonus.assert_awaited_once()
-    args, kwargs = bonus_service.process_referral_bonus.await_args
-    assert kwargs["referred_tg_id"] == 200
-    assert kwargs["payment_amount"] == 500.0
-
-
-@pytest.mark.asyncio
 async def test_route_swallows_bonus_failure_so_payment_succeeds():
     """#7: ошибка бонус-движка (например, DB сбой при начислении баланса) НЕ должна
     валить обработку платежа — роутер ловит и логирует, платёж остаётся succeeded

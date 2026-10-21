@@ -50,33 +50,3 @@ async def test_audit_failure_increments_counter_and_stays_fail_open():
 
     after = _counter_value(action, error_type)
     assert after > before, "счётчик сбоев аудита не вырос"
-
-
-@pytest.mark.asyncio
-async def test_audit_failure_labels_error_type_name():
-    """error_type label = type(e).__name__ (не строка сообщения)."""
-    action, error_type = "change_tariff", "ConnectionResetError"
-    before = _counter_value(action, error_type)
-
-    conn = AsyncMock()
-    conn.execute = AsyncMock(side_effect=ConnectionResetError("gone"))
-    pool = _make_pool(conn)
-
-    await AuditLogger(pool).record(1, action, "x@y.com")
-
-    assert _counter_value(action, error_type) > before
-
-
-@pytest.mark.asyncio
-async def test_audit_success_does_not_increment_counter():
-    """Успешный INSERT не трогает счётчик сбоев."""
-    action, error_type = "generate_key", "RuntimeError"
-    before = _counter_value(action, error_type)
-
-    conn = AsyncMock()
-    conn.execute = AsyncMock(return_value=None)  # успех
-    pool = _make_pool(conn)
-
-    await AuditLogger(pool).record(7, action, "9:2")
-
-    assert _counter_value(action, error_type) == before

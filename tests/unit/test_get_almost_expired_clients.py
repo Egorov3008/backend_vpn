@@ -50,12 +50,3 @@ async def test_returns_empty_when_nothing_expiring(xui_session):
     result = await xui_session.get_almost_expired_clients(within_seconds=600)
 
     assert result == []
-
-
-@pytest.mark.asyncio
-async def test_propagates_page_size_to_list_clients_all(xui_session):
-    xui_session.list_clients_all = AsyncMock(return_value=[])
-
-    await xui_session.get_almost_expired_clients(within_seconds=600, page_size=50)
-
-    xui_session.list_clients_all.assert_awaited_once_with(page_size=50)

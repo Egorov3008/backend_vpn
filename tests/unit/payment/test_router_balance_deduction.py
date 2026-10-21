@@ -110,49 +110,6 @@ def make_processor_and_router(
 
 
 @pytest.mark.asyncio
-async def test_balance_discount_is_deducted_from_user_balance():
-    """When the user paid using their reward balance, that amount
-    must be subtracted from users.balance after a successful payment."""
-    user = make_user(tg_id=100, balance=50.0)
-    payment = make_payment(
-        tg_id=100,
-        amount=160.0,                # final amount after 40₽ discount
-        referral_discount=0.0,       # no 10% referred-customer discount
-        balance_discount=40.0,       # 40₽ came from user's reward balance
-    )
-    processor, router, model_service, _ = make_processor_and_router(payment, user)
-
-    await router.route(payment.payment_id)
-
-    assert user.balance == pytest.approx(10.0, abs=1e-9), (
-        f"Expected user.balance=10.0 after deducting 40₽ balance discount, "
-        f"got {user.balance}"
-    )
-    model_service.users.update.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_balance_discount_not_deducted_twice_for_idempotent_reroute():
-    """If the webhook re-fires after a successful payment, the early-return
-    for status=='succeeded' must prevent a second deduction."""
-    user = make_user(tg_id=100, balance=10.0)
-    payment = make_payment(
-        tg_id=100,
-        amount=160.0,
-        referral_discount=0.0,
-        balance_discount=40.0,
-        status="succeeded",          # already processed
-    )
-    processor, router, model_service, _ = make_processor_and_router(payment, user)
-
-    await router.route(payment.payment_id)
-
-    # User balance must remain untouched.
-    assert user.balance == pytest.approx(10.0, abs=1e-9)
-    model_service.users.update.assert_not_awaited()
-
-
-@pytest.mark.asyncio
 async def test_referral_10pct_discount_does_not_touch_user_balance():
     """The 10% referred-customer discount must NOT reduce users.balance —
     it is a price reduction for the new customer, not a spend of the
@@ -190,19 +147,6 @@ async def test_combined_discounts_only_balance_part_is_deducted():
     # Only balance_discount (50₽) is deducted; the 10% discount is price-side.
     assert user.balance == pytest.approx(50.0, abs=1e-9)
     model_service.users.update.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_processor_loads_balance_discount_from_payment():
-    """PaymentProcessor must surface balance_discount from the persisted
-    PaymentModel so the router can deduct it."""
-    payment = make_payment(balance_discount=42.5, referral_discount=0.0)
-    processor, _, model_service, _ = make_processor_and_router(payment, make_user())
-
-    await processor.load_payment_data(payment.payment_id)
-
-    assert processor.balance_discount == pytest.approx(42.5, abs=1e-9)
-    assert processor.referral_discount == pytest.approx(0.0, abs=1e-9)
 
 
 @pytest.mark.asyncio

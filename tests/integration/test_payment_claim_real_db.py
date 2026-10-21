@@ -1,80 +1,19 @@
 """Интеграционные тесты: атомарный захват платежей и уникальность keys.payment_id на живом Postgres.
 
 Проверяют реальный SQL PaymentRepository (claim/release/complete/mark_canceled_if_pending)
-и миграции db/migrations/20261011_* и 20261012_*. Моки здесь не используются: гонка
-между захватами воспроизводится настоящими конкурентными запросами.
-
-Пропускаются, если не задана TEST_DATABASE_URL. Тест СОЗДАЁТ и УДАЛЯЕТ таблицы, поэтому
-отказывается работать, если search_path указывает не на изолированную тестовую схему
-(имя которой начинается с test). Для общей БД задавайте схему через options, например:
-    TEST_DATABASE_URL="postgresql://user:pass@host:5432/db?options=-csearch_path%3Dtest_payment_claim"
+на схеме из db/schema_fixed.sql и миграций. Моки здесь не используются: гонка между
+захватами воспроизводится настоящими конкурентными запросами. База и запуск — см.
+tests/integration/conftest.py.
 """
 
 import asyncio
-import os
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import asyncpg
 import pytest
 
 from database.service import PAYMENT_CLAIM_STALE_MINUTES, PaymentRepository
 from models import PaymentModel
-
-TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
-MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "db" / "migrations"
-
-pytestmark = pytest.mark.skipif(
-    not TEST_DATABASE_URL,
-    reason="TEST_DATABASE_URL не задана — нужен живой Postgres (см. докстринг)",
-)
-
-# Базовые таблицы в той форме, в какой их видит миграция (до колонок захвата и payment_id).
-BASE_DDL = """
-DROP TABLE IF EXISTS keys CASCADE;
-DROP TABLE IF EXISTS payments CASCADE;
-CREATE TABLE payments (
-    id SERIAL PRIMARY KEY,
-    payment_id TEXT UNIQUE,
-    tg_id BIGINT NOT NULL,
-    amount REAL NOT NULL DEFAULT 0.0,
-    status TEXT DEFAULT 'pending',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    payment_type TEXT NOT NULL,
-    number_of_months INTEGER NOT NULL DEFAULT 1,
-    discount_percent INTEGER NOT NULL DEFAULT 0,
-    referral_discount REAL NOT NULL DEFAULT 0.0,
-    balance_discount REAL NOT NULL DEFAULT 0.0
-);
-CREATE TABLE keys (
-    email TEXT PRIMARY KEY,
-    tg_id BIGINT NOT NULL
-);
-"""
-
-
-async def _search_path(conn) -> str:
-    return await conn.fetchval("SHOW search_path")
-
-
-@pytest.fixture
-async def pool():
-    p = await asyncpg.create_pool(TEST_DATABASE_URL, min_size=1, max_size=20)
-    async with p.acquire() as conn:
-        search_path = await _search_path(conn)
-        # Защита от запуска DROP/CREATE в общей схеме (public) рабочей БД
-        if not search_path.split(",")[0].strip().startswith("test"):
-            await p.close()
-            pytest.fail(
-                f"search_path={search_path!r}: тест создаёт и удаляет таблицы, "
-                "задайте изолированную схему test* через options в TEST_DATABASE_URL"
-            )
-        await conn.execute(BASE_DDL)
-        # Все миграции по порядку имён: схема теста совпадает с накатом на БД
-        for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
-            await conn.execute(path.read_text(encoding="utf-8"))
-    yield p
-    await p.close()
 
 
 @pytest.fixture
@@ -211,18 +150,22 @@ async def test_renewal_expiry_is_fixed_on_first_write_and_reused_on_retry(pool, 
     assert stored == 5_000
 
 
+_KEY_SQL = (
+    "INSERT INTO keys (email, client_id, payment_id, tg_id, created_at, expiry_time, key, inbound_id)"
+    " SELECT v.email, v.client_id, v.payment_id, 1, 0, 0, '', 11 FROM (VALUES {rows}) AS v(email, client_id, payment_id)"
+)
+
+
 @pytest.mark.asyncio
 async def test_keys_payment_id_is_unique_when_set(pool):
     async with pool.acquire() as conn:
         await conn.execute(
-            "INSERT INTO keys (email, tg_id, payment_id) VALUES ('a@x', 1, 'pay_k')"
+            _KEY_SQL.format(rows="('a@x', 'c1', 'pay_k')")
         )
         # Ключи без платежа (NULL) не конфликтуют между собой
-        await conn.execute("INSERT INTO keys (email, tg_id) VALUES ('n1@x', 1), ('n2@x', 1)")
+        await conn.execute(_KEY_SQL.format(rows="('n1@x', 'c2', NULL), ('n2@x', 'c3', NULL)"))
         with pytest.raises(asyncpg.UniqueViolationError):
-            await conn.execute(
-                "INSERT INTO keys (email, tg_id, payment_id) VALUES ('b@x', 1, 'pay_k')"
-            )
+            await conn.execute(_KEY_SQL.format(rows="('b@x', 'c4', 'pay_k')"))
 
 
 @pytest.mark.asyncio

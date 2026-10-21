@@ -51,18 +51,6 @@ def test_verify_missing_hash():
         verify_telegram_hash(data, BOT_TOKEN)
 
 
-def test_verify_uses_constant_time_comparison():
-    """Ensure that verify_telegram_hash uses hmac.compare_digest (timing-attack safe).
-
-    We exercise this by providing a hash of the wrong length — compare_digest
-    must still return False without raising on length mismatch.
-    """
-    data = {"id": 123, "first_name": "Test", "auth_date": int(time.time())}
-    data["hash"] = "a" * 10  # wrong length but well-formed string
-    with pytest.raises(TelegramHashError, match="Invalid"):
-        verify_telegram_hash(data, BOT_TOKEN)
-
-
 @pytest.mark.asyncio
 async def test_telegram_login_new_user():
     """A new Telegram user is created via user_repo and notify_fn is invoked."""

@@ -14,8 +14,10 @@ class Pricing:
             )
             return price.amount
 
+        # stocks.value в БД — DECIMAL (asyncpg отдаёт Decimal), цена тарифа — float:
+        # их смешение в арифметике падает с TypeError
         temp_price = Price(
-            amount=price.amount, stock=stock.value, type_stock=stock.stock_type
+            amount=price.amount, stock=float(stock.value), type_stock=stock.stock_type
         )
         result = temp_price.format_price
         logger.info(
