@@ -387,6 +387,7 @@ All settings are defined in `config.py` (`Settings`, pydantic-settings, loads `.
 - `YOOKASSA_SHOP_ID` / `YOOKASSA_SECRET_KEY` — payment processing. `DISABLE_WEBHOOK_IP_CHECK` bypasses the YooKassa IP allowlist for local/dev — the allowlist itself is hardcoded in `api/v1/payments.py::_check_webhook_ip`, not env-configurable.
 - `WEBHOOK_BASE_URL` — public URL for YooKassa callbacks (e.g., https://api.example.com)
 - `ADMIN_ID` — JSON array of admin Telegram IDs
+- `ADMIN_PAYMENT_NOTIFY_ENABLED` (default `true`) — after every successful payment (`PaymentRouter.route`, after `succeeded` is committed) each admin from `ADMIN_ID` gets a Telegram message via `BOT_TOKEN`: service = YooKassa payment `description` + payment ID, and the amount (`services/core/payment/admin_notification.py`). A failed send is logged and never breaks payment processing.
 - `TRUSTED_PROXY_CIDRS` — proxies whose `X-Forwarded-For`/`X-Real-IP` are trusted by `app/client_ip.py` (rate limit, YooKassa webhook IP check). The XFF chain is walked right to left and the first non-proxy address wins; a direct client's headers are ignored. Default: loopback + private ranges.
 - No hardcoded domains or bot usernames: the bot username comes from `getMe` on `BOT_TOKEN` (`BOT_NAME` is only a fallback, empty by default).
 - `BOT_TOKEN` — for sending user notifications and (via `services/core/referral`) channel-subscription checks against `CANALL_URL`

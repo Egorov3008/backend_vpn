@@ -63,6 +63,42 @@ async def test_paid_invoice_issues_one_key_and_notifies(backend):
     assert backend.fakes.sent_messages(2001), "пользователь не получил сообщение о ключе"
 
 
+ADMIN_TG_ID = 9001
+
+
+async def test_admin_notified_once_with_service_id_and_amount(backend, monkeypatch):
+    import config
+
+    monkeypatch.setattr(config, "ADMIN_ID", [ADMIN_TG_ID])
+    await register_user(backend, 2010)
+    invoice = await _invoice(backend, 2010, number_of_months=3)
+    yk_description = backend.fakes.state()["yk_requests"][-1]["description"]
+
+    await _pay(backend, invoice["payment_id"])
+    await _webhook(backend, invoice["payment_id"])  # повтор вебхука не шлёт второе сообщение
+
+    messages = backend.fakes.sent_messages(ADMIN_TG_ID)
+    assert len(messages) == 1
+    text = messages[0]["params"]["text"]
+    assert yk_description in text
+    assert invoice["payment_id"] in text
+    assert f"{invoice['amount']:.2f}" in text
+
+
+async def test_admin_notification_disabled_by_env(backend, monkeypatch):
+    import config
+
+    monkeypatch.setattr(config, "ADMIN_ID", [ADMIN_TG_ID])
+    monkeypatch.setattr(config.settings, "admin_payment_notify_enabled", False)
+    await register_user(backend, 2011)
+    invoice = await _invoice(backend, 2011)
+
+    await _pay(backend, invoice["payment_id"])
+
+    assert (await db_payment(backend, invoice["payment_id"]))["status"] == "succeeded"
+    assert backend.fakes.sent_messages(ADMIN_TG_ID) == []
+
+
 async def test_repeated_webhook_does_not_issue_second_key(backend):
     await register_user(backend, 2002)
     invoice = await _invoice(backend, 2002)

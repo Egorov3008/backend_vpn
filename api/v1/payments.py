@@ -250,7 +250,8 @@ async def payment_webhook(
     payment_router = build_payment_router(
         pool, service_data, cache, data_service, notifier=_NOTIFIER
     )
-    await payment_router.route(payment_id)
+    # Описание берём из подтверждённого ответа ЮKassa API, а не из тела вебхука
+    await payment_router.route(payment_id, description=getattr(yk_payment, "description", None))
 
     logger.info("Webhook платежа обработан", extra={"payment_id": payment_id})
     return {"ok": True}

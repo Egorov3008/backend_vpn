@@ -75,8 +75,17 @@ async def list_pending_payments(
     return [dict(r) for r in rows]
 
 
-async def _check_yookassa_status(payment_id: str) -> Optional[str]:
-    """Спрашивает YooKassa статус платежа. Возвращает 'succeeded'|'pending'|'canceled'|... или None при ошибке."""
+@dataclasses.dataclass(frozen=True)
+class _YooKassaPayment:
+    status: Optional[str]
+    description: Optional[str]
+
+
+async def _find_yookassa_payment(payment_id: str) -> Optional[_YooKassaPayment]:
+    """Спрашивает YooKassa платёж: статус ('succeeded'|'pending'|'canceled'|...) и описание.
+
+    None — при ошибке запроса.
+    """
     import yookassa
 
     yookassa.Configuration.account_id = settings.yookassa_shop_id
@@ -86,7 +95,10 @@ async def _check_yookassa_status(payment_id: str) -> Optional[str]:
             asyncio.to_thread(yookassa.Payment.find_one, payment_id),
             timeout=15.0,
         )
-        return getattr(yk, "status", None)
+        return _YooKassaPayment(
+            status=getattr(yk, "status", None),
+            description=getattr(yk, "description", None),
+        )
     except asyncio.TimeoutError:
         logger.warning("Sweep: YooKassa find_one timed out", payment_id=payment_id)
         return None
@@ -178,7 +190,8 @@ async def sweep_pending_payments(
             report["excluded"].append(pid)
             continue
 
-        yk_status = await _check_yookassa_status(pid)
+        yk_payment = await _find_yookassa_payment(pid)
+        yk_status = yk_payment.status if yk_payment else None
 
         if yk_status is None:
             report["unknown"].append(pid)
@@ -190,7 +203,7 @@ async def sweep_pending_payments(
                 continue
             try:
                 router = build_payment_router(pool, service_data, cache, data_service, notifier=notifier)
-                await router.route(pid)
+                await router.route(pid, description=yk_payment.description)
                 report["routed"] += 1
                 logger.info("Sweep: платёж обработан (route)", payment_id=pid)
             except Exception as e:
