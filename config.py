@@ -150,6 +150,8 @@ class Settings(BaseSettings):
     daily_payments_report_enabled: bool = Field(default=True, alias="DAILY_PAYMENTS_REPORT_ENABLED")
     daily_payments_report_hour: int = Field(default=18, ge=0, le=23, alias="DAILY_PAYMENTS_REPORT_HOUR")
     daily_payments_report_tz: str = Field(default="Europe/Moscow", alias="DAILY_PAYMENTS_REPORT_TZ")
+    # Сообщение админам из ADMIN_ID о каждой успешной оплате (услуга + сумма).
+    admin_payment_notify_enabled: bool = Field(default=True, alias="ADMIN_PAYMENT_NOTIFY_ENABLED")
 
     # Прокси, которым верим X-Forwarded-For/X-Real-IP (app/client_ip.py):
     # список CIDR через запятую. По умолчанию loopback и частные сети docker.

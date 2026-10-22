@@ -13,6 +13,7 @@ from services.core.keys.utils.formtion import FormationKey
 from services.core.keys.utils.renewal import KeyRenewal
 from services.core.keys.utils.reset import KeyResetter
 from services.core.keys.utils.updating import KeyUpdater
+from services.core.payment.admin_notification import AdminPaymentNotifier, MessageSender, PaymentSuccessListener
 from services.core.payment.creation_service import KeyCreationService
 from services.core.payment.processor import PaymentProcessor
 from services.core.payment.renewal_service import KeyRenewalService
@@ -59,6 +60,16 @@ def build_key_services(
     return (create_key, key_renewal, xui)
 
 
+def build_payment_success_listeners(notifier: Optional[MessageSender]) -> list[PaymentSuccessListener]:
+    """Слушатели успешной оплаты: уведомление админов из ADMIN_ID (если включено)."""
+    from app.auth import admin_ids
+    from config import settings
+
+    if notifier is None or not settings.admin_payment_notify_enabled:
+        return []
+    return [AdminPaymentNotifier(notifier, sorted(admin_ids()))]
+
+
 def build_payment_router(
     pool: asyncpg.Pool,
     service_data: ServiceDataModel,
@@ -103,4 +114,5 @@ def build_payment_router(
         creation_service=creation_svc,
         renewal_service=renewal_svc,
         bonus_service=bonus_svc,
+        success_listeners=build_payment_success_listeners(notifier),
     )

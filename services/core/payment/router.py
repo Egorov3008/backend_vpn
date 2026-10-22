@@ -1,7 +1,8 @@
 from functools import partial
-from typing import Optional
+from typing import Optional, Sequence
 
 from logger import logger
+from services.core.payment.admin_notification import PaidPayment, PaymentSuccessListener
 from services.core.payment.creation_service import KeyCreationService
 from services.core.payment.processor import PaymentProcessor
 from services.core.payment.renewal_service import KeyRenewalService
@@ -16,7 +17,8 @@ class PaymentRouter:
     1. Load payment data
     2. Route to creation or renewal service
     3. Send notifications
-    4. Handle referral bonuses
+    4. Notify success listeners (e.g. admins)
+    5. Handle referral bonuses
     """
 
     def __init__(
@@ -25,18 +27,21 @@ class PaymentRouter:
         creation_service: KeyCreationService,
         renewal_service: KeyRenewalService,
         bonus_service: Optional[ReferralBonusService] = None,
+        success_listeners: Sequence[PaymentSuccessListener] = (),
     ):
         self.processor = processor
         self.creation_service = creation_service
         self.renewal_service = renewal_service
         self.bonus_service = bonus_service
+        self.success_listeners = tuple(success_listeners)
 
-    async def route(self, payment_id: str) -> None:
+    async def route(self, payment_id: str, description: Optional[str] = None) -> None:
         """
         Обработать платеж и отправить уведомления.
 
         Args:
             payment_id: ID платежа для обработки
+            description: описание платежа из ЮKassa (для уведомления админов)
         """
         logger.info(
             "Начало обработки платежа",
@@ -195,6 +200,16 @@ class PaymentRouter:
 
         if notify is not None:
             await notify()
+
+        await self._notify_success_listeners(
+            PaidPayment(
+                payment_id=payment_id,
+                amount=self.processor.amount,
+                tg_id=self.processor.tg_id,
+                operation=operation,
+                description=description,
+            )
+        )
         logger.debug(
             "Статус платежа обновлен", payment_id=payment_id, new_status="succeeded"
         )
@@ -276,4 +291,19 @@ class PaymentRouter:
                     "Ошибка при начислении реферального бонуса",
                     payment_id=payment_id,
                     error=str(e),
+                )
+
+    async def _notify_success_listeners(self, payment: PaidPayment) -> None:
+        """Платёж уже succeeded: сбой слушателя логируем, но обработку не ломаем."""
+        for listener in self.success_listeners:
+            try:
+                await listener.on_payment_succeeded(payment)
+            except Exception as e:
+                logger.error(
+                    "Ошибка слушателя успешной оплаты",
+                    payment_id=payment.payment_id,
+                    listener=type(listener).__name__,
+                    error_type=type(e).__name__,
+                    error=str(e),
+                    exc_info=True,
                 )
