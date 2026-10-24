@@ -57,6 +57,7 @@ from services.cache.key_manager import CacheKeyManager
 from services.cache.service import CacheService
 from services.core.data.service import ServiceDataModel
 from services.core.keys.admin_report import KeyAdminReport
+from services.core.referral.link_generator import ReferralLinkGenerator, referral_share_url
 from services.core.keys.utils.reset import KeyResetter
 from services.core.keys.utils.inbounds import paid_inbound_ids
 from services.system.maintenance import maintenance_mode
@@ -694,6 +695,11 @@ async def admin_get_tariff(
     }
 
 
+def _referral_link_response(token: str, referrer_tg_id: int) -> dict:
+    """Токен + ссылка-приглашение на сайт (адрес собирает только бэкенд)."""
+    return {"token": token, "referrer_tg_id": referrer_tg_id, "share_url": referral_share_url(token)}
+
+
 @router.get("/referrals/links/{tg_id}", response_model=AdminReferralLinkResponse)
 async def admin_get_referral_link(
     tg_id: int,
@@ -702,8 +708,8 @@ async def admin_get_referral_link(
     """Get referral link for a user."""
     existing = await service_data.referral_links.get_by(referrer_tg_id=tg_id)
     if existing:
-        return {"token": existing.token, "referrer_tg_id": existing.referrer_tg_id}
-    return {"token": None, "referrer_tg_id": tg_id}
+        return _referral_link_response(existing.token, existing.referrer_tg_id)
+    return {"token": None, "referrer_tg_id": tg_id, "share_url": None}
 
 
 @router.post("/referrals/links", response_model=AdminReferralLinkResponse)
@@ -713,15 +719,8 @@ async def admin_create_referral_link(
     service_data: ServiceDataModel = Depends(get_service_data),
 ):
     """Get existing or create new referral link for a user."""
-    import uuid
-    existing = await service_data.referral_links.get_by(referrer_tg_id=tg_id)
-    if existing:
-        return {"token": existing.token, "referrer_tg_id": existing.referrer_tg_id}
-    token = f"ref_{uuid.uuid4().hex[:12]}"
-    from models.referrals.referral_link import ReferralLink
-    link = ReferralLink(referrer_tg_id=tg_id, token=token)
-    await service_data.referral_links.save_data(pool, link, token=link.token)
-    return {"token": link.token, "referrer_tg_id": link.referrer_tg_id}
+    link = await ReferralLinkGenerator(service_data).get_or_create(pool, tg_id)
+    return _referral_link_response(link.token, link.referrer_tg_id)
 
 
 @router.get("/referrals/links/by-token/{token}", response_model=AdminReferralLinkDetailResponse)
@@ -734,8 +733,7 @@ async def admin_get_referral_link_by_token(
     if not link:
         raise HTTPException(status_code=404, detail="Referral link not found")
     return {
-        "token": link.token,
-        "referrer_tg_id": link.referrer_tg_id,
+        **_referral_link_response(link.token, link.referrer_tg_id),
         "created_at": link.created_at.isoformat() if link.created_at else None,
         "id": link.id,
     }
