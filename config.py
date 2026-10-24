@@ -162,6 +162,22 @@ class Settings(BaseSettings):
     # Самая большая скидка, которую можно задать коду в админке.
     promo_max_percent: int = Field(default=90, ge=1, le=100, alias="PROMO_MAX_PERCENT")
 
+    # Акция возврата (services/core/promo_codes/winback.py): личный промокод тем, у кого
+    # оплаченный ключ истёк WINBACK_MIN_DAYS..WINBACK_MAX_DAYS дней назад. Выключена по умолчанию.
+    winback_enabled: bool = Field(default=False, alias="WINBACK_ENABLED")
+    winback_min_days: int = Field(default=7, ge=0, alias="WINBACK_MIN_DAYS")
+    winback_max_days: int = Field(default=60, ge=1, alias="WINBACK_MAX_DAYS")
+    winback_discount_percent: int = Field(default=30, ge=1, le=100, alias="WINBACK_DISCOUNT_PERCENT")
+    winback_valid_hours: int = Field(default=72, ge=1, alias="WINBACK_VALID_HOURS")
+    # Скидка на первые N месяцев оплаты; 0 — на весь срок.
+    winback_max_months: int = Field(default=1, ge=0, alias="WINBACK_MAX_MONTHS")
+    # Не чаще одного предложения человеку за столько дней.
+    winback_repeat_days: int = Field(default=90, ge=1, alias="WINBACK_REPEAT_DAYS")
+    # Доля контрольной группы (напоминание без скидки), %.
+    winback_control_percent: int = Field(default=20, ge=0, le=100, alias="WINBACK_CONTROL_PERCENT")
+    # Оплата в течение стольких дней после сообщения считается возвратом.
+    winback_attribution_days: int = Field(default=7, ge=1, alias="WINBACK_ATTRIBUTION_DAYS")
+
     # Прокси, которым верим X-Forwarded-For/X-Real-IP (app/client_ip.py):
     # список CIDR через запятую. По умолчанию loopback и частные сети docker.
     trusted_proxy_cidrs_raw: str = Field(

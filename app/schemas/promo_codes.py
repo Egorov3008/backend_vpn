@@ -78,3 +78,23 @@ class AdminPromoCodeStatsResponse(BaseModel):
     payments_after: int
     repeat_payers: int
     window_days: int
+
+
+class WinbackCohortResponse(BaseModel):
+    sent: int
+    returned: int
+    revenue: float
+
+
+class AdminWinbackStatsResponse(BaseModel):
+    enabled: bool
+    discount_percent: int
+    valid_hours: int
+    min_days: int
+    max_days: int
+    control_percent: int
+    days: int
+    attribution_days: int
+    offer: WinbackCohortResponse
+    control: WinbackCohortResponse
+    discount_total: float

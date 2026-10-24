@@ -17,11 +17,13 @@ from app.schemas.promo_codes import (
     AdminPromoCodesListResponse,
     AdminPromoCodeStatsResponse,
     AdminPromoCodeUpdateRequest,
+    AdminWinbackStatsResponse,
 )
 from config import settings
 from services.admin_audit import AuditLogger
 from services.core.promo_codes.admin import InvalidPromoCode, NewPromoCode, PromoCodeAdmin
 from services.core.promo_codes.repository import DuplicatePromoCode
+from services.core.promo_codes.winback import WinbackPolicy, WinbackRepository
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(verify_admin_or_bot)])
 destructive_router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(verify_admin_actor)])
@@ -55,6 +57,25 @@ async def admin_promo_code_stats(
         raise HTTPException(status_code=404, detail="Promo code not found")
     promo, stats = found
     return {"promo_code": AdminPromoCodeResponse.build(promo), **asdict(stats)}
+
+
+@router.get("/winback/stats", response_model=AdminWinbackStatsResponse)
+async def admin_winback_stats(
+    days: int = Query(30, ge=1, le=365, description="Предложения за столько последних дней"),
+    pool: asyncpg.Pool = Depends(get_pool),
+):
+    """Акция возврата: сколько вернулись со скидкой и в контрольной группе без неё."""
+    policy = WinbackPolicy.from_settings(settings)
+    stats = await WinbackRepository(pool).stats(days, policy.attribution_days)
+    return {
+        "enabled": policy.enabled,
+        "discount_percent": policy.discount_percent,
+        "valid_hours": policy.valid_hours,
+        "min_days": policy.min_days,
+        "max_days": policy.max_days,
+        "control_percent": policy.control_percent,
+        **asdict(stats),
+    }
 
 
 @destructive_router.post("/promo-codes", response_model=AdminPromoCodeResponse, status_code=201)
