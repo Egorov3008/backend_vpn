@@ -150,6 +150,10 @@ async def test_discount_only_for_first_months(backend):
 
     assert three_months["promo_discount_amount"] == one_month["promo_discount_amount"]
     assert three_months["final_amount"] > one_month["final_amount"] * 2
+    # Разбивка сходится: клиент показывает базу и каждую скидку отдельной строкой
+    for quote in (one_month, three_months):
+        parts = quote["promo_discount_amount"] + quote["volume_discount_amount"] + quote["balance_discount_amount"]
+        assert quote["final_amount"] == pytest.approx(quote["base_amount"] - parts)
 
 
 async def test_code_for_purchase_does_not_apply_to_renewal(backend):

@@ -117,13 +117,14 @@ def _calculate_payment_amount(
     """
     from config import MIN_PAYMENT_AMOUNT
 
-    # 1. Базовая сумма (tariff_amount уже со Stock-скидкой; промокод — сразу в рублях)
-    base_amount = round(tariff_amount * number_of_months - promo_discount_amount, 2)
+    # 1. Базовая сумма (tariff_amount уже со Stock-скидкой), затем промокод в рублях
+    base_amount = tariff_amount * number_of_months
+    amount_after_promo = round(base_amount - promo_discount_amount, 2) if promo_discount_amount else base_amount
 
     # 2. Скидка за объём (от 2 месяцев)
     volume_discount_percent = DISCOUNTS if number_of_months >= 2 and DISCOUNTS > 0 else 0
-    amount_after_volume = round(base_amount * (1 - volume_discount_percent / 100), 2) if volume_discount_percent > 0 else base_amount
-    volume_discount_amount = round(base_amount - amount_after_volume, 2)
+    amount_after_volume = round(amount_after_promo * (1 - volume_discount_percent / 100), 2) if volume_discount_percent > 0 else amount_after_promo
+    volume_discount_amount = round(amount_after_promo - amount_after_volume, 2)
 
     # 3. Реферальная скидка 10% (для приглашённых)
     referral_discount_amount = 0.0
