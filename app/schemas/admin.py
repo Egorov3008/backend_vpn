@@ -95,6 +95,76 @@ class AdminDashboardMetricsResponse(BaseModel):
     succeeded_pct: float
 
 
+class AdminMonthPaymentsWindow(BaseModel):
+    revenue: float
+    count: int
+    paying_users: int
+
+
+class AdminMonthPayments(BaseModel):
+    current: AdminMonthPaymentsWindow
+    previous_same_days: AdminMonthPaymentsWindow
+    previous_full: AdminMonthPaymentsWindow
+    daily_revenue: List[float]
+    daily_revenue_prev: List[float]
+
+
+class AdminMonthActivity(BaseModel):
+    active_users: int
+    active_keys: int
+    active_keys_paid: int
+    active_keys_guest: int
+
+
+class AdminMonthNewUsersWindow(BaseModel):
+    count: int
+    paid_users: int
+    payments: int
+    revenue: float
+
+
+class AdminMonthNewUsers(BaseModel):
+    current: AdminMonthNewUsersWindow
+    previous_same_days: AdminMonthNewUsersWindow
+    previous_full: AdminMonthNewUsersWindow
+    daily: List[float]
+    daily_prev: List[float]
+
+
+class AdminMonthWebWindow(BaseModel):
+    guests: int
+    linked_telegram: int
+    paid: int
+
+
+class AdminMonthWeb(BaseModel):
+    current: AdminMonthWebWindow
+    previous_same_days: AdminMonthWebWindow
+    previous_full: AdminMonthWebWindow
+    daily: List[float]
+    daily_prev: List[float]
+
+
+class AdminMonthTariff(BaseModel):
+    tariff_id: Optional[int]
+    tariff: str
+    payments: int
+    revenue: float
+
+
+class AdminMonthStatsResponse(BaseModel):
+    month: str
+    prev_month: str
+    tz: str
+    days_in_month: int
+    days_elapsed: int
+    payments: AdminMonthPayments
+    activity: AdminMonthActivity
+    new_users: AdminMonthNewUsers
+    web: AdminMonthWeb
+    tariffs: List[AdminMonthTariff]
+
+
 class ChannelBonusStats(BaseModel):
     cumulative: int
     today: int

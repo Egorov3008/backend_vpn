@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 import asyncpg
 
 from app.auth import verify_admin_or_bot, verify_admin_actor, AdminPrincipal
+from services.admin_stats import InvalidPeriod, MonthPeriod, MonthStatsService
 from services.admin_filters import KeyStatus, filter_keys, filter_payments, filter_users
 from app.dependencies import get_service_data, get_pool, get_cache
 from app.factories import build_key_services
@@ -20,6 +21,7 @@ from app.schemas.admin import (
     AdminUpdatePanelMetaRequest,
     AdminStatsResponse,
     AdminDashboardMetricsResponse,
+    AdminMonthStatsResponse,
     AdminGraceBonusStatsResponse,
     AdminSchedulerStatusResponse,
     MaintenanceStatusResponse,
@@ -106,6 +108,21 @@ async def get_dashboard_metrics(
     """
     from services.admin_dashboard_metrics import DashboardMetricsService
     return await DashboardMetricsService(pool).get_all_dashboard_metrics()
+
+
+@router.get("/stats/month", response_model=AdminMonthStatsResponse)
+async def get_month_stats(
+    month: Optional[str] = Query(None, max_length=7, description="ГГГГ-ММ; по умолчанию текущий месяц"),
+    tz: str = Query("UTC", max_length=64, description="IANA-часовой пояс админа, например Europe/Moscow"),
+    pool: asyncpg.Pool = Depends(get_pool),
+):
+    """Месяц против прошлого: оплаты, новые пользователи и их оплаты, регистрации с сайта,
+    популярные тарифы; плюс активные пользователи и ключи на сейчас."""
+    try:
+        period = MonthPeriod.build(month, tz)
+    except InvalidPeriod as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return await MonthStatsService(pool).get(period)
 
 
 @router.get("/grace-bonus-stats", response_model=AdminGraceBonusStatsResponse)
