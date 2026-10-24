@@ -1,14 +1,15 @@
-"""Продление из кабинета (Mini App и веб) по тарифу, снятому с продажи.
+"""Выбор тарифа при продлении из кабинета (Mini App и веб).
 
-Тариф ключа мог пропасть из AVAILABLE_RATES: новые ключи на нём не продаются,
-но владелец ключа должен продлить его по цене своего тарифа.
+- ключ на платном тарифе, снятом с продажи (нет в AVAILABLE_RATES), продлевается
+  только по своему тарифу и по его цене;
+- пробный ключ и ключ на тарифе в продаже — любым тарифом из AVAILABLE_RATES.
 """
 import time
 
 import pytest
 
-from tests.integration.conftest import STANDARD_TARIFF_ID, TRIAL_TARIFF_ID
-from tests.integration.helpers import db_key, db_payment, insert_key, register_user
+from tests.integration.conftest import FAMILY_TARIFF_ID, STANDARD_TARIFF_ID, TRIAL_TARIFF_ID
+from tests.integration.helpers import db_key, db_payment, insert_key, issue_trial, register_user
 
 DAY_MS = 24 * 3600 * 1000
 LEGACY_TARIFF_ID = 20
@@ -104,3 +105,35 @@ async def test_legacy_tariff_not_allowed_for_another_key(backend, legacy_key):
     resp = await backend.client.post("/api/v1/web/payments", json=body, headers=_session(7003))
 
     assert resp.status_code == 404
+
+
+async def test_legacy_key_cannot_switch_to_tariff_on_sale(backend, legacy_key):
+    body = {"tariff_id": STANDARD_TARIFF_ID, "number_of_months": 1, "operation": "renew_key", "email": legacy_key}
+
+    quote = await backend.client.post("/api/v1/web/payments/quotes", json=body, headers=_session(7001))
+    invoice = await backend.client.post("/api/v1/web/payments", json=body, headers=_session(7001))
+
+    assert quote.status_code == 404
+    assert invoice.status_code == 404
+
+
+async def test_key_on_sale_tariff_can_switch_tariff(backend):
+    await register_user(backend, 7004)
+    email = await insert_key(
+        backend, 7004, tariff_id=STANDARD_TARIFF_ID, expiry_time=int(time.time() * 1000) + DAY_MS
+    )
+    await backend.reload_cache()
+    body = {"tariff_id": FAMILY_TARIFF_ID, "number_of_months": 1, "operation": "renew_key", "email": email}
+
+    resp = await backend.client.post("/api/v1/web/payments", json=body, headers=_session(7004))
+
+    assert resp.status_code == 200, resp.text
+
+
+async def test_trial_key_renews_at_tariff_on_sale(backend):
+    trial = await issue_trial(backend, 7005)
+    body = {"tariff_id": STANDARD_TARIFF_ID, "number_of_months": 1, "operation": "renew_key", "email": trial["email"]}
+
+    resp = await backend.client.post("/api/v1/web/payments", json=body, headers=_session(7005))
+
+    assert resp.status_code == 200, resp.text

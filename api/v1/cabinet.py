@@ -55,7 +55,7 @@ from app.schemas.payments import (
 from app.schemas.tariffs import TariffResponse
 from app.schemas.users import UserResponse
 from config import AVAILABLE_RATES_LIST
-from models import Key
+from models import Key, Tariff
 from services.cache.key_manager import CacheKeyManager
 from services.cache.service import CacheService
 from services.core.data.service import ServiceDataModel
@@ -79,8 +79,8 @@ class CabinetPaymentRequest(CabinetQuoteRequest):
 
 
 class CabinetTariffResponse(TariffResponse):
-    # True — тариф снят с продажи (нет в AVAILABLE_RATES), но им можно продлить
-    # ключ пользователя, который на нём сидит. Новый ключ на нём не купить.
+    # True — тариф снят с продажи (нет в AVAILABLE_RATES). Ключ на нём
+    # продлевается только по нему; новый ключ на нём не купить.
     renew_only: bool = False
 
 
@@ -95,16 +95,21 @@ def available_rates() -> List[int]:
     return AVAILABLE_RATES_LIST
 
 
-def is_tariff_allowed(tariff_id: int, operation: str, key: Optional[Key] = None) -> bool:
-    """Можно ли оплатить тариф из кабинета.
+def allowed_tariff_ids(key: Optional[Key] = None, key_tariff: Optional[Tariff] = None) -> List[int]:
+    """Какими тарифами можно оплатить из кабинета.
 
-    Новый ключ — только тарифы из `AVAILABLE_RATES`. Продление — они же
-    плюс текущий тариф продлеваемого ключа, даже если его сняли с продажи:
-    человек продлевает то, что у него уже есть, по цене этого тарифа.
+    Новый ключ, пробный ключ и ключ на тарифе из `AVAILABLE_RATES` — любой
+    тариф из `AVAILABLE_RATES`. Ключ на платном тарифе, снятом с продажи,
+    продлевается только по своему тарифу, без выбора.
     """
-    if tariff_id in available_rates():
-        return True
-    return operation == "renew_key" and key is not None and key.tariff_id == tariff_id
+    if key is not None and key_tariff is not None and is_off_sale_paid(key_tariff):
+        return [key_tariff.id]
+    return list(available_rates())
+
+
+def is_off_sale_paid(tariff: Tariff) -> bool:
+    """Платный тариф, которого нет в `AVAILABLE_RATES`."""
+    return tariff.id not in available_rates() and bool(tariff.amount) and tariff.amount > 0
 
 
 async def require_own_key(email: str, tg_id: int, service_data: ServiceDataModel, pool) -> Key:
@@ -141,8 +146,11 @@ async def require_payable_tariff(
         elif email_required:
             raise HTTPException(status_code=422, detail="email required for renew_key operation")
 
+    key_tariff = None
+    if key is not None and key.tariff_id is not None:
+        key_tariff = await service_data.tariffs.get_data(key.tariff_id, conn=pool)
     tariff = await service_data.tariffs.get_data(body.tariff_id, conn=pool)
-    if not tariff or not is_tariff_allowed(body.tariff_id, body.operation, key):
+    if not tariff or body.tariff_id not in allowed_tariff_ids(key, key_tariff):
         raise HTTPException(status_code=404, detail="Tariff not found")
     if not tariff.amount or tariff.amount <= 0:
         # Бесплатные тарифы не оплачиваются; триал — через POST /keys/trial.
@@ -183,8 +191,8 @@ def build_cabinet_router(
         service_data: ServiceDataModel = Depends(get_service_data),
         pool: asyncpg.Pool = Depends(get_pool),
     ):
-        """Тарифы в продаже и, с `renew_only`, снятые с продажи тарифы ключей
-        пользователя: ими можно только продлить свой ключ."""
+        """Тарифы в продаже и, с `renew_only`, снятые с продажи платные тарифы
+        ключей пользователя: ключ на таком тарифе продлевается только по нему."""
         tariffs = await list_tariffs(service_data=service_data, pool=pool)
         allowed = set(available_rates())
         keys = await service_data.data_service.keys.filter(pool, tg_id=principal.tg_id)
@@ -193,7 +201,7 @@ def build_cabinet_router(
         for t in tariffs:
             if t.id in allowed:
                 result.append(CabinetTariffResponse(**t.model_dump()))
-            elif t.id in own_tariffs and t.amount > 0:
+            elif t.id in own_tariffs and is_off_sale_paid(t):
                 result.append(CabinetTariffResponse(**t.model_dump(), renew_only=True))
         return result
 
