@@ -74,6 +74,7 @@ class CabinetQuoteRequest(BaseModel):
     number_of_months: int = Field(1, ge=1, le=12)
     operation: Literal["create_key", "renew_key"] = "create_key"
     email: Optional[str] = Field(None, description="Key to renew; required for operation=renew_key")
+    promo_code: Optional[str] = Field(None, max_length=64, description="Промокод, если пользователь его ввёл")
 
 
 class CabinetPaymentRequest(CabinetQuoteRequest):
@@ -320,6 +321,7 @@ def build_cabinet_router(
                 tariff_id=body.tariff_id,
                 number_of_months=body.number_of_months,
                 operation=body.operation,
+                promo_code=body.promo_code,
             ),
             pool=pool,
             service_data=service_data,
@@ -344,6 +346,7 @@ def build_cabinet_router(
                 operation=body.operation,
                 email=body.email if body.operation == "renew_key" else None,
                 customer_email=body.customer_email,
+                promo_code=body.promo_code,
             ),
             pool,
             service_data,

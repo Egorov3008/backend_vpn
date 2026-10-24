@@ -18,6 +18,9 @@ from services.core.payment.creation_service import KeyCreationService
 from services.core.payment.processor import PaymentProcessor
 from services.core.payment.renewal_service import KeyRenewalService
 from services.core.payment.router import PaymentRouter
+from services.core.promo_codes.listener import PromoRedemptionListener
+from services.core.promo_codes.repository import PromoCodeRepository
+from services.core.promo_codes.service import FailedAttemptLimiter, PromoCodeService
 from services.core.notifications.protocols import INotifier
 from services.core.referral.bonus_service import ReferralBonusService
 
@@ -60,14 +63,45 @@ def build_key_services(
     return (create_key, key_renewal, xui)
 
 
-def build_payment_success_listeners(notifier: Optional[MessageSender]) -> list[PaymentSuccessListener]:
-    """Слушатели успешной оплаты: уведомление админов из ADMIN_ID (если включено)."""
+def build_payment_success_listeners(
+    notifier: Optional[MessageSender], pool: Optional[asyncpg.Pool] = None
+) -> list[PaymentSuccessListener]:
+    """Слушатели успешной оплаты: отметка промокода и уведомление админов из ADMIN_ID (если включено)."""
     from app.auth import admin_ids
     from config import settings
 
-    if notifier is None or not settings.admin_payment_notify_enabled:
-        return []
-    return [AdminPaymentNotifier(notifier, sorted(admin_ids()))]
+    listeners: list[PaymentSuccessListener] = []
+    if pool is not None:
+        listeners.append(PromoRedemptionListener(build_promo_code_repository(pool)))
+    if notifier is not None and settings.admin_payment_notify_enabled:
+        listeners.append(AdminPaymentNotifier(notifier, sorted(admin_ids())))
+    return listeners
+
+
+def build_promo_code_repository(pool: asyncpg.Pool) -> PromoCodeRepository:
+    from config import settings
+
+    return PromoCodeRepository(pool, reservation_ttl_minutes=settings.promo_reservation_ttl_minutes)
+
+
+_promo_failed_attempts: Optional[FailedAttemptLimiter] = None
+
+
+def promo_failed_attempts() -> FailedAttemptLimiter:
+    """Один счётчик неверных кодов на процесс (иначе лимит сбрасывался бы на каждом запросе)."""
+    global _promo_failed_attempts
+    if _promo_failed_attempts is None:
+        from config import settings
+
+        _promo_failed_attempts = FailedAttemptLimiter(
+            max_attempts=settings.promo_max_failed_attempts,
+            window_seconds=settings.promo_failed_window_minutes * 60,
+        )
+    return _promo_failed_attempts
+
+
+def build_promo_code_service(pool: asyncpg.Pool) -> PromoCodeService:
+    return PromoCodeService(build_promo_code_repository(pool), promo_failed_attempts())
 
 
 def build_payment_router(
@@ -114,5 +148,5 @@ def build_payment_router(
         creation_service=creation_svc,
         renewal_service=renewal_svc,
         bonus_service=bonus_svc,
-        success_listeners=build_payment_success_listeners(notifier),
+        success_listeners=build_payment_success_listeners(notifier, pool),
     )

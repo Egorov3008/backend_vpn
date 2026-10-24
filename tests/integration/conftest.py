@@ -219,7 +219,7 @@ def _configure_backend(monkeypatch, fakes_url: str) -> None:
 
     import bot_project
     from api.v1 import landing, payments
-    from app import rate_limit
+    from app import factories, rate_limit
     from client import _xui_circuit_breaker
     from config import settings
     from services.core.connect_module.repositories import form_data
@@ -255,6 +255,7 @@ def _configure_backend(monkeypatch, fakes_url: str) -> None:
     _xui_circuit_breaker.close()
     rate_limit._buckets.clear()
     payments._yk_cancel_checked_at.clear()
+    factories.promo_failed_attempts().clear()
 
 
 async def _seed(pool, fakes_url: str) -> None:

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 from typing import Optional, Literal
 from datetime import datetime
 
@@ -18,9 +18,23 @@ class PaymentCreateRequest(BaseModel):
     customer_email: Optional[str] = None  # For fiscal receipt
     amount: Optional[float] = None  # Override tariff price (e.g. after discounts)
     referral_discount: Optional[float] = None  # Two-sided referral discount passed from bot
+    promo_code: Optional[str] = Field(None, max_length=64)
 
 
-class PaymentCreateResponse(BaseModel):
+class PromoFieldsMixin(BaseModel):
+    """Что стало с промокодом из запроса; все поля пустые, если кода не было.
+
+    promo_status: applied — скидка по коду в сумме; not_better — у пользователя уже
+    есть скидка больше, код не применён; иначе причина отказа (not_found, expired,
+    limit_reached, ...). promo_message — готовый текст для пользователя.
+    """
+    promo_code: Optional[str] = None
+    promo_status: Optional[str] = None
+    promo_message: Optional[str] = None
+    promo_discount_amount: float = 0.0
+
+
+class PaymentCreateResponse(PromoFieldsMixin):
     payment_id: str
     confirmation_url: str
     amount: float
@@ -52,9 +66,10 @@ class PaymentCalculateRequest(BaseModel):
     tariff_id: int
     number_of_months: int = 1
     operation: Literal["create_key", "renew_key"] = "create_key"
+    promo_code: Optional[str] = Field(None, max_length=64)
 
 
-class PaymentCalculateResponse(BaseModel):
+class PaymentCalculateResponse(PromoFieldsMixin):
     final_amount: float
     # Полная разбивка скидок — бот рендерит окно оплаты по этим полям
     # (источник истины — backend, см. _calculate_payment_amount).
@@ -65,6 +80,7 @@ class PaymentCalculateResponse(BaseModel):
     referral_discount_amount: float = 0.0
     balance_discount_amount: float = 0.0
     has_stock_discount: bool = False
+    has_promo_discount: bool = False
     has_volume_discount: bool = False
     has_referral_discount: bool = False
     has_balance_discount: bool = False

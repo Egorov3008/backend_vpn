@@ -153,6 +153,15 @@ class Settings(BaseSettings):
     # Сообщение админам из ADMIN_ID о каждой успешной оплате (услуга + сумма).
     admin_payment_notify_enabled: bool = Field(default=True, alias="ADMIN_PAYMENT_NOTIFY_ENABLED")
 
+    # Промокоды (services/core/promo_codes). Резерв активации живёт столько минут,
+    # пока счёт можно оплатить; потом место в лимите кода освобождается.
+    promo_reservation_ttl_minutes: int = Field(default=60, ge=1, alias="PROMO_RESERVATION_TTL_MINUTES")
+    # Защита от перебора: столько неверных кодов на пользователя за окно, потом отказ.
+    promo_max_failed_attempts: int = Field(default=10, ge=1, alias="PROMO_MAX_FAILED_ATTEMPTS")
+    promo_failed_window_minutes: int = Field(default=10, ge=1, alias="PROMO_FAILED_WINDOW_MINUTES")
+    # Самая большая скидка, которую можно задать коду в админке.
+    promo_max_percent: int = Field(default=90, ge=1, le=100, alias="PROMO_MAX_PERCENT")
+
     # Прокси, которым верим X-Forwarded-For/X-Real-IP (app/client_ip.py):
     # список CIDR через запятую. По умолчанию loopback и частные сети docker.
     trusted_proxy_cidrs_raw: str = Field(

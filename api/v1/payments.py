@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from app.auth import verify_bot_secret
 from app.client_ip import extract_client_ip
 from app.dependencies import get_service_data, get_pool, get_cache
-from app.factories import build_payment_router
+from app.factories import build_payment_router, build_promo_code_service
 from app.rate_limit import rate_limit
 from bot_project import bot as telegram_bot
 from app.schemas.payments import (
@@ -30,6 +30,8 @@ from services.cache.key_manager import CacheKeyManager
 from services.cache.service import CacheService
 from services.core.data.service import ServiceDataModel
 from services.core.notifications import TelegramBotNotifier
+from services.core.promo_codes.models import PromoCode, PromoRequest
+from services.core.promo_codes.service import APPLIED, NOT_BETTER, NOT_BETTER_MESSAGE, message_for, normalize_code
 from logger import logger
 
 router = APIRouter(
@@ -88,6 +90,7 @@ def _calculate_payment_amount(
     user_tg_id: int,
     user_balance: float = 0.0,
     stock_discount_amount: float = 0.0,
+    promo_discount_amount: float = 0.0,
 ) -> dict:
     """
     Рассчитывает сумму платежа со всеми скидками.
@@ -95,6 +98,8 @@ def _calculate_payment_amount(
     ``tariff_amount`` должен быть уже Stock-скидочной помесячной ценой
     (см. ``_apply_stock_to_tariff``); ``stock_discount_amount`` — суммарная
     Stock-скидка за все месяцы, передаётся сквозным полем для отчётности.
+    ``promo_discount_amount`` — скидка по промокоду в рублях, вычитается из базовой
+    суммы до скидки за объём (см. ``_quote_payment``).
 
     Returns:
         dict с полями:
@@ -112,8 +117,8 @@ def _calculate_payment_amount(
     """
     from config import MIN_PAYMENT_AMOUNT
 
-    # 1. Базовая сумма (tariff_amount уже со Stock-скидкой)
-    base_amount = tariff_amount * number_of_months
+    # 1. Базовая сумма (tariff_amount уже со Stock-скидкой; промокод — сразу в рублях)
+    base_amount = round(tariff_amount * number_of_months - promo_discount_amount, 2)
 
     # 2. Скидка за объём (от 2 месяцев)
     volume_discount_percent = DISCOUNTS if number_of_months >= 2 and DISCOUNTS > 0 else 0
@@ -145,15 +150,124 @@ def _calculate_payment_amount(
     return {
         "base_amount": base_amount,
         "stock_discount_amount": stock_discount_amount,
+        "promo_discount_amount": promo_discount_amount,
         "volume_discount_percent": volume_discount_percent,
         "volume_discount_amount": volume_discount_amount,
         "referral_discount_amount": referral_discount_amount,
         "balance_discount_amount": balance_discount_amount,
         "final_amount": final_amount,
         "has_stock_discount": stock_discount_amount > 0,
+        "has_promo_discount": promo_discount_amount > 0,
         "has_volume_discount": volume_discount_percent > 0,
         "has_referral_discount": referral_discount_amount > 0,
         "has_balance_discount": balance_discount_amount > 0,
+    }
+
+
+@dataclasses.dataclass
+class _Quote:
+    """Сумма счёта и что стало с промокодом (если его ввели)."""
+    result: dict
+    promo: Optional[PromoCode] = None
+    promo_discount: float = 0.0
+    # applied / not_better / причина отказа (services.core.promo_codes.rules.Reason)
+    promo_status: Optional[str] = None
+
+
+async def _quote_payment(
+    pool,
+    service_data: ServiceDataModel,
+    *,
+    tg_id: int,
+    tariff,
+    number_of_months: int,
+    operation: str,
+    promo_code: Optional[str],
+    referral_discount_from_request: Optional[float] = None,
+) -> _Quote:
+    """Единый расчёт суммы для /quotes и /create (источник истины — backend).
+
+    Промокод не складывается со Stock-скидкой и реферальной скидкой: считаются оба
+    варианта и действует тот, где сумма до списания баланса меньше. Скидка за объём
+    и баланс работают в обоих вариантах.
+    """
+    from config import MIN_PAYMENT_AMOUNT
+
+    user = await service_data.users.get_data(tg_id, conn=pool)
+    user_referral_id = getattr(user, "referral_id", None) if user else None
+    user_check_referral = getattr(user, "check_referral", False) if user else False
+    user_balance = getattr(user, "balance", 0.0) if user else 0.0
+
+    # Stock-скидка на помесячную цену тарифа (источник истины — backend)
+    stock = await service_data.stocks.get_data(tg_id)
+    stock_price_per_month, _ = _apply_stock_to_tariff(tariff.amount, stock)
+    stock_discount_amount = round((float(tariff.amount) - stock_price_per_month) * number_of_months, 2)
+
+    result = _calculate_payment_amount(
+        tariff_amount=stock_price_per_month,
+        number_of_months=number_of_months,
+        referral_discount_from_request=referral_discount_from_request,
+        user_referral_id=user_referral_id,
+        user_check_referral=user_check_referral,
+        user_tg_id=tg_id,
+        user_balance=user_balance,
+        stock_discount_amount=stock_discount_amount,
+    )
+    quote = _Quote(result=result)
+    if not promo_code or not promo_code.strip():
+        return quote
+
+    check = await build_promo_code_service(pool).check(
+        promo_code, PromoRequest(tg_id=tg_id, operation=operation, number_of_months=number_of_months)
+    )
+    if not check.ok:
+        quote.promo_status = check.reason
+        return quote
+
+    full_price = float(tariff.amount) * number_of_months
+    # Скидка не опускает сумму ниже минимального платежа
+    promo_discount = min(
+        check.promo.discount_for(tariff.amount, number_of_months),
+        max(0.0, round(full_price - MIN_PAYMENT_AMOUNT, 2)),
+    )
+    promo_result = _calculate_payment_amount(
+        tariff_amount=float(tariff.amount),
+        number_of_months=number_of_months,
+        referral_discount_from_request=None,
+        user_referral_id=None,
+        user_check_referral=False,
+        user_tg_id=tg_id,
+        user_balance=user_balance,
+        promo_discount_amount=promo_discount,
+    )
+    if promo_discount > 0 and _before_balance(promo_result) < _before_balance(result):
+        quote.result = promo_result
+        quote.promo = check.promo
+        quote.promo_discount = promo_discount
+        quote.promo_status = APPLIED
+    else:
+        quote.promo_status = NOT_BETTER
+    return quote
+
+
+def _before_balance(result: dict) -> float:
+    return round(result["final_amount"] + result["balance_discount_amount"], 2)
+
+
+def _promo_fields(quote: _Quote, promo_code: Optional[str]) -> dict:
+    """Поля ответа о промокоде: что ввели, применён ли и что сказать пользователю."""
+    if quote.promo_status is None:
+        return {}
+    if quote.promo_status == APPLIED:
+        message = None
+    elif quote.promo_status == NOT_BETTER:
+        message = NOT_BETTER_MESSAGE
+    else:
+        message = message_for(quote.promo_status)
+    return {
+        "promo_code": normalize_code(promo_code or ""),
+        "promo_status": quote.promo_status,
+        "promo_message": message,
     }
 
 
@@ -284,27 +398,16 @@ async def calculate_payment(
         logger.warning("Тариф не найден", extra={"tariff_id": body.tariff_id})
         raise HTTPException(status_code=404, detail="Tariff not found")
 
-    # Загружаем пользователя для расчёта скидок
-    user = await service_data.users.get_data(body.tg_id, conn=pool)
-    user_referral_id = getattr(user, "referral_id", None) if user else None
-    user_check_referral = getattr(user, "check_referral", False) if user else False
-    user_balance = getattr(user, "balance", 0.0) if user else 0.0
-
-    # Stock-скидка на помесячную цену тарифа (источник истины — backend)
-    stock = await service_data.stocks.get_data(body.tg_id)
-    stock_price_per_month, _ = _apply_stock_to_tariff(tariff.amount, stock)
-    stock_discount_amount = round((float(tariff.amount) - stock_price_per_month) * body.number_of_months, 2)
-
-    result = _calculate_payment_amount(
-        tariff_amount=stock_price_per_month,
+    quote = await _quote_payment(
+        pool,
+        service_data,
+        tg_id=body.tg_id,
+        tariff=tariff,
         number_of_months=body.number_of_months,
-        referral_discount_from_request=None,  # Бот не передаёт — рассчитываем на бэкенде
-        user_referral_id=user_referral_id,
-        user_check_referral=user_check_referral,
-        user_tg_id=body.tg_id,
-        user_balance=user_balance,
-        stock_discount_amount=stock_discount_amount,
+        operation=body.operation,
+        promo_code=body.promo_code,
     )
+    result = quote.result
 
     logger.info("Расчёт платежа завершён", extra={
         "tg_id": body.tg_id,
@@ -314,9 +417,11 @@ async def calculate_payment(
         "volume_discount": result["volume_discount_amount"],
         "referral_discount": result["referral_discount_amount"],
         "balance_discount": result["balance_discount_amount"],
+        "promo_discount": result["promo_discount_amount"],
+        "promo_status": quote.promo_status,
     })
 
-    return PaymentCalculateResponse(**result)
+    return PaymentCalculateResponse(**result, **_promo_fields(quote, body.promo_code))
 
 
 @router.post(
@@ -409,29 +514,20 @@ async def _create_payment(
     else:
         payment_type = f"create_key|{body.tariff_id}"
 
-    # Загружаем пользователя для расчёта скидок
-    user = await service_data.users.get_data(body.tg_id, conn=pool)
-    user_referral_id = getattr(user, "referral_id", None) if user else None
-    user_check_referral = getattr(user, "check_referral", False) if user else False
-    user_balance = getattr(user, "balance", 0.0) if user else 0.0
-
-    # Stock-скидка на помесячную цену тарифа — рассчитываем на бэкенде,
-    # чтобы сумма создания платежа совпадала с /calculate (источник истины).
-    stock = await service_data.stocks.get_data(body.tg_id)
-    stock_price_per_month, _ = _apply_stock_to_tariff(tariff.amount, stock)
-    stock_discount_amount = round((float(tariff.amount) - stock_price_per_month) * body.number_of_months, 2)
-
-    # Рассчитываем сумму с использованием общей функции
-    result = _calculate_payment_amount(
-        tariff_amount=stock_price_per_month,
+    quote = await _quote_payment(
+        pool,
+        service_data,
+        tg_id=body.tg_id,
+        tariff=tariff,
         number_of_months=body.number_of_months,
+        operation=body.operation,
+        promo_code=body.promo_code,
         referral_discount_from_request=body.referral_discount if body.referral_discount and body.referral_discount > 0 else None,
-        user_referral_id=user_referral_id,
-        user_check_referral=user_check_referral,
-        user_tg_id=body.tg_id,
-        user_balance=user_balance,
-        stock_discount_amount=stock_discount_amount,
     )
+    result = quote.result
+    if quote.promo_status not in (None, APPLIED, NOT_BETTER):
+        # Код перестал подходить после расчёта цены: счёт по другой цене не выставляем молча
+        raise HTTPException(status_code=409, detail=message_for(quote.promo_status))
 
     final_amount = result["final_amount"]
     referral_discount = result["referral_discount_amount"]
@@ -445,6 +541,16 @@ async def _create_payment(
         "balance_discount": balance_discount,
         "final_amount": final_amount,
     })
+
+    promo_service = build_promo_code_service(pool) if quote.promo is not None else None
+    promo_request = PromoRequest(
+        tg_id=body.tg_id, operation=body.operation, number_of_months=body.number_of_months
+    )
+    if promo_service is not None:
+        # Резерв под блокировкой кода: лимит активаций не превышается параллельными оплатами
+        reason = await promo_service.reserve(quote.promo, promo_request, quote.promo_discount)
+        if reason is not None:
+            raise HTTPException(status_code=409, detail=message_for(reason))
 
     # Один открытый счёт на одну операцию: если пользователь вернулся и снова нажал
     # «оплатить» тот же ключ, отдаём прежний неоплаченный счёт, а не выставляем второй.
@@ -464,7 +570,7 @@ async def _create_payment(
             "Повторно отдан незавершённый платёж вместо нового",
             extra={"payment_id": open_payment_id, "tg_id": body.tg_id, "payment_type": payment_type},
         )
-        return _payment_create_response(open_payment_id, open_confirmation_url, result)
+        return _payment_create_response(open_payment_id, open_confirmation_url, result, quote, body.promo_code)
 
     import yookassa
     yookassa.Configuration.account_id = settings.yookassa_shop_id
@@ -559,13 +665,28 @@ async def _create_payment(
         logger.error("Ошибка при сохранении платежа", extra={"error": str(e), "payment_id": payment_id})
         raise HTTPException(status_code=500, detail="Failed to save payment")
 
+    if promo_service is not None:
+        try:
+            await promo_service.attach_payment(payment_id, quote.promo, body.tg_id, quote.promo_discount)
+        except Exception as e:
+            # Счёт уже выставлен со скидкой; без отметки активация не попадёт в статистику
+            logger.error("Не удалось привязать промокод к платежу", extra={"payment_id": payment_id, "error": str(e)})
+
     logger.info("Платёж успешно создан", extra={"payment_id": payment_id, "tg_id": body.tg_id, "amount": final_amount})
 
-    return _payment_create_response(payment_id, confirmation_url, result)
+    return _payment_create_response(payment_id, confirmation_url, result, quote, body.promo_code)
 
 
-def _payment_create_response(payment_id: str, confirmation_url: str, result: dict) -> PaymentCreateResponse:
+def _payment_create_response(
+    payment_id: str,
+    confirmation_url: str,
+    result: dict,
+    quote: Optional[_Quote] = None,
+    promo_code: Optional[str] = None,
+) -> PaymentCreateResponse:
     return PaymentCreateResponse(
+        **(_promo_fields(quote, promo_code) if quote is not None else {}),
+        promo_discount_amount=result["promo_discount_amount"],
         payment_id=payment_id,
         confirmation_url=confirmation_url,
         amount=result["final_amount"],
