@@ -295,11 +295,14 @@ class AdminTariffsListResponse(BaseModel):
 class AdminReferralLinkResponse(BaseModel):
     token: Optional[str] = None
     referrer_tg_id: int
+    # Ссылка-приглашение на сайт; None, если не задан WEB_PUBLIC_URL.
+    share_url: Optional[str] = None
 
 
 class AdminReferralLinkDetailResponse(BaseModel):
     token: str
     referrer_tg_id: int
+    share_url: Optional[str] = None
     created_at: Optional[str] = None
     id: Optional[int] = None
 

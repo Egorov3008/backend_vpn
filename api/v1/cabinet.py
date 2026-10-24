@@ -79,6 +79,8 @@ class CabinetPaymentRequest(CabinetQuoteRequest):
 
 class CabinetReferralLinkResponse(BaseModel):
     token: str
+    # Ссылка-приглашение на сайт; None, если не задан WEB_PUBLIC_URL.
+    share_url: Optional[str] = None
 
 
 def available_rates() -> List[int]:
@@ -315,6 +317,6 @@ def build_cabinet_router(
     ):
         """Возвращает реферальный токен пользователя, создавая его при первом вызове."""
         link = await admin_create_referral_link(tg_id=principal.tg_id, pool=pool, service_data=service_data)
-        return CabinetReferralLinkResponse(token=link["token"])
+        return CabinetReferralLinkResponse(token=link["token"], share_url=link["share_url"])
 
     return router
