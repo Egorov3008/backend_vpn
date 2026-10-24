@@ -345,6 +345,7 @@ class SyncScheduler:
         from services.notifications.funnels.referral_bonus import ReferralBonusFunnel
         from services.notifications.funnels.referral_reminder import ReferralReminderFunnel
         from services.notifications.funnels.channel_bonus_reminder import ChannelBonusReminderFunnel
+        from services.notifications.funnels.winback_offer import WinbackOfferFunnel
         from services.notifications.rate_limiter import RateLimiter
 
         logger.info("Запуск цикла уведомлений")
@@ -359,6 +360,8 @@ class SyncScheduler:
             funnel_manager.register(ReferralBonusFunnel(pool=self._pool, rate_limiter=rate_limiter))
             funnel_manager.register(ReferralReminderFunnel(pool=self._pool, rate_limiter=rate_limiter))
             funnel_manager.register(ChannelBonusReminderFunnel(pool=self._pool, rate_limiter=rate_limiter))
+            # Выключена, пока не задан WINBACK_ENABLED=true (should_send сразу отвечает «нет»)
+            funnel_manager.register(WinbackOfferFunnel(pool=self._pool, rate_limiter=rate_limiter))
 
             report = await funnel_manager.run_cycle()
             logger.info(

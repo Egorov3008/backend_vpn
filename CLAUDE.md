@@ -150,6 +150,17 @@ PostgreSQL + 3x-UI Panel
   - Verifies IP whitelist
   - Updates payment status, calls KeyCreation on success
 
+#### Promo codes (`services/core/promo_codes/`, migration `db/migrations/20261024_promo_codes.sql`)
+
+A percent discount by code, separate from `stocks` (a personal discount without a code). `/quotes` and `/create` (and the cabinet `payments/quotes`, `payments`) take optional `promo_code` and answer `promo_status`: `applied`, `not_better`, or a refusal reason (`not_found`, `expired`, `limit_reached`, `not_new_user`, `already_used`, ...) plus `promo_message` (Russian text for the user). `/create` with a refused code returns 409, never a silent full price.
+
+- Rules: one class per rule in `rules.py` (`DEFAULT_RULES`: owner, active, dates, operation, audience `new` = no succeeded payment yet (trial does not count), once per user, limit). Add a rule as a new class.
+- Pricing (`api/v1/payments.py::_quote_payment`): the code does not stack with `stocks` and the referral 10%; both variants are computed and the smaller amount before balance wins (`not_better` otherwise). The code discount covers the first `max_months` months; volume discount and balance work as usual; the amount never drops below `MIN_PAYMENT_AMOUNT`.
+- Limit: `/create` reserves an activation under `SELECT ... FOR UPDATE` of the code row (`promo_redemptions`, one row per code+user, `reserved` → `used`). A reservation older than `PROMO_RESERVATION_TTL_MINUTES` does not hold a place. The payment gets `payments.promo_code_id`/`promo_discount`; `PromoRedemptionListener` (a payment success listener) marks it `used`.
+- Brute force: `PROMO_MAX_FAILED_ATTEMPTS` wrong codes per user per `PROMO_FAILED_WINDOW_MINUTES` (in-memory, `app/factories.py::promo_failed_attempts`).
+- Win-back (`services/core/promo_codes/winback.py`, funnel `services/notifications/funnels/winback_offer.py`, migration `20261025_winback_offers.sql`): off until `WINBACK_ENABLED=true`. Targets users with no active key whose latest key expired `WINBACK_MIN_DAYS`..`WINBACK_MAX_DAYS` ago and who paid at least once; at most once per `WINBACK_REPEAT_DAYS`. `WINBACK_CONTROL_PERCENT` of them (stable by tg_id) get the same reminder without a discount. The rest get a personal code `VERNI-XXXXXX` (`owner_tg_id`, one activation, `WINBACK_VALID_HOURS`, `WINBACK_DISCOUNT_PERCENT`, `WINBACK_MAX_MONTHS`) and a web_app button `MINIAPP_URL?screen=pay&renew=<email>&promo=<code>`. Every attempt is stored in `winback_offers` (`delivered=false` if Telegram refused). `GET /admin/winback/stats?days=30` compares returns (a succeeded payment within `WINBACK_ATTRIBUTION_DAYS`) in both groups.
+- Admin (`api/v1/admin_promo.py`): `GET /admin/promo-codes`, `GET /admin/promo-codes/{id}/stats?window_days=14` (activations new vs existing, revenue, discount, abandoned reservations, all payments before/during/after, repeat payers); `POST /admin/promo-codes` and `PATCH /admin/promo-codes/{id}` (`is_active`) are destructive (admin only, audited). Personal codes (`owner_tg_id`) are not listed. Max percent `PROMO_MAX_PERCENT`.
+
 #### Tariffs (`/api/v1/tariffs`)
 
 - **GET `/`** — List all tariffs
