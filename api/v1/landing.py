@@ -45,6 +45,7 @@ from services.cache.loader import LoadingService
 from services.cache.service import CacheService
 from services.core.data.service import ServiceDataModel
 from services.core.keys.utils.calculator import ExpiryCalculator
+from services.core.keys.utils.deep_links import happ_add_link
 from services.core.keys.utils.landing_upgrade import upgrade_landing_key
 from services.core.user.utils.saver import SeverUser
 from services.core.user.utils.trial import TrialService
@@ -450,15 +451,10 @@ async def _bot_url() -> str:
 async def _build_deep_links(key_value: str, landing_uid: str) -> tuple[str, str]:
     """Формирует deep-link в Happ (открыть и импортировать) и в Telegram-бота.
 
-    Happ-клиент принимает subscription URL через `happ://add/<url>` **без**
-    URL-кодирования — см. апстрим 3x-ui (PR MHSanaei/3x-ui#3863,
-    «Fix DeepLink for Happ, remove encoding URL»). Любое кодирование или
-    иные действия (happ://import/, извлечение vless://) Happ отвергает
-    ошибкой «Неизвестное действие DeepLink».
-
-    В проде key.key — это subscription URL (http(s)://…), отдаём его как есть.
+    Формат ссылки Happ — в ``happ_add_link``. В проде key.key — это
+    subscription URL (http(s)://…), отдаём его как есть.
     """
-    deep_link_happ = f"happ://add/{key_value}"
+    deep_link_happ = happ_add_link(key_value) or ""
 
     # Telegram-бот: /start landing_<uid> — бот подхватит и привяжет/выдаст trial
     deep_link_bot = f"{await _bot_url()}?start=landing_{landing_uid}"

@@ -1,6 +1,8 @@
 from pydantic import BaseModel
 from typing import Optional
 
+from services.core.keys.utils.deep_links import happ_add_link
+
 
 class KeyResponse(BaseModel):
     email: str
@@ -14,6 +16,8 @@ class KeyResponse(BaseModel):
     inbound_id: int
     public_link: Optional[str] = None
     link_to_connect: Optional[str] = None
+    # Открыть ключ сразу в Happ (кабинет показывает кнопку, только если ссылка есть).
+    deep_link_happ: Optional[str] = None
     notified_10h: bool = False
     notified_24h: bool = False
 
@@ -34,6 +38,7 @@ class KeyResponse(BaseModel):
             inbound_id=k.inbound_id,
             public_link=public_link,
             link_to_connect=link_to_connect,
+            deep_link_happ=happ_add_link(k.key),
             notified_10h=getattr(k, "notified_10h", False),
             notified_24h=getattr(k, "notified_24h", False),
         )
