@@ -390,3 +390,29 @@ async def test_referrer_is_rewarded_only_for_first_payment(backend):
     assert (await db_user(backend, 2038))["balance"] == bonus
     rewards = await backend.pool.fetchval("SELECT count(*) FROM referral_rewards WHERE referrer_tg_id = 2038")
     assert rewards == 1
+
+
+async def test_cabinet_referral_stats_follow_friends_payment(backend):
+    from app.core.miniapp_session import web_sessions
+
+    await _make_referral(backend, 2040, 2041)
+    await register_user(backend, 2042)
+    await backend.pool.execute("UPDATE users SET referral_id = 2040 WHERE tg_id = 2042")
+    await backend.reload_cache()
+    token, _ = web_sessions.issue(2040)
+
+    async def stats() -> dict:
+        resp = await backend.client.get(
+            "/api/v1/web/referral-stats", headers={"Cookie": f"web_session={token}"}
+        )
+        assert resp.status_code == 200, resp.text
+        return resp.json()
+
+    before = await stats()
+    await _pay(backend, (await _invoice(backend, 2041))["payment_id"])
+    after = await stats()
+
+    assert (before["invited_count"], before["paid_count"], before["earned_total"]) == (2, 0, 0)
+    assert (after["invited_count"], after["paid_count"]) == (2, 1)
+    assert after["earned_total"] > 0
+    assert after["balance"] == pytest.approx((await db_user(backend, 2040))["balance"])

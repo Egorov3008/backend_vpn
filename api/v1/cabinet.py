@@ -18,6 +18,7 @@ YooKassa возвращает после оплаты. Новый клиент �
 Бизнес-логика не дублируется: вызываются handler-функции внутренних
 роутеров `api/v1/*.py`.
 """
+from dataclasses import asdict
 from typing import Awaitable, Callable, List, Literal, Optional, Sequence
 
 import asyncpg
@@ -59,6 +60,7 @@ from models import Key, Tariff
 from services.cache.key_manager import CacheKeyManager
 from services.cache.service import CacheService
 from services.core.data.service import ServiceDataModel
+from services.core.referral.stats import ReferralStatsService
 from services.core.promotions.channel_subscription import (
     ChannelSubscriptionChecker,
     get_channel_subscription_checker,
@@ -88,6 +90,15 @@ class CabinetReferralLinkResponse(BaseModel):
     token: str
     # Ссылка-приглашение на сайт; None, если не задан WEB_PUBLIC_URL.
     share_url: Optional[str] = None
+
+
+class CabinetReferralStatsResponse(BaseModel):
+    invited_count: int
+    paid_count: int
+    earned_total: float
+    balance: float
+    bonus_percent: int
+    friend_discount_percent: int
 
 
 def available_rates() -> List[int]:
@@ -381,5 +392,14 @@ def build_cabinet_router(
         """Возвращает реферальный токен пользователя, создавая его при первом вызове."""
         link = await admin_create_referral_link(tg_id=principal.tg_id, pool=pool, service_data=service_data)
         return CabinetReferralLinkResponse(token=link["token"], share_url=link["share_url"])
+
+    @router.get("/referral-stats", response_model=CabinetReferralStatsResponse, dependencies=read_deps)
+    async def cabinet_referral_stats(
+        principal: UserPrincipal = Depends(principal_dep),
+        pool=Depends(get_pool),
+    ):
+        """Сколько друзей пришло и оплатило, сколько начислено и сколько на балансе."""
+        stats = await ReferralStatsService(pool).for_user(principal.tg_id)
+        return CabinetReferralStatsResponse(**asdict(stats))
 
     return router
