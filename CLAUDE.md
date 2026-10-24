@@ -175,6 +175,7 @@ Anonymous, cookie-based flow for the marketing landing page (separate from the b
 
 Both are built by one factory, `api/v1/cabinet.py::build_cabinet_router`, which reuses the internal handlers (keys, payments, tariffs, referral link). The factory takes only the auth dependency and the YooKassa `return_url`; `tg_id` always comes from the session, never from the request.
 
+- **Tariffs for payment:** `GET /tariffs` returns `AVAILABLE_RATES` plus the paid tariffs of the user's own keys that are off sale, with `renew_only: true`. Such a tariff can only renew the key that is on it (`is_tariff_allowed`); quote and payment share one check (`require_payable_tariff`), quote takes optional `email`.
 - **Mini App:** `POST /miniapp/auth` verifies `Telegram.WebApp.initData` and returns a Bearer token (`verify_miniapp_session`).
 - **Web:** for users who may have no Telegram access yet. Session in HttpOnly cookie `web_session` (`SameSite=Strict`, `Path=/api/v1/web`); mutating requests also need `X-Requested-With: web` (`app/auth.py::verify_web_session`). Both token kinds are signed with `MINIAPP_SESSION_SECRET` under different labels (`app/core/session_tokens.py`), so one is never accepted as the other.
   - `POST /web/anonymous/key`, `GET /web/anonymous/state` — the landing 24h key (`api/v1/landing.py` functions), no account.

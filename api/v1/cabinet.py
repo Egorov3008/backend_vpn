@@ -55,6 +55,7 @@ from app.schemas.payments import (
 from app.schemas.tariffs import TariffResponse
 from app.schemas.users import UserResponse
 from config import AVAILABLE_RATES_LIST
+from models import Key
 from services.cache.key_manager import CacheKeyManager
 from services.cache.service import CacheService
 from services.core.data.service import ServiceDataModel
@@ -70,11 +71,17 @@ class CabinetQuoteRequest(BaseModel):
     tariff_id: int
     number_of_months: int = Field(1, ge=1, le=12)
     operation: Literal["create_key", "renew_key"] = "create_key"
+    email: Optional[str] = Field(None, description="Key to renew; required for operation=renew_key")
 
 
 class CabinetPaymentRequest(CabinetQuoteRequest):
-    email: Optional[str] = Field(None, description="Key to renew; required for operation=renew_key")
     customer_email: Optional[str] = Field(None, description="E-mail for the fiscal receipt")
+
+
+class CabinetTariffResponse(TariffResponse):
+    # True — тариф снят с продажи (нет в AVAILABLE_RATES), но им можно продлить
+    # ключ пользователя, который на нём сидит. Новый ключ на нём не купить.
+    renew_only: bool = False
 
 
 class CabinetReferralLinkResponse(BaseModel):
@@ -88,7 +95,19 @@ def available_rates() -> List[int]:
     return AVAILABLE_RATES_LIST
 
 
-async def require_own_key(email: str, tg_id: int, service_data: ServiceDataModel, pool) -> None:
+def is_tariff_allowed(tariff_id: int, operation: str, key: Optional[Key] = None) -> bool:
+    """Можно ли оплатить тариф из кабинета.
+
+    Новый ключ — только тарифы из `AVAILABLE_RATES`. Продление — они же
+    плюс текущий тариф продлеваемого ключа, даже если его сняли с продажи:
+    человек продлевает то, что у него уже есть, по цене этого тарифа.
+    """
+    if tariff_id in available_rates():
+        return True
+    return operation == "renew_key" and key is not None and key.tariff_id == tariff_id
+
+
+async def require_own_key(email: str, tg_id: int, service_data: ServiceDataModel, pool) -> Key:
     """404 и для чужого, и для несуществующего ключа — не раскрываем, что
     ключ с таким email существует у другого пользователя."""
     key = await service_data.keys.get_data(email)
@@ -98,6 +117,36 @@ async def require_own_key(email: str, tg_id: int, service_data: ServiceDataModel
             await service_data.cache_service.keys.set(CacheKeyManager.key(email), key)
     if not key or key.tg_id != tg_id:
         raise HTTPException(status_code=404, detail="Key not found")
+    return key
+
+
+async def require_payable_tariff(
+    body: CabinetQuoteRequest,
+    tg_id: int,
+    service_data: ServiceDataModel,
+    pool,
+    *,
+    email_required: bool,
+) -> None:
+    """Проверки перед расчётом и оплатой: свой ключ для продления, тариф
+    разрешён для этой операции и платный. Одно правило для quote и оплаты,
+    чтобы сумма на экране и в счёте считалась по одному и тому же тарифу.
+
+    Для quote email необязателен (старые клиенты его не шлют): без ключа
+    доступны только тарифы из `AVAILABLE_RATES`."""
+    key = None
+    if body.operation == "renew_key":
+        if body.email:
+            key = await require_own_key(body.email, tg_id, service_data, pool)
+        elif email_required:
+            raise HTTPException(status_code=422, detail="email required for renew_key operation")
+
+    tariff = await service_data.tariffs.get_data(body.tariff_id, conn=pool)
+    if not tariff or not is_tariff_allowed(body.tariff_id, body.operation, key):
+        raise HTTPException(status_code=404, detail="Tariff not found")
+    if not tariff.amount or tariff.amount <= 0:
+        # Бесплатные тарифы не оплачиваются; триал — через POST /keys/trial.
+        raise HTTPException(status_code=400, detail="Tariff is not purchasable")
 
 
 def build_cabinet_router(
@@ -128,15 +177,25 @@ def build_cabinet_router(
     ) -> UserResponse:
         return await get_user(tg_id=principal.tg_id, service_data=service_data, pool=pool)
 
-    @router.get("/tariffs", response_model=List[TariffResponse], dependencies=read_deps)
+    @router.get("/tariffs", response_model=List[CabinetTariffResponse], dependencies=read_deps)
     async def cabinet_tariffs(
         principal: UserPrincipal = Depends(principal_dep),
         service_data: ServiceDataModel = Depends(get_service_data),
         pool: asyncpg.Pool = Depends(get_pool),
     ):
+        """Тарифы в продаже и, с `renew_only`, снятые с продажи тарифы ключей
+        пользователя: ими можно только продлить свой ключ."""
         tariffs = await list_tariffs(service_data=service_data, pool=pool)
-        allowed = available_rates()
-        return [t for t in tariffs if t.id in allowed]
+        allowed = set(available_rates())
+        keys = await service_data.data_service.keys.filter(pool, tg_id=principal.tg_id)
+        own_tariffs = {k.tariff_id for k in keys if k.tariff_id is not None}
+        result = []
+        for t in tariffs:
+            if t.id in allowed:
+                result.append(CabinetTariffResponse(**t.model_dump()))
+            elif t.id in own_tariffs and t.amount > 0:
+                result.append(CabinetTariffResponse(**t.model_dump(), renew_only=True))
+        return result
 
     @router.get("/keys", response_model=List[KeyResponse], dependencies=read_deps)
     async def cabinet_list_keys(
@@ -235,8 +294,14 @@ def build_cabinet_router(
         pool=Depends(get_pool),
         service_data: ServiceDataModel = Depends(get_service_data),
     ):
+        await require_payable_tariff(body, principal.tg_id, service_data, pool, email_required=False)
         return await calculate_payment(
-            body=PaymentCalculateRequest(tg_id=principal.tg_id, **body.model_dump()),
+            body=PaymentCalculateRequest(
+                tg_id=principal.tg_id,
+                tariff_id=body.tariff_id,
+                number_of_months=body.number_of_months,
+                operation=body.operation,
+            ),
             pool=pool,
             service_data=service_data,
         )
@@ -249,17 +314,7 @@ def build_cabinet_router(
         service_data: ServiceDataModel = Depends(get_service_data),
         cache: CacheService = Depends(get_cache),
     ):
-        if body.operation == "renew_key":
-            if not body.email:
-                raise HTTPException(status_code=422, detail="email required for renew_key operation")
-            await require_own_key(body.email, principal.tg_id, service_data, pool)
-
-        tariff = await service_data.tariffs.get_data(body.tariff_id, conn=pool)
-        if not tariff or body.tariff_id not in available_rates():
-            raise HTTPException(status_code=404, detail="Tariff not found")
-        if not tariff.amount or tariff.amount <= 0:
-            # Бесплатные тарифы не оплачиваются; триал — через POST /keys/trial.
-            raise HTTPException(status_code=400, detail="Tariff is not purchasable")
+        await require_payable_tariff(body, principal.tg_id, service_data, pool, email_required=True)
 
         # amount/referral_discount не передаются — сумму считает только бэкенд.
         return await create_payment_for_user(
