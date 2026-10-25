@@ -34,7 +34,6 @@ WORKSPACE = BACKEND_REPO.parent
 MAIN_BOT = {"id": 7000000001, "is_bot": True, "first_name": "VPN e2e", "username": "e2e_vpn_bot"}
 ADMIN_BOT = {"id": 7000000002, "is_bot": True, "first_name": "Admin e2e", "username": "e2e_admin_bot"}
 ADMIN_TG_ID = 900001
-LANDING_INBOUND = 5
 PAID_INBOUNDS = [11, 12]
 
 # Тарифы стенда как в проде: 10 — триал (id 10 зашит в backend), 7 и 8 — платные.
@@ -170,7 +169,6 @@ class Stack:
             XUI_PASSWORD=secrets.token_hex(8),
             XUI_SUB=f"{c.fakes_url}/sub",
             EXTERNAL_SUB_URL="",
-            XUI_INBOUND_ID_LANDING=str(LANDING_INBOUND),
             AVAILABLE_CONNECTIONS=json.dumps(PAID_INBOUNDS),
             AVAILABLE_RATES=json.dumps(PAID_TARIFF_IDS),
             DEFAULT_PRICING_PLAN=str(TRIAL_TARIFF_ID),
@@ -262,7 +260,7 @@ class Stack:
             f"{self.cfg.fakes_url}/_ctl/reset",
             json={
                 "bots": {self.secrets.bot_token: MAIN_BOT, self.secrets.admin_bot_token: ADMIN_BOT},
-                "inbounds": [LANDING_INBOUND, *PAID_INBOUNDS],
+                "inbounds": PAID_INBOUNDS,
                 "webhook_url": f"{self.cfg.backend_url}/api/v1/payments/webhook",
             },
             timeout=5,

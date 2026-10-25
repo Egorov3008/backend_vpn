@@ -55,10 +55,6 @@ class Settings(BaseSettings):
         return reject_insecure_secret(info.field_name.upper(), value)
 
     # Landing page
-    # Separate 3x-UI inbound for anonymous 24h keys. Landing-only — NOT part
-    # of a paid/trial key's inbound set (see paid_inbound_ids()), so it does
-    # not need to be in AVAILABLE_CONNECTIONS.
-    xui_inbound_id_landing: int = Field(default=0, alias="XUI_INBOUND_ID_LANDING")
     # HMAC secret for signed landing cookies. Falls back to bot_secret_key if empty.
     landing_cookie_secret: str = Field(default="", alias="LANDING_COOKIE_SECRET")
     # Public URL of the landing page (used in deep-link to bot).

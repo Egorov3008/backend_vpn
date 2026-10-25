@@ -4,7 +4,7 @@ import time
 
 from playwright.sync_api import expect
 
-from stack import LANDING_INBOUND, PAID_INBOUNDS
+from stack import PAID_INBOUNDS
 
 
 def test_guest_key_then_login_via_bot_attaches_key(stack, page, fakes, db, web_login, new_tg_id):
@@ -16,7 +16,7 @@ def test_guest_key_then_login_via_bot_attaches_key(stack, page, fakes, db, web_l
     assert key_url == f"{stack.cfg.fakes_url}/sub/{email}"
 
     panel = fakes.panel_client(email)
-    assert panel and panel["inboundIds"] == [LANDING_INBOUND], panel
+    assert panel and panel["inboundIds"] == PAID_INBOUNDS, panel
 
     # Второй гостевой ключ тому же браузеру не выдаётся
     page.reload()

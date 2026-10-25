@@ -178,7 +178,7 @@ A percent discount by code, separate from `stocks` (a personal discount without 
 
 #### Landing (`/api/v1/landing`)
 
-Anonymous, cookie-based flow for the marketing landing page (separate from the bot/web `tg_id`-trusting flow above): `POST /set-ref-cookie`, `POST /quick-key` (mints a short-lived key on `XUI_INBOUND_ID_LANDING`), `GET /state`, `POST /mark-converted/{landing_uid}`, `POST /claim/{landing_uid}`. Signed cookies use `LANDING_COOKIE_SECRET` (falls back to `BOT_SECRET_KEY`).
+Anonymous, cookie-based flow for the marketing landing page (separate from the bot/web `tg_id`-trusting flow above): `POST /set-ref-cookie`, `POST /quick-key` (mints a 24h key on `AVAILABLE_CONNECTIONS`, like other keys), `GET /state`, `POST /mark-converted/{landing_uid}`, `POST /claim/{landing_uid}`. Signed cookies use `LANDING_COOKIE_SECRET` (falls back to `BOT_SECRET_KEY`).
 
 `mark-converted` and `claim` are bot-only: they also require `X-Landing-Internal-Secret: <LANDING_INTERNAL_SECRET>` (`app/auth.py::verify_landing_internal_secret`, fail-closed when unset). nginx injects `X-Bot-Secret` on public `/api/v1/landing/*`, so that header alone must not open these routes.
 
@@ -398,7 +398,7 @@ All settings are defined in `config.py` (`Settings`, pydantic-settings, loads `.
 - `BOT_SECRET_KEY` / `ADMIN_API_KEY` / `INVITE_TOKEN` / `MVP_APP_SECRET` — all rejected at startup if left at insecure/placeholder defaults (`shared.config.core.reject_insecure_secret`)
 - `XUI_API_URL` / `XUI_LOGIN` / `XUI_PASSWORD` — 3x-UI panel credentials
 - `AVAILABLE_CONNECTIONS` — JSON/list of panel inbound IDs allowed for new keys (used by `FormConnectionData`; panel inbounds are filtered by this)
-- `XUI_INBOUND_ID_LANDING` — fixed panel inbound ID for landing keys (Telegram-only baseline) and for the separate anonymous landing-page flow (`/api/v1/landing`). Paid keys are created on `[XUI_INBOUND_ID_LANDING] + AVAILABLE_CONNECTIONS` and stay there for the life of the key — the 3x-ui panel cuts VPN access on its own once the client's `expiryTime` passes, no code-driven inbound detach. The panel client is **not** deleted automatically — physical deletion from the panel is admin-only (`admin_delete_key` / bulk "delete expired keys" in the bot admin panel).
+- Keys are created on `AVAILABLE_CONNECTIONS` (the landing 24h key too; there is no separate landing inbound) and stay there for the life of the key — the 3x-ui panel cuts VPN access on its own once the client's `expiryTime` passes, no code-driven inbound detach. A landing key that was not yet moved to its Telegram owner is recognized by `tg_id != converted_tg_id` (still the pseudo id), not by its inbounds. The panel client is **not** deleted automatically — physical deletion from the panel is admin-only (`admin_delete_key` / bulk "delete expired keys" in the bot admin panel).
 - `DEFAULT_PRICING_PLAN` — default tariff ID for trial keys
 - `YOOKASSA_SHOP_ID` / `YOOKASSA_SECRET_KEY` — payment processing. `DISABLE_WEBHOOK_IP_CHECK` bypasses the YooKassa IP allowlist for local/dev — the allowlist itself is hardcoded in `api/v1/payments.py::_check_webhook_ip`, not env-configurable.
 - `WEBHOOK_BASE_URL` — public URL for YooKassa callbacks (e.g., https://api.example.com)

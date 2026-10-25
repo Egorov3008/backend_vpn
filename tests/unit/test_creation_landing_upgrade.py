@@ -2,7 +2,6 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from services.core.payment.creation_service import KeyCreationService
-from services.core.keys.utils.inbounds import BASELINE_INBOUNDS
 
 
 def _processor(tg_id=42, months=1, amount=100.0, conn=None):
@@ -38,7 +37,7 @@ async def test_upgrades_existing_landing_key_instead_of_creating_new():
     landing_key = MagicMock()
     landing_key.landing_uid = "abc"
     landing_key.converted_tg_id = 42
-    landing_key.inbound_ids = list(BASELINE_INBOUNDS)
+    landing_key.tg_id = -1
     landing_key.email = "a@b.c"
     p._model_service.keys.get_all = AsyncMock(return_value=[landing_key])
 
@@ -90,7 +89,7 @@ async def test_falls_back_to_create_when_upgrade_returns_none():
     landing_key = MagicMock()
     landing_key.landing_uid = "abc"
     landing_key.converted_tg_id = 42
-    landing_key.inbound_ids = list(BASELINE_INBOUNDS)
+    landing_key.tg_id = -1
     landing_key.email = "a@b.c"
     p._model_service.keys.get_all = AsyncMock(return_value=[landing_key])
 
@@ -117,7 +116,7 @@ async def test_no_landing_upgrade_when_xui_session_not_wired():
     landing_key = MagicMock()
     landing_key.landing_uid = "abc"
     landing_key.converted_tg_id = 42
-    landing_key.inbound_ids = list(BASELINE_INBOUNDS)
+    landing_key.tg_id = -1
     landing_key.email = "a@b.c"
     p._model_service.keys.get_all = AsyncMock(return_value=[landing_key])
 
@@ -133,4 +132,29 @@ async def test_no_landing_upgrade_when_xui_session_not_wired():
 
     upgrade_mock.assert_not_awaited()
     create_key.proces.assert_awaited_once()
+    assert result["email"] == "new@x.c"
+
+
+@pytest.mark.asyncio
+async def test_landing_key_already_moved_to_user_is_not_upgraded_again():
+    """Ключ уже перенесён на реальный tg_id (claim или прошлый апгрейд) → новый ключ."""
+    p = _processor()
+    landing_key = MagicMock()
+    landing_key.landing_uid = "abc"
+    landing_key.converted_tg_id = 42
+    landing_key.tg_id = 42
+    landing_key.email = "a@b.c"
+    p._model_service.keys.get_all = AsyncMock(return_value=[landing_key])
+
+    create_key = MagicMock()
+    create_key.proces = AsyncMock(return_value={"email": "new@x.c"})
+
+    svc = _svc(p, create_key)
+    with patch(
+        "services.core.payment.creation_service.upgrade_landing_key",
+        AsyncMock(),
+    ) as upgrade_mock:
+        result = await svc.process(tariff_id="5")
+
+    upgrade_mock.assert_not_awaited()
     assert result["email"] == "new@x.c"

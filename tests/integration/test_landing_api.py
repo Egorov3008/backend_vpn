@@ -7,7 +7,7 @@
 import asyncio
 import time
 
-from tests.integration.conftest import LANDING_INBOUND, LANDING_INTERNAL_SECRET, PAID_INBOUNDS, TRIAL_TARIFF_ID
+from tests.integration.conftest import LANDING_INTERNAL_SECRET, PAID_INBOUNDS, TRIAL_TARIFF_ID
 from tests.integration.helpers import db_key, db_user, register_user
 
 HOUR_MS = 3600 * 1000
@@ -53,7 +53,7 @@ async def _referral_link(backend, referrer: int) -> str:
 # --- гостевой ключ ------------------------------------------------------------
 
 
-async def test_quick_key_lives_24h_on_landing_inbound(backend):
+async def test_quick_key_lives_24h_on_available_inbounds(backend):
     data, cookie = await _quick_key(backend)
 
     email = await _landing_email(backend, data["landing_uid"])
@@ -61,7 +61,7 @@ async def test_quick_key_lives_24h_on_landing_inbound(backend):
     assert row["tg_id"] < 0
     assert abs(row["expiry_time"] - (time.time() * 1000 + DAY_MS)) < 60_000
     panel = backend.fakes.panel_client(email)
-    assert panel["inboundIds"] == [LANDING_INBOUND]
+    assert sorted(panel["inboundIds"]) == PAID_INBOUNDS
     # Панель и БД получают срок отдельными вызовами — расхождение в доли секунды
     assert abs(panel["client"]["expiryTime"] - row["expiry_time"]) < 60_000
 

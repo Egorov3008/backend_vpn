@@ -30,15 +30,8 @@ class FormationKey:
         tariff: Tariff,
         server_id: int,
         number_of_months: int = 1,
-        inbound_id_override: Optional[int] = None,
     ) -> Optional[Key]:
-        """Формирует новый объект ключа.
-
-        Args:
-            inbound_id_override: если задан, используется как единственный inbound
-                (для лендинга и других специальных потоков). Иначе берётся
-                первый из server.inbound_ids.
-        """
+        """Формирует новый объект ключа."""
         email = await self._generate_email()
 
         # Защита от дрейфа данных: все платные тарифы должны быть 30-дневными.
@@ -72,14 +65,9 @@ class FormationKey:
 
         subscription_url = f"{server_data.get('subscription_url')}/{email}"
 
-        if inbound_id_override is not None:
-            # Landing-page flow: форсируем конкретный inbound.
-            inbound_ids = [inbound_id_override]
-            primary_inbound_id = inbound_id_override
-        else:
-            inbound_ids = paid_inbound_ids() if is_subscription(tariff) else (
-                server_data.get("inbound_ids", []))
-            primary_inbound_id = inbound_ids[0] if inbound_ids else 0
+        inbound_ids = paid_inbound_ids() if is_subscription(tariff) else (
+            server_data.get("inbound_ids", []))
+        primary_inbound_id = inbound_ids[0] if inbound_ids else 0
 
         key = Key(
             tg_id=tg_id,

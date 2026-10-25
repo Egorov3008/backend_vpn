@@ -5,24 +5,19 @@ repo-root .env, not hardcoded to any particular inbound list.
 """
 from unittest.mock import MagicMock
 
-from config import DEFAULT_PRICING_PLAN, LIST_AVAILABLE_CONNECTIONS, settings
+from config import DEFAULT_PRICING_PLAN, LIST_AVAILABLE_CONNECTIONS
 
 from services.core.keys.utils import inbounds as ib
 
 TRIAL_ID = int(DEFAULT_PRICING_PLAN)
 
 
-def test_baseline_and_overlay():
-    expected_baseline = (
-        [settings.xui_inbound_id_landing] if settings.xui_inbound_id_landing else []
-    )
-    assert ib.BASELINE_INBOUNDS == expected_baseline
+def test_overlay_is_available_connections():
     assert ib.PAID_OVERLAY_INBOUNDS == list(LIST_AVAILABLE_CONNECTIONS)
 
 
 def test_paid_inbound_ids():
-    """paid_inbound_ids() is AVAILABLE_CONNECTIONS only — BASELINE_INBOUNDS
-    (landing inbound) is not part of a paid/trial key's inbound set."""
+    """paid_inbound_ids() is AVAILABLE_CONNECTIONS (dedup, order kept)."""
     expected_paid = []
     seen = set()
     for i in list(LIST_AVAILABLE_CONNECTIONS):
