@@ -34,7 +34,6 @@ ROOT = Path(__file__).resolve().parents[2]
 INTEGRATION_DIR = Path(__file__).resolve().parent
 
 # Конфигурация стенда (совпадает с e2e/stack.py)
-LANDING_INBOUND = 5
 PAID_INBOUNDS = [11, 12]
 TRIAL_TARIFF_ID = 10
 STANDARD_TARIFF_ID = 7
@@ -135,7 +134,7 @@ class Fakes:
     def reset(self) -> None:
         self._http.post(
             "/_ctl/reset",
-            json={"bots": {BOT_TOKEN: BOT_ME}, "inbounds": [LANDING_INBOUND, *PAID_INBOUNDS]},
+            json={"bots": {BOT_TOKEN: BOT_ME}, "inbounds": PAID_INBOUNDS},
         ).raise_for_status()
 
     def state(self) -> dict:
@@ -230,7 +229,6 @@ def _configure_backend(monkeypatch, fakes_url: str) -> None:
         "api_url": fakes_url,
         "xui_subscription_url": f"{fakes_url}/sub",
         "external_subscription_url": "",
-        "xui_inbound_id_landing": LANDING_INBOUND,
         "bot_token": BOT_TOKEN,
         "landing_internal_secret": LANDING_INTERNAL_SECRET,
         "disable_webhook_ip_check": True,
@@ -239,7 +237,6 @@ def _configure_backend(monkeypatch, fakes_url: str) -> None:
     }.items():
         monkeypatch.setattr(settings, attr, value)
 
-    monkeypatch.setattr(inbounds, "BASELINE_INBOUNDS", [LANDING_INBOUND])
     monkeypatch.setattr(inbounds, "PAID_OVERLAY_INBOUNDS", list(PAID_INBOUNDS))
     monkeypatch.setattr(inbounds, "_TRIAL_TARIFF_ID", TRIAL_TARIFF_ID)
     monkeypatch.setattr(form_data, "LIST_AVAILABLE_CONNECTIONS", list(PAID_INBOUNDS))

@@ -9,7 +9,6 @@ from logger import logger
 from services.cache.service import CacheService
 from services.core.keys.utils.calculator import ExpiryCalculator
 from services.core.keys.utils.create_key import CreateKey
-from services.core.keys.utils.inbounds import BASELINE_INBOUNDS
 from services.core.keys.utils.landing_upgrade import upgrade_landing_key
 from services.core.payment.processor import PaymentProcessor
 from services.core.notifications.protocols import INotifier
@@ -44,16 +43,15 @@ class KeyCreationService:
     async def _find_landing_origin_key(self, tg_id: int):
         """Найти landing-ключ юзера, готовый к апгрейду:
         landing_uid set, converted_tg_id == tg_id, ещё не апгрейжен
-        (inbound set == baseline, telegram-only)."""
+        (владелец всё ещё псевдо-tg_id: апгрейд переносит tg_id на converted_tg_id)."""
         try:
             keys = await self.processor._model_service.keys.get_all()
         except Exception:
             return None
-        baseline = set(BASELINE_INBOUNDS)
         for k in keys or []:
             if (getattr(k, "landing_uid", None)
                     and getattr(k, "converted_tg_id", None) == tg_id
-                    and set(getattr(k, "inbound_ids", None) or []) == baseline):
+                    and getattr(k, "tg_id", None) != tg_id):
                 return k
         return None
 
@@ -114,7 +112,7 @@ class KeyCreationService:
                 paid_amount=self.processor.amount,
             )
 
-            # Landing-upgrade: если у юзера есть неапгрейженный landing-ключ [7] —
+            # Landing-upgrade: если у юзера есть неапгрейженный landing-ключ —
             # апгрейдим тот же клиент (Happ-URL сохраняется), не создаём новый.
             if self.xui_session is not None and self.cache is not None and self.pool is not None:
                 landing_key = await self._find_landing_origin_key(self.processor.tg_id)

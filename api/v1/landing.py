@@ -12,7 +12,6 @@
   - ключ работает 24ч и автоматически умирает
   - limit_ip=1 (1 устройство)
   - подписанная HMAC-кука tg_landing_id на 90 дней (только для state)
-  - inbound изолирован (XUI_INBOUND_ID_LANDING), не входит в AVAILABLE_CONNECTIONS
 """
 from __future__ import annotations
 
@@ -566,18 +565,11 @@ async def create_quick_key(
     """Создать анонимный 24-часовой ключ для лендинга.
 
     - Без email, без регистрации
-    - inbound_id берётся из settings.xui_inbound_id_landing
     - limit_ip=1 (1 устройство)
     - expiry = now + 24ч
     - tg_id = отрицательный хэш landing_uid
     - Устанавливает подписанную HMAC-куку tg_landing_id на 90 дней
     """
-    if not settings.xui_inbound_id_landing:
-        raise HTTPException(
-            status_code=500,
-            detail="XUI_INBOUND_ID_LANDING не настроен на сервере",
-        )
-
     # 1. Генерируем уникальный landing_uid
     landing_uid = uuid.uuid4().hex[:16]
 
@@ -613,7 +605,7 @@ async def create_quick_key(
         )
         raise HTTPException(status_code=500, detail="Failed to create anonymous user")
 
-    # 4. Создаём ключ через стандартный пайплайн, но с принудительным inbound_id
+    # 4. Создаём ключ через стандартный пайплайн (inbounds из AVAILABLE_CONNECTIONS)
     data_service = DataService()
     create_key_svc, _, _ = build_key_services(pool, service_data, cache, data_service)
 
@@ -626,7 +618,6 @@ async def create_quick_key(
         server_id=settings.xui_server_id,
         conn=pool,
         number_of_months=1,
-        inbound_id_override=settings.xui_inbound_id_landing,
     )
 
     if not result:
@@ -668,7 +659,6 @@ async def create_quick_key(
         "Landing quick-key создан",
         landing_uid=landing_uid,
         pseudo_tg_id=pseudo_tg_id,
-        inbound_id=settings.xui_inbound_id_landing,
         email=key_obj.email,
     )
 
@@ -895,7 +885,7 @@ async def claim_key(
     if not user:
         raise HTTPException(status_code=404, detail="User not registered")
 
-    # Апгрейд того же клиента: attach [11,12], trial expiry, перенос tg_id
+    # Апгрейд того же клиента: inbounds AVAILABLE_CONNECTIONS, trial expiry, перенос tg_id
     # на реальный. Happ-URL (key.key) сохраняется. converted_tg_id ставится
     # до вызова — upgrade_landing_key читает его, чтобы перенести tg_id
     # (transfer_tg). При провале откатываем, иначе key_obj (живой объект
