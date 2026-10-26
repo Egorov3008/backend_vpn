@@ -197,6 +197,10 @@ Both are built by one factory, `api/v1/cabinet.py::build_cabinet_router`, which 
   - Referral links go to the site only: `share_url` = `WEB_PUBLIC_URL/?ref=<token>` (`services/core/referral/link_generator.py::referral_share_url`), returned by `POST /miniapp|web/referral-link` and admin `/referrals/links*`. Clients (bot, Mini App, web) show it and never build it; there are no `t.me/<bot>?start=ref_…` links any more.
   - The web nginx must proxy only `/api/v1/web/` and inject no secrets; `/api/v1/auth/*` must never be public.
 
+#### Renew by link (`/api/v1/web/renew/{email}`, `api/v1/renew_link.py`)
+
+No login: the link `WEB_PUBLIC_URL/renew/<email>` goes into the 3x-ui subscription settings (Profile page `.../renew/{{EMAIL}}`), so Happ shows it as a button for each key and opens it in a browser. The email is the key's `subId`, so whoever has it can already download the subscription; the page reveals nothing new. `GET /{email}` (expiry, own tariff, tariffs allowed by the cabinet renewal rules), `POST /{email}/quotes`, `POST /{email}/payments` (always `renew_key|<email>`, billed to the key owner, YooKassa returns to `WEB_PUBLIC_URL/renew/<email>/result`), `GET /{email}/payments/{payment_id}/status` (only this key's renewal payments). The owner's balance is never spent or shown (`use_balance=False`); stocks, the referral 10%, volume discount and promo codes work as in the cabinet. Responses never include `tg_id`. Landing guest keys (`tg_id < 0`) answer 404. Rate limited per IP.
+
 #### Mobile MVP (`/api/v1/mobile`)
 
 - **GET `/shared-config`** — One shared VPN config for the MVP Android app; no per-user auth, no accounts, no per-user state.
