@@ -185,19 +185,24 @@ async def _quote_payment(
     operation: str,
     promo_code: Optional[str],
     referral_discount_from_request: Optional[float] = None,
+    use_balance: bool = True,
 ) -> _Quote:
     """Единый расчёт суммы для /quotes и /create (источник истины — backend).
 
     Промокод не складывается со Stock-скидкой и реферальной скидкой: считаются оба
     варианта и действует тот, где сумма до списания баланса меньше. Скидка за объём
     и баланс работают в обоих вариантах.
+
+    ``use_balance=False`` — баланс пользователя не списывается и не виден в
+    ответе (оплата по публичной ссылке продления, где платит не обязательно
+    владелец).
     """
     from config import MIN_PAYMENT_AMOUNT
 
     user = await service_data.users.get_data(tg_id, conn=pool)
     user_referral_id = getattr(user, "referral_id", None) if user else None
     user_check_referral = getattr(user, "check_referral", False) if user else False
-    user_balance = getattr(user, "balance", 0.0) if user else 0.0
+    user_balance = getattr(user, "balance", 0.0) if user and use_balance else 0.0
 
     # Stock-скидка на помесячную цену тарифа (источник истины — backend)
     stock = await service_data.stocks.get_data(tg_id)
@@ -394,6 +399,18 @@ async def calculate_payment(
         "operation": body.operation,
     })
 
+    return await quote_for_user(body, pool, service_data)
+
+
+async def quote_for_user(
+    body: PaymentCalculateRequest,
+    pool,
+    service_data: ServiceDataModel,
+    *,
+    use_balance: bool = True,
+) -> PaymentCalculateResponse:
+    """Расчёт суммы для пользователя ``body.tg_id``; кабинеты и публичная
+    ссылка продления вызывают это напрямую. ``use_balance`` — см. ``_quote_payment``."""
     tariff = await service_data.tariffs.get_data(body.tariff_id, conn=pool)
     if not tariff:
         logger.warning("Тариф не найден", extra={"tariff_id": body.tariff_id})
@@ -407,6 +424,7 @@ async def calculate_payment(
         number_of_months=body.number_of_months,
         operation=body.operation,
         promo_code=body.promo_code,
+        use_balance=use_balance,
     )
     result = quote.result
 
@@ -446,13 +464,17 @@ async def create_payment_for_user(
     cache: CacheService,
     *,
     return_url: Optional[str] = None,
+    use_balance: bool = True,
 ) -> PaymentCreateResponse:
     """Создать платёж; ``return_url`` — куда YooKassa вернёт пользователя после
-    оплаты (``None`` — в бота). Кабинеты (Mini App, веб) вызывают это напрямую."""
+    оплаты (``None`` — в бота). Кабинеты (Mini App, веб) вызывают это напрямую.
+    ``use_balance=False`` — без списания баланса (см. ``_quote_payment``)."""
     # Запросы одного пользователя обрабатываются по очереди: иначе два одновременных
     # нажатия «оплатить» оба не увидят открытого счёта и выставят два.
     async with _user_payment_lock(body.tg_id):
-        return await _create_payment(body, pool, service_data, cache, return_url=return_url)
+        return await _create_payment(
+            body, pool, service_data, cache, return_url=return_url, use_balance=use_balance
+        )
 
 
 # Блокировки по tg_id живут, пока их кто-то держит (бэкенд работает одним процессом uvicorn).
@@ -473,6 +495,7 @@ async def _create_payment(
     service_data: ServiceDataModel,
     cache: CacheService,
     return_url: Optional[str] = None,
+    use_balance: bool = True,
 ) -> PaymentCreateResponse:
     logger.debug("Запрос create_payment", extra={"tg_id": body.tg_id, "tariff_id": body.tariff_id, "months": body.number_of_months, "operation": body.operation})
 
@@ -524,6 +547,7 @@ async def _create_payment(
         operation=body.operation,
         promo_code=body.promo_code,
         referral_discount_from_request=body.referral_discount if body.referral_discount and body.referral_discount > 0 else None,
+        use_balance=use_balance,
     )
     result = quote.result
     if quote.promo_status not in (None, APPLIED, NOT_BETTER):
