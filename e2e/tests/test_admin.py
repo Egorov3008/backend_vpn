@@ -97,9 +97,11 @@ def test_admin_api_needs_session_not_bot_secrets(stack, sign, admin_tg_id):
         assert r.status_code == 401
 
 
-def test_admin_broadcasts_video_to_users(stack, telegram_page, sign, fakes, backend, db, admin_tg_id, new_tg_id):
+def test_admin_broadcasts_video_to_users(
+    stack, telegram_page, sign, fakes, backend, db, admin_tg_id, new_tg_id, other_tg_id
+):
     """Рассылка из админки: видео грузится через nginx админки, уходит от пользовательского бота."""
-    reader, blocked = new_tg_id, new_tg_id + 1
+    reader, blocked = new_tg_id, other_tg_id
     for tg_id in (admin_tg_id, reader, blocked):
         backend.post("/users/register", json={"tg_id": tg_id})
     fakes.block_bot(blocked)
@@ -134,3 +136,30 @@ def test_admin_broadcasts_video_to_users(stack, telegram_page, sign, fakes, back
         [reader, blocked],
     )}
     assert counts == {"sent": 1, "blocked": 1}
+
+
+def test_admin_broadcasts_album_with_button(stack, telegram_page, sign, fakes, backend, admin_tg_id, new_tg_id):
+    """Альбом из фото и видео: Telegram получает sendMediaGroup, текст с кнопкой — следом."""
+    for tg_id in (admin_tg_id, new_tg_id):
+        backend.post("/users/register", json={"tg_id": tg_id})
+
+    page = telegram_page(sign(admin_tg_id, bot="admin"))
+    page.goto(f"{stack.cfg.admin_url}/admin")
+    page.get_by_role("navigation").get_by_role("button", name="Рассылка").click()
+    page.locator("#bc-file").set_input_files([
+        {"name": "one.jpg", "mimeType": "image/jpeg", "buffer": b"\xff\xd8\xff" + b"0" * 5000},
+        {"name": "two.mp4", "mimeType": "video/mp4", "buffer": b"\x00\x00\x00\x18ftypmp42" + b"0" * 5000},
+    ])
+    expect(page.get_by_text("Альбом из 2 файлов")).to_be_visible()
+    page.get_by_label("Кнопка").select_option(label="Ссылка")
+    page.get_by_label("Ссылка кнопки").fill("https://example.test/news")
+    page.get_by_label("Текст сообщения").fill("Новости недели")
+    page.get_by_role("button", name="Разослать").click()
+    # В истории могут быть рассылки прошлых тестов: ждём именно эту
+    expect(page.get_by_role("button", name=re.compile("Новости недели.*Завершена"))).to_be_visible(timeout=30_000)
+
+    sent = [m for m in fakes.sent_to(new_tg_id) if m["method"].startswith("send")]
+    assert [m["method"] for m in sent] == ["sendMediaGroup", "sendMessage"]
+    assert [item["type"] for item in sent[0]["params"]["media"]] == ["photo", "video"]
+    assert sent[1]["params"]["text"] == "Новости недели"
+    assert sent[1]["params"]["reply_markup"]["inline_keyboard"][0][0]["url"] == "https://example.test/news"
