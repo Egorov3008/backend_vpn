@@ -62,6 +62,10 @@ class Fakes:
     def sent_to(self, chat_id: int) -> list[dict]:
         return [m for m in self.state()["sent"] if m["chat_id"] == chat_id]
 
+    def block_bot(self, *chat_ids: int) -> None:
+        """Эти пользователи заблокировали бота: отправка им — 403."""
+        self.http.post("/_ctl/tg/blocked", json={"chat_ids": list(chat_ids)}).raise_for_status()
+
     def user_says(self, tg_id: int, text: str) -> int:
         """Пользователь пишет боту; возвращает число сообщений ему до этого."""
         before = len(self.sent_to(tg_id))

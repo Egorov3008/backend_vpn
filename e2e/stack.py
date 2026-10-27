@@ -285,6 +285,9 @@ class Stack:
             conn = await asyncpg.connect(self.cfg.database_url())
             try:
                 await conn.execute((BACKEND_REPO / "db" / "schema_fixed.sql").read_text())
+                # Миграции идемпотентны и дополняют схему (как в tests/integration/conftest.py)
+                for migration in sorted((BACKEND_REPO / "db" / "migrations").glob("*.sql")):
+                    await conn.execute(migration.read_text())
                 await conn.executemany(
                     "INSERT INTO tariff (id, name_tariff, amount, description, limit_ip, period, traffic_limit)"
                     " VALUES ($1, $2, $3, $4, $5, $6, 0)",

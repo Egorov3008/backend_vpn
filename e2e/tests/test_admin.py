@@ -95,3 +95,42 @@ def test_admin_api_needs_session_not_bot_secrets(stack, sign, admin_tg_id):
     with httpx.Client(base_url=stack.cfg.backend_url, trust_env=False, timeout=30) as api:
         r = api.get("/api/v1/web/me", headers={"Cookie": f"web_session={token}"})
         assert r.status_code == 401
+
+
+def test_admin_broadcasts_video_to_users(stack, telegram_page, sign, fakes, backend, db, admin_tg_id, new_tg_id):
+    """Рассылка из админки: видео грузится через nginx админки, уходит от пользовательского бота."""
+    reader, blocked = new_tg_id, new_tg_id + 1
+    for tg_id in (admin_tg_id, reader, blocked):
+        backend.post("/users/register", json={"tg_id": tg_id})
+    fakes.block_bot(blocked)
+
+    page = telegram_page(sign(admin_tg_id, bot="admin"))
+    page.goto(f"{stack.cfg.admin_url}/admin")
+    page.get_by_role("navigation").get_by_role("button", name="Рассылка").click()
+    page.get_by_label("Текст сообщения").fill("<b>Новое видео</b> для своих")
+    # Больше 1 МБ — проверяем лимит тела запроса в nginx, а не только API
+    page.locator("#bc-file").set_input_files(
+        {"name": "clip.mp4", "mimeType": "video/mp4", "buffer": b"\x00\x00\x00\x18ftypmp42" + b"0" * 2_000_000}
+    )
+    expect(page.get_by_text("🎬 clip.mp4")).to_be_visible()
+    page.get_by_label("Кнопка").select_option(label="Открыть приложение")
+    page.get_by_role("button", name="Разослать").click()
+
+    expect(page.get_by_text("Завершена").first).to_be_visible(timeout=30_000)
+
+    [video] = [m for m in fakes.sent_to(reader) if m["method"] == "sendVideo"]
+    assert video["params"]["caption"] == "<b>Новое видео</b> для своих"
+    [[button]] = video["params"]["reply_markup"]["inline_keyboard"]
+    assert button["web_app"]["url"]
+    assert [m for m in fakes.sent_to(blocked) if m["method"].startswith("send")] == []
+    # Админу: загрузка файла (удаляется) и контрольная копия
+    admin_methods = [m["method"] for m in fakes.sent_to(admin_tg_id)]
+    assert admin_methods.count("sendVideo") == 2, admin_methods
+
+    [row] = db.fetch("SELECT status FROM broadcasts ORDER BY id DESC LIMIT 1")
+    assert row["status"] == "done"
+    counts = {r["status"]: r["n"] for r in db.fetch(
+        "SELECT status, COUNT(*) AS n FROM broadcast_recipients WHERE tg_id = ANY($1::bigint[]) GROUP BY status",
+        [reader, blocked],
+    )}
+    assert counts == {"sent": 1, "blocked": 1}
