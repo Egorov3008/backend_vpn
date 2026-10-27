@@ -44,6 +44,9 @@ class State:
         self.msg_seq = 1000
         self.callback_answers: list[dict] = []
         self.chat_members: dict[tuple[str, int], str] = {}
+        # Чаты, где бот заблокирован (send* → 403), и где Telegram один раз ответит 429
+        self.blocked_chats: set[int] = set()
+        self.flood_once: dict[int, int] = {}  # chat_id -> retry_after
         # ЮKassa
         self.payments: dict[str, dict] = {}
         # Адрес webhook, как в настройках магазина ЮKassa (в запросе на создание
@@ -158,6 +161,38 @@ async def ctl_tg_chat_member(request: Request) -> dict:
     body = await request.json()
     S.chat_members[(str(body["chat_id"]), int(body["user_id"]))] = body["status"]
     return {"ok": True}
+
+
+@app.post("/_ctl/tg/blocked")
+async def ctl_tg_blocked(request: Request) -> dict:
+    """Пользователи заблокировали бота: {chat_ids: [...]}."""
+    S.blocked_chats.update(int(c) for c in (await request.json())["chat_ids"])
+    return {"ok": True}
+
+
+@app.post("/_ctl/tg/flood")
+async def ctl_tg_flood(request: Request) -> dict:
+    """Следующая отправка в эти чаты получит 429: {chat_ids: [...], retry_after}."""
+    body = await request.json()
+    for c in body["chat_ids"]:
+        S.flood_once[int(c)] = int(body.get("retry_after", 1))
+    return {"ok": True}
+
+
+def _tg_error(code: int, description: str, **extra: Any) -> JSONResponse:
+    return JSONResponse({"ok": False, "error_code": code, "description": description, **extra}, status_code=code)
+
+
+_MEDIA_METHODS = {"sendphoto": "photo", "sendvideo": "video", "sendanimation": "animation",
+                  "sendaudio": "audio", "senddocument": "document"}
+
+
+def _media_file_id(kind: str, value: Any) -> str:
+    """file_id в ответе: загруженный файл получает новый, присланный file_id возвращается как есть."""
+    if isinstance(value, str) and value and not value.startswith("<file"):
+        return value
+    S.msg_seq += 1
+    return f"fake-{kind}-file-{S.msg_seq}"
 
 
 def _find_sent(chat_id: int, message_id: int) -> Optional[dict]:
@@ -279,6 +314,15 @@ async def telegram(token: str, method: str, request: Request):
         return _ok({"id": params.get("chat_id"), "type": "private"})
     if m.startswith("send") or m.startswith("edit") or m == "copymessage":
         chat_id = int(params.get("chat_id") or 0)
+        if m.startswith("send") and chat_id in S.blocked_chats:
+            return _tg_error(403, "Forbidden: bot was blocked by the user")
+        if m.startswith("send") and chat_id in S.flood_once:
+            retry_after = S.flood_once.pop(chat_id)
+            return _tg_error(429, f"Too Many Requests: retry after {retry_after}",
+                             parameters={"retry_after": retry_after})
+        body_text = str(params.get("text") or params.get("caption") or "")
+        if params.get("parse_mode") == "HTML" and body_text.count("<b>") != body_text.count("</b>"):
+            return _tg_error(400, "Bad Request: can't parse entities: unclosed start tag")
         if m.startswith("edit") and params.get("message_id"):
             message_id = int(params["message_id"])
             prev = _find_sent(chat_id, message_id)
@@ -293,8 +337,12 @@ async def telegram(token: str, method: str, request: Request):
             message["caption"] = params["caption"]
         if "reply_markup" in params:
             message["reply_markup"] = params["reply_markup"]
-        if m == "sendphoto":
-            message["photo"] = [{"file_id": "f", "file_unique_id": "u", "width": 1, "height": 1}]
+        kind = _MEDIA_METHODS.get(m)
+        if kind == "photo":
+            file_id = _media_file_id(kind, params.get("photo"))
+            message["photo"] = [{"file_id": file_id, "file_unique_id": "u", "width": 1, "height": 1}]
+        elif kind:
+            message[kind] = {"file_id": _media_file_id(kind, params.get(kind)), "file_unique_id": "u"}
         _record(token, method, chat_id, params, message)
         return _ok(message)
     # Неизвестный метод — пусть тест увидит, что бот звал что-то новое

@@ -9,11 +9,13 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from api.v1.router import api_router
+from app.factories import broadcast_jobs, build_broadcast_runner
 from background.scheduler import create_scheduler
 from config import settings  # noqa: F401
 from database.base import create_db_pool
 from database.service import DataService
 from logger import generate_trace_id, logger, reset_trace_id, set_trace_id, setup_logging
+from services.broadcasts.repository import BroadcastRepository
 from services.cache.loader import LoadingService
 from services.cache.service import CacheService
 from services.cache.storage import CacheStorage
@@ -56,6 +58,13 @@ async def lifespan(app: FastAPI):
         # SyncScheduler instance for admin/sync-jobs async-launch endpoint.
         # create_scheduler() вешает sync_scheduler атрибутом на AsyncIOScheduler.
         app.state.sync_scheduler = scheduler.sync_scheduler  # type: ignore[attr-defined]
+
+        # 6. Рассылки, прерванные прошлой остановкой, продолжаются с того же места.
+        # Сбой здесь (например, не применена миграция рассылок) не должен класть backend.
+        try:
+            await broadcast_jobs().resume(BroadcastRepository(pool), lambda: build_broadcast_runner(pool))
+        except Exception as e:
+            logger.error("Не удалось продолжить рассылки", error_type=type(e).__name__, error=str(e))
     except Exception:
         await storage.stop()
         await pool.close()
@@ -64,6 +73,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # Teardown (reverse order)
+    await broadcast_jobs().shutdown()
     scheduler.shutdown()
     await storage.stop()
     await pool.close()

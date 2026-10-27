@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from api.v1 import (
     admin,
+    admin_broadcasts,
     admin_promo,
     admin_session,
     app_distribution,
@@ -29,6 +30,7 @@ api_router.include_router(admin.router)
 api_router.include_router(admin.destructive_router)
 api_router.include_router(admin_promo.router)
 api_router.include_router(admin_promo.destructive_router)
+api_router.include_router(admin_broadcasts.router)
 api_router.include_router(landing.router)
 api_router.include_router(mobile_mvp.router)
 api_router.include_router(miniapp.router)

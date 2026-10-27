@@ -1,5 +1,7 @@
 # FastAPI core
 fastapi>=0.115.0
+# Загрузка файлов (UploadFile/Form) — медиа для рассылки из админки
+python-multipart>=0.0.9
 uvicorn[standard]>=0.30.0
 pydantic-settings>=2.0.0
 
