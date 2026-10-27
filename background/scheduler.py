@@ -374,6 +374,20 @@ class SyncScheduler:
         except Exception as e:
             logger.error("Ошибка в цикле уведомлений", error=str(e), exc_info=True)
 
+    async def run_events_purge(self) -> None:
+        """Удаляет события журнала старше EVENTS_RETENTION_DAYS."""
+        from config import settings
+        from services.user_events import UserEventRepository
+
+        before = datetime.now(ZoneInfo("UTC")) - timedelta(days=settings.events_retention_days)
+        try:
+            deleted = await UserEventRepository(self._pool).purge_before(before)
+        except Exception as e:
+            logger.error("Ошибка очистки журнала событий", error=str(e))
+            return
+        if deleted:
+            logger.info("Журнал событий очищен", deleted=deleted, before=before.isoformat())
+
     async def run_daily_payments_report(self) -> None:
         """Сводка успешных платежей за последние 24 часа, отправка админам из ADMIN_ID.
 
@@ -455,6 +469,16 @@ def create_scheduler(
         hours=1,
         id="notifications",
         replace_existing=True,
+    )
+
+    # Раз в сутки удаляем старые события журнала (EVENTS_RETENTION_DAYS).
+    scheduler.add_job(
+        sync_scheduler.run_events_purge,
+        "interval",
+        hours=24,
+        id="events_purge",
+        replace_existing=True,
+        coalesce=True,
     )
 
     # Фонового опроса pending-платежей нет: ключ выдаётся только по вебхуку ЮKassa.

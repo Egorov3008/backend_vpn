@@ -42,7 +42,7 @@ from api.v1.payments import (
 from api.v1.tariffs import list_tariffs
 from api.v1.users import get_user
 from app.auth import UserPrincipal
-from app.dependencies import get_cache, get_pool, get_service_data
+from app.dependencies import get_cache, get_event_tracker, get_pool, get_service_data
 from app.rate_limit import rate_limit
 from app.schemas.keys import ChannelBonusResponse, KeyDetailResponse, KeyResponse
 from app.schemas.payments import (
@@ -61,6 +61,7 @@ from services.cache.key_manager import CacheKeyManager
 from services.cache.service import CacheService
 from services.core.data.service import ServiceDataModel
 from services.core.referral.stats import ReferralStatsService
+from services.user_events import EventTracker
 from services.core.promotions.channel_subscription import (
     ChannelSubscriptionChecker,
     get_channel_subscription_checker,
@@ -175,6 +176,7 @@ def build_cabinet_router(
     tags: Sequence[str],
     principal_dep: PrincipalDependency,
     rate_limit_name: str,
+    event_source: str,
     return_url: Callable[[], Optional[str]] = lambda: None,
 ) -> APIRouter:
     """Роутер кабинета.
@@ -183,6 +185,7 @@ def build_cabinet_router(
         prefix: путь клиента, например ``/miniapp`` или ``/web``.
         principal_dep: зависимость, возвращающая пользователя из сессии.
         rate_limit_name: префикс корзин rate limit (``<name>-read``/``<name>-write``).
+        event_source: ``source`` событий журнала действий (``miniapp``/``web``).
         return_url: куда YooKassa вернёт после оплаты; ``None`` — в бота.
     """
     router = APIRouter(prefix=prefix, tags=list(tags))
@@ -194,8 +197,12 @@ def build_cabinet_router(
         principal: UserPrincipal = Depends(principal_dep),
         service_data: ServiceDataModel = Depends(get_service_data),
         pool=Depends(get_pool),
+        events: EventTracker = Depends(get_event_tracker),
     ) -> UserResponse:
-        return await get_user(tg_id=principal.tg_id, service_data=service_data, pool=pool)
+        user = await get_user(tg_id=principal.tg_id, service_data=service_data, pool=pool)
+        # Клиенты запрашивают /me один раз при открытии — это и есть «открыл приложение».
+        await events.track("app_opened", source=event_source, tg_id=principal.tg_id)
+        return user
 
     @router.get("/tariffs", response_model=List[CabinetTariffResponse], dependencies=read_deps)
     async def cabinet_tariffs(
@@ -242,14 +249,17 @@ def build_cabinet_router(
         pool: asyncpg.Pool = Depends(get_pool),
         service_data: ServiceDataModel = Depends(get_service_data),
         cache: CacheService = Depends(get_cache),
+        events: EventTracker = Depends(get_event_tracker),
     ) -> KeyResponse:
-        return await create_trial_key(
+        key = await create_trial_key(
             tg_id=principal.tg_id,
             gift_token=gift_token,
             pool=pool,
             service_data=service_data,
             cache=cache,
         )
+        await events.track("trial_created", source=event_source, tg_id=principal.tg_id)
+        return key
 
     @router.post("/keys/channel-bonus", response_model=ChannelBonusResponse, dependencies=write_deps)
     async def cabinet_claim_channel_bonus(
@@ -296,6 +306,7 @@ def build_cabinet_router(
         pool: asyncpg.Pool = Depends(get_pool),
         service_data: ServiceDataModel = Depends(get_service_data),
         cache: CacheService = Depends(get_cache),
+        events: EventTracker = Depends(get_event_tracker),
     ):
         await require_own_key(email, principal.tg_id, service_data, pool)
         await delete_key(
@@ -305,6 +316,7 @@ def build_cabinet_router(
             service_data=service_data,
             cache=cache,
         )
+        await events.track("key_deleted", source=event_source, tg_id=principal.tg_id)
         return Response(status_code=204)
 
     @router.post("/payments/quotes", response_model=PaymentCalculateResponse, dependencies=read_deps)
@@ -334,11 +346,12 @@ def build_cabinet_router(
         pool=Depends(get_pool),
         service_data: ServiceDataModel = Depends(get_service_data),
         cache: CacheService = Depends(get_cache),
+        events: EventTracker = Depends(get_event_tracker),
     ):
         await require_payable_tariff(body, principal.tg_id, service_data, pool, email_required=True)
 
         # amount/referral_discount не передаются — сумму считает только бэкенд.
-        return await create_payment_for_user(
+        payment = await create_payment_for_user(
             PaymentCreateRequest(
                 tg_id=principal.tg_id,
                 tariff_id=body.tariff_id,
@@ -353,6 +366,16 @@ def build_cabinet_router(
             cache,
             return_url=return_url(),
         )
+        await events.track_payment_created(
+            source=event_source,
+            tg_id=principal.tg_id,
+            operation=body.operation,
+            tariff_id=body.tariff_id,
+            months=body.number_of_months,
+            amount=payment.amount,
+            promo_code=body.promo_code if payment.promo_status == "applied" else None,
+        )
+        return payment
 
     @router.get("/payments", response_model=List[PaymentHistoryItem], dependencies=read_deps)
     async def cabinet_payment_history(

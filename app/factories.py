@@ -19,6 +19,7 @@ from services.core.payment.processor import PaymentProcessor
 from services.core.payment.renewal_service import KeyRenewalService
 from services.core.payment.router import PaymentRouter
 from services.core.promo_codes.listener import PromoRedemptionListener
+from services.user_events import EventCatalog, EventTracker, PaymentEventListener, UserEventRepository
 from services.core.promo_codes.repository import PromoCodeRepository
 from services.core.promo_codes.service import FailedAttemptLimiter, PromoCodeService
 from services.core.notifications.protocols import INotifier
@@ -66,16 +67,23 @@ def build_key_services(
 def build_payment_success_listeners(
     notifier: Optional[MessageSender], pool: Optional[asyncpg.Pool] = None
 ) -> list[PaymentSuccessListener]:
-    """Слушатели успешной оплаты: отметка промокода и уведомление админов из ADMIN_ID (если включено)."""
+    """Слушатели успешной оплаты: отметка промокода, журнал событий и уведомление админов из ADMIN_ID (если включено)."""
     from app.auth import admin_ids
     from config import settings
 
     listeners: list[PaymentSuccessListener] = []
     if pool is not None:
         listeners.append(PromoRedemptionListener(build_promo_code_repository(pool)))
+        listeners.append(PaymentEventListener(build_event_tracker(pool)))
     if notifier is not None and settings.admin_payment_notify_enabled:
         listeners.append(AdminPaymentNotifier(notifier, sorted(admin_ids())))
     return listeners
+
+
+def build_event_tracker(pool: asyncpg.Pool) -> EventTracker:
+    from config import settings
+
+    return EventTracker(UserEventRepository(pool), EventCatalog(), enabled=settings.events_enabled)
 
 
 def build_promo_code_repository(pool: asyncpg.Pool) -> PromoCodeRepository:

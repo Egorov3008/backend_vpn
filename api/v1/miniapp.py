@@ -29,6 +29,7 @@ router = build_cabinet_router(
     tags=["miniapp"],
     principal_dep=verify_miniapp_session,
     rate_limit_name="miniapp",
+    event_source="miniapp",
 )
 
 
