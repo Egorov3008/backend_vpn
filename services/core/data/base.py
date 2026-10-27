@@ -77,7 +77,7 @@ class BaseData(Generic[T]):
                     )
                     return obj
             # Если кеш и БД пусты — возвращаем None, чтобы API мог вернуть 404
-            logger.warning(
+            logger.debug(
                 "Объект не найден в кеше и БД",
                 class_name=self.__class__.__name__,
                 identifier=identifier,
