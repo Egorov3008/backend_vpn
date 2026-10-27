@@ -1,7 +1,8 @@
 import asyncpg
-from fastapi import Request
+from fastapi import Depends, Request
 
 from services.cache.service import CacheService
+from services.user_events import EventTracker
 from services.core.data.service import ServiceDataModel
 
 
@@ -15,3 +16,9 @@ def get_cache(request: Request) -> CacheService:
 
 def get_service_data(request: Request) -> ServiceDataModel:
     return request.app.state.service_data
+
+
+def get_event_tracker(pool: asyncpg.Pool = Depends(get_pool)) -> EventTracker:
+    from app.factories import build_event_tracker
+
+    return build_event_tracker(pool)

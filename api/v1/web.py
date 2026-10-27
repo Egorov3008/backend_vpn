@@ -35,13 +35,14 @@ from app.auth import (
     verify_web_session,
 )
 from app.core.miniapp_session import web_sessions
-from app.dependencies import get_cache, get_pool, get_service_data
+from app.dependencies import get_cache, get_event_tracker, get_pool, get_service_data
 from app.rate_limit import rate_limit
 from app.schemas.tariffs import TariffResponse
 from config import settings
 from logger import logger
 from services.cache.service import CacheService
 from services.core.data.service import ServiceDataModel
+from services.user_events import EventTracker
 from services.web_auth.service import (
     DEEP_LINK_PREFIX,
     ConfirmStatus,
@@ -66,6 +67,7 @@ router = build_cabinet_router(
     tags=["web"],
     principal_dep=verify_web_session,
     rate_limit_name="web",
+    event_source="web",
     return_url=web_payment_return_url,
 )
 
@@ -260,6 +262,7 @@ async def web_bot_login_complete(
     pool: asyncpg.Pool = Depends(get_pool),
     service_data: ServiceDataModel = Depends(get_service_data),
     cache: CacheService = Depends(get_cache),
+    events: EventTracker = Depends(get_event_tracker),
 ) -> BotLoginCompleteResponse:
     """Опрос: после подтверждения в боте ставит cookie ``web_session`` (один раз).
 
@@ -272,6 +275,7 @@ async def web_bot_login_complete(
         if tg_ref:
             await _attach_referral(response, tg_ref, result.tg_id, pool, service_data, cache)
         logger.info("Web login completed", tg_id=result.tg_id)
+        await events.track("web_login", source="web", tg_id=result.tg_id)
         return BotLoginCompleteResponse(status="confirmed", tg_id=result.tg_id)
     if result.status == PollStatus.EXPIRED:
         _delete_cookie(response, WEB_LOGIN_POLL_COOKIE, path=_WEB_AUTH_PATH)

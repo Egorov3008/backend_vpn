@@ -33,7 +33,7 @@ from api.v1.cabinet import (
     require_payable_tariff,
 )
 from api.v1.payments import create_payment_for_user, get_payment_status, quote_for_user
-from app.dependencies import get_cache, get_pool, get_service_data
+from app.dependencies import get_cache, get_event_tracker, get_pool, get_service_data
 from app.rate_limit import rate_limit
 from app.schemas.tariffs import TariffResponse
 from app.schemas.payments import (
@@ -47,6 +47,7 @@ from models import Key
 from services.cache.key_manager import CacheKeyManager
 from services.cache.service import CacheService
 from services.core.data.service import ServiceDataModel
+from services.user_events import EventTracker
 
 router = APIRouter(prefix="/web/renew", tags=["web-renew"])
 
@@ -173,11 +174,12 @@ async def renew_key_payment(
     service_data: ServiceDataModel = Depends(get_service_data),
     pool: asyncpg.Pool = Depends(get_pool),
     cache: CacheService = Depends(get_cache),
+    events: EventTracker = Depends(get_event_tracker),
 ) -> PaymentCreateResponse:
     key = await _renewable_key(email, service_data, pool)
     await _check_tariff(key, body, service_data, pool)
     # amount/referral_discount не передаются — сумму считает только бэкенд.
-    return await create_payment_for_user(
+    payment = await create_payment_for_user(
         PaymentCreateRequest(
             tg_id=key.tg_id,
             tariff_id=body.tariff_id,
@@ -193,6 +195,16 @@ async def renew_key_payment(
         return_url=renew_return_url(key.email),
         use_balance=False,
     )
+    await events.track_payment_created(
+        source="renew_link",
+        tg_id=key.tg_id,
+        operation="renew_key",
+        tariff_id=body.tariff_id,
+        months=body.number_of_months,
+        amount=payment.amount,
+        promo_code=body.promo_code if payment.promo_status == "applied" else None,
+    )
+    return payment
 
 
 @router.get(

@@ -112,6 +112,10 @@ class Settings(BaseSettings):
     # Telegram позволяет боту ~30 сообщений в секунду на всех; часть запаса
     # оставляем уведомлениям, которые шлются тем же ботом.
     broadcast_rate_per_second: float = Field(default=20.0, gt=0, le=30, alias="BROADCAST_RATE_PER_SECOND")
+    # Журнал действий пользователей для вкладки «Поведение» (services/user_events/).
+    events_enabled: bool = Field(default=True, alias="EVENTS_ENABLED")
+    # Сколько дней хранить события; старые удаляет планировщик раз в сутки.
+    events_retention_days: int = Field(default=180, ge=1, alias="EVENTS_RETENTION_DAYS")
     # Username бота берётся у Telegram (getMe по BOT_TOKEN); BOT_NAME — только
     # запасной вариант, если getMe недоступен. Никакого вшитого имени.
     bot_name: str = ""

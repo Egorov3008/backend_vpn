@@ -7,6 +7,9 @@ import asyncpg
 
 from app.auth import verify_admin_or_bot, verify_admin_actor, AdminPrincipal
 from services.admin_stats import InvalidPeriod, MonthPeriod, MonthStatsService
+from services.behavior import BehaviorReportService, BehaviorWindow, InvalidWindow
+from services.user_events import EventCatalog, UserEventRepository
+from app.schemas.behavior import AdminBehaviorResponse, AdminUserEvent
 from services.admin_filters import KeyStatus, filter_keys, filter_payments, filter_users
 from app.dependencies import get_service_data, get_pool, get_cache
 from app.factories import build_key_services
@@ -124,6 +127,35 @@ async def get_month_stats(
     except InvalidPeriod as e:
         raise HTTPException(status_code=422, detail=str(e))
     return await MonthStatsService(pool).get(period)
+
+
+@router.get("/behavior", response_model=AdminBehaviorResponse)
+async def get_behavior(
+    days: int = Query(30, ge=1, le=365, description="Окно: последние N дней, сегодня включительно"),
+    tz: str = Query("UTC", max_length=64, description="IANA-часовой пояс админа"),
+    pool: asyncpg.Pool = Depends(get_pool),
+):
+    """Поведение пользователей: воронка новых, удержание по когортам, отток,
+    брошенные счета и активность по журналу событий."""
+    try:
+        window = BehaviorWindow.build(days, tz)
+    except InvalidWindow as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    report = await BehaviorReportService(pool).get(window)
+    report["event_titles"] = EventCatalog().titles()
+    return report
+
+
+@router.get("/users/{tg_id}/events", response_model=List[AdminUserEvent])
+async def get_user_events(
+    tg_id: int,
+    limit: int = Query(50, ge=1, le=200),
+    pool: asyncpg.Pool = Depends(get_pool),
+):
+    """Последние действия пользователя из журнала, новые первыми."""
+    titles = EventCatalog().titles()
+    events = await UserEventRepository(pool).for_user(tg_id, limit)
+    return [AdminUserEvent(title=titles.get(e["name"], e["name"]), **e) for e in events]
 
 
 @router.get("/grace-bonus-stats", response_model=AdminGraceBonusStatsResponse)
