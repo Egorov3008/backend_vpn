@@ -53,3 +53,11 @@ async def test_pages_cover_full_list_once(filled, url, params, ids):
         pages.extend(ids(resp.json()))
 
     assert sorted(map(str, pages)) == sorted(map(str, everything))
+
+
+async def test_admin_finds_payment_by_part_of_id(filled):
+    resp = await filled.client.get("/api/v1/admin/payments", params={"q": "FOREI"})
+
+    assert resp.status_code == 200, resp.text
+    assert [p["payment_id"] for p in resp.json()["payments"]] == ["foreign"]
+    assert resp.headers["X-Total-Count"] == "1"

@@ -69,8 +69,13 @@ def filter_payments(
     *,
     tg_id: Optional[int] = None,
     status: Optional[str] = None,
+    q: Optional[str] = None,
 ) -> List[PaymentModel]:
+    """``q`` ищет по части ID платежа YooKassa (без учёта регистра)."""
+    query = (q or "").strip().lower()
     return [
         p for p in payments
-        if (tg_id is None or p.tg_id == tg_id) and (status is None or p.status == status)
+        if (tg_id is None or p.tg_id == tg_id)
+        and (status is None or p.status == status)
+        and (not query or query in (p.payment_id or "").lower())
     ]
