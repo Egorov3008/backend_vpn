@@ -4,6 +4,7 @@ from pathlib import Path
 
 import asyncpg
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -234,7 +235,8 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     return JSONResponse(
         status_code=422,
-        content={"detail": exc.errors(), "trace_id": getattr(request.state, "trace_id", "")},
+        # jsonable_encoder: в ctx ошибок model_validator лежит сам ValueError, json его не сериализует
+        content={"detail": jsonable_encoder(exc.errors()), "trace_id": getattr(request.state, "trace_id", "")},
         headers={"X-Trace-Id": getattr(request.state, "trace_id", "")},
     )
 

@@ -1,4 +1,5 @@
 """SQL рассылок (asyncpg): broadcasts + снимок получателей broadcast_recipients."""
+import json
 from typing import Any, Optional, Sequence
 
 import asyncpg
@@ -38,10 +39,20 @@ class BroadcastAlreadyRunning(Exception):
         self.broadcast_id = broadcast_id
 
 
-def _message(row: Any) -> BroadcastMessage:
-    media = None
+def _media(row: Any) -> tuple[Media, ...]:
+    items = row["media_items"]
+    if isinstance(items, str):
+        items = json.loads(items)
+    if items:
+        return tuple(Media(MediaType(m["type"]), m["file_id"], m.get("file_name")) for m in items)
+    # Рассылки до миграции 20261028: один файл в отдельных колонках
     if row["media_type"] and row["media_file_id"]:
-        media = Media(MediaType(row["media_type"]), row["media_file_id"], row["media_file_name"])
+        return (Media(MediaType(row["media_type"]), row["media_file_id"], row["media_file_name"]),)
+    return ()
+
+
+def _message(row: Any) -> BroadcastMessage:
+    media = _media(row)
     button = None
     if row["button_kind"]:
         button = Button(row["button_kind"], row["button_text"] or "", row["button_url"] or "")
@@ -82,7 +93,12 @@ class BroadcastRepository:
     async def create(self, admin_tg_id: Optional[int], audience: Audience, message: BroadcastMessage) -> int:
         """Рассылка + снимок получателей одной транзакцией. Админ в получатели не входит:
         ему уходит контрольная копия до запуска."""
-        media, button = message.media, message.button
+        button = message.button
+        first = message.media[0] if message.media else None
+        items = json.dumps(
+            [{"type": m.type.value, "file_id": m.file_id, "file_name": m.file_name} for m in message.media],
+            ensure_ascii=False,
+        )
         async with self._pool.acquire() as conn, conn.transaction():
             await conn.execute("SELECT pg_advisory_xact_lock($1)", _CREATE_LOCK)
             running = await conn.fetchval(
@@ -93,15 +109,15 @@ class BroadcastRepository:
             broadcast_id = await conn.fetchval(
                 """
                 INSERT INTO broadcasts (admin_tg_id, audience, text, media_type, media_file_id, media_file_name,
-                                        button_kind, button_text, button_url, disable_notification, pin)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                                        button_kind, button_text, button_url, disable_notification, pin, media_items)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb)
                 RETURNING id
                 """,
                 admin_tg_id, audience.id, message.text,
-                media.type.value if media else None, media.file_id if media else None,
-                media.file_name if media else None,
+                first.type.value if first else None, first.file_id if first else None,
+                first.file_name if first else None,
                 button.kind if button else None, button.text if button else None, button.url if button else None,
-                message.disable_notification, message.pin,
+                message.disable_notification, message.pin, items,
             )
             await conn.execute(
                 "INSERT INTO broadcast_recipients (broadcast_id, tg_id)"

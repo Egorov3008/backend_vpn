@@ -251,3 +251,72 @@ async def test_bot_secret_alone_cannot_broadcast(backend):
 
     assert resp.status_code in (401, 403)
     assert _received(backend, 3001) == []
+
+
+async def _upload(backend, name: str, content_type: str) -> dict:
+    resp = await backend.client.post(
+        "/api/v1/admin/broadcasts/media",
+        files={"file": (name, b"0" * 2048, content_type)},
+        headers=_admin_headers(),
+    )
+    assert resp.status_code == 200, resp.text
+    media = resp.json()
+    return {"type": media["type"], "file_id": media["file_id"], "file_name": media["file_name"]}
+
+
+async def test_album_of_photo_and_video(backend):
+    await _users(backend, 3101)
+    items = [await _upload(backend, "a.jpg", "image/jpeg"), await _upload(backend, "b.mp4", "video/mp4")]
+
+    started = await _start(backend, text="Наш альбом", media_items=items, pin=True, audience="all")
+    done = await _finished(backend, started["id"])
+
+    assert done["progress"]["sent"] == 1
+    assert [m["type"] for m in done["media_items"]] == ["photo", "video"]
+    [album] = _received(backend, 3101)
+    assert album["method"] == "sendMediaGroup"
+    assert [m["media"] for m in album["params"]["media"]] == [i["file_id"] for i in items]
+    assert album["params"]["media"][0]["caption"] == "Наш альбом"
+    pins = [m for m in backend.fakes.sent_messages(3101) if m["method"] == "pinChatMessage"]
+    assert pins[0]["params"]["message_id"] == album["message"]["message_id"]
+
+
+async def test_album_with_button_gets_text_message_after_it(backend):
+    await _users(backend, 3201)
+    items = [await _upload(backend, "a.jpg", "image/jpeg"), await _upload(backend, "b.jpg", "image/jpeg")]
+
+    started = await _start(
+        backend,
+        text="Подробнее по ссылке",
+        media_items=items,
+        button={"kind": "url", "text": "Сайт", "url": "https://example.test"},
+        audience="all",
+    )
+    await _finished(backend, started["id"])
+
+    album, text = _received(backend, 3201)
+    assert album["method"] == "sendMediaGroup"
+    assert text["method"] == "sendMessage"
+    assert text["params"]["text"] == "Подробнее по ссылке"
+    assert text["params"]["reply_markup"]["inline_keyboard"][0][0]["url"] == "https://example.test"
+
+
+@pytest.mark.parametrize(
+    "files, extra",
+    [
+        ([("a.jpg", "image/jpeg"), ("b.pdf", "application/pdf")], {"text": "x"}),
+        ([("a.jpg", "image/jpeg"), ("c.gif", "image/gif")], {"text": "x"}),
+        ([("a.jpg", "image/jpeg"), ("b.jpg", "image/jpeg")], {"button": {"kind": "url", "text": "Сайт", "url": "https://e.test"}}),
+    ],
+)
+async def test_album_telegram_cannot_send_is_refused(backend, files, extra):
+    await _users(backend, 3301)
+    items = [await _upload(backend, name, ctype) for name, ctype in files]
+
+    resp = await backend.client.post(
+        "/api/v1/admin/broadcasts", json={"media_items": items, "audience": "all", **extra}, headers=_admin_headers()
+    )
+
+    assert resp.status_code == 422
+    assert await backend.pool.fetchval("SELECT COUNT(*) FROM broadcasts") == 0
+    assert _received(backend, 3301) == []

@@ -4,7 +4,7 @@ Bot API принимает при загрузке фото до 10 МБ, ост
 крупнее 10 МБ уходит файлом (document), остальное крупнее 50 МБ не принимаем.
 """
 from pathlib import PurePosixPath
-from typing import Optional
+from typing import Optional, Sequence
 
 from services.broadcasts.models import MediaType
 
@@ -39,3 +39,23 @@ def detect_media_type(content_type: Optional[str], file_name: str, size: int, as
     if ctype.startswith("audio/") or ext in _AUDIO_EXT:
         return MediaType.AUDIO
     return MediaType.DOCUMENT
+
+
+ALBUM_MAX = 10
+_ALBUM_VISUAL = {MediaType.PHOTO, MediaType.VIDEO}
+
+
+def album_error(types: Sequence[MediaType]) -> Optional[str]:
+    """Почему эти файлы нельзя отправить одним альбомом (правила sendMediaGroup) или None.
+
+    Фото и видео смешиваются; файлы — только с файлами, аудио — только с аудио; GIF в альбом нельзя."""
+    if len(types) <= 1:
+        return None
+    if len(types) > ALBUM_MAX:
+        return f"В альбоме до {ALBUM_MAX} файлов"
+    kinds = set(types)
+    if MediaType.ANIMATION in kinds:
+        return "GIF нельзя добавить в альбом: отправьте его отдельной рассылкой или файлом"
+    if kinds <= _ALBUM_VISUAL or kinds == {MediaType.DOCUMENT} or kinds == {MediaType.AUDIO}:
+        return None
+    return "В одном альбоме: фото и видео вместе, файлы только с файлами, аудио только с аудио"

@@ -44,6 +44,12 @@ def new_tg_id() -> int:
     return next(_tg_ids)
 
 
+@pytest.fixture
+def other_tg_id() -> int:
+    """Второй пользователь теста (свой, не совпадает с new_tg_id других тестов)."""
+    return next(_tg_ids)
+
+
 @pytest.fixture(scope="session")
 def admin_tg_id() -> int:
     return ADMIN_TG_ID

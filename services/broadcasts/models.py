@@ -33,10 +33,26 @@ class Button:
 @dataclass(frozen=True)
 class BroadcastMessage:
     text: str = ""  # HTML (parse_mode=HTML); с медиа — подпись
-    media: Optional[Media] = None
+    # Один файл или альбом (2–10, sendMediaGroup). К альбому Telegram не цепляет
+    # кнопку: если она есть, текст с кнопкой уходит следующим сообщением.
+    media: tuple[Media, ...] = ()
     button: Optional[Button] = None
     disable_notification: bool = False
     pin: bool = False
+
+    @property
+    def is_album(self) -> bool:
+        return len(self.media) > 1
+
+    @property
+    def text_with_button(self) -> bool:
+        """Текст идёт отдельным сообщением с кнопкой (альбом + кнопка)."""
+        return self.is_album and self.button is not None
+
+    @property
+    def cost(self) -> int:
+        """Сколько сообщений получает человек: столько «мест» занимает в лимите Telegram."""
+        return max(1, len(self.media)) + (1 if self.text_with_button else 0)
 
 
 class DeliveryStatus(str, Enum):
