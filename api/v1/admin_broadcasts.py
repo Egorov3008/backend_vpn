@@ -75,9 +75,7 @@ def _raise_for_admin_send(result: SendResult) -> None:
 
 
 def _message(body: BroadcastMessageIn) -> BroadcastMessage:
-    media = None
-    if body.media is not None:
-        media = Media(MediaType(body.media.type), body.media.file_id, body.media.file_name)
+    media = tuple(Media(MediaType(m.type), m.file_id, m.file_name) for m in body.media_items)
     button = None
     if body.button is not None:
         if body.button.kind == "miniapp":

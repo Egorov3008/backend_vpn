@@ -26,12 +26,13 @@ class Pacer:
         self._sleep = sleep
         self._next = 0.0
 
-    async def wait(self) -> None:
+    async def wait(self, cost: int = 1) -> None:
+        """Дождаться места для запроса, который занимает ``cost`` сообщений (альбом — по числу файлов)."""
         now = self._clock()
         if self._next > now:
             await self._sleep(self._next - now)
             now = self._next
-        self._next = now + self._interval
+        self._next = now + self._interval * cost
 
 
 class BroadcastRunner:
@@ -99,7 +100,7 @@ class BroadcastRunner:
     async def _deliver(self, tg_id: int, message: BroadcastMessage) -> SendResult:
         result = SendResult(DeliveryStatus.FAILED)
         for attempt in range(1, self._max_attempts + 1):
-            await self._pacer.wait()
+            await self._pacer.wait(message.cost)
             result = await self._bot.send(tg_id, message)
             if result.retry_after is None or attempt == self._max_attempts:
                 break

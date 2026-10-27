@@ -1,10 +1,10 @@
 """Чистая логика рассылок: тип отправки файла, разбор ответов Bot API, темп."""
 import pytest
 
-from services.broadcasts.media import FILE_MAX_BYTES, PHOTO_MAX_BYTES, MediaTooLarge, detect_media_type
+from services.broadcasts.media import FILE_MAX_BYTES, PHOTO_MAX_BYTES, MediaTooLarge, album_error, detect_media_type
 from services.broadcasts.models import BroadcastMessage, Button, DeliveryStatus, Media, MediaType
 from services.broadcasts.runner import Pacer
-from services.broadcasts.telegram import build_request, extract_media, parse_response
+from services.broadcasts.telegram import build_requests, extract_media, parse_response
 
 
 @pytest.mark.parametrize(
@@ -48,11 +48,11 @@ def test_bot_api_answers():
 def test_media_message_uses_caption_and_web_app_button():
     message = BroadcastMessage(
         text="Подпись",
-        media=Media(MediaType.VIDEO, "file-id-123456"),
+        media=(Media(MediaType.VIDEO, "file-id-123456"),),
         button=Button("miniapp", "Открыть", "https://app.example.test"),
     )
 
-    method, payload = build_request(42, message)
+    [(method, payload)] = build_requests(42, message)
 
     assert method == "sendVideo"
     assert payload["video"] == "file-id-123456"
@@ -81,3 +81,51 @@ async def test_pacer_spaces_requests():
         await pacer.wait()
 
     assert now[0] == pytest.approx(0.4)
+
+
+PHOTO = Media(MediaType.PHOTO, "photo-id-123456")
+VIDEO = Media(MediaType.VIDEO, "video-id-123456")
+
+
+def test_album_caption_goes_on_first_file():
+    [(method, payload)] = build_requests(42, BroadcastMessage(text="Подпись", media=(PHOTO, VIDEO)))
+
+    assert method == "sendMediaGroup"
+    assert [m["media"] for m in payload["media"]] == [PHOTO.file_id, VIDEO.file_id]
+    assert payload["media"][0]["caption"] == "Подпись"
+    assert "caption" not in payload["media"][1]
+
+
+def test_album_with_button_sends_text_separately():
+    button = Button("url", "Сайт", "https://example.test")
+    message = BroadcastMessage(text="Текст", media=(PHOTO, VIDEO), button=button)
+
+    (album_method, album), (text_method, text) = build_requests(42, message)
+
+    assert album_method == "sendMediaGroup"
+    assert all("caption" not in m for m in album["media"])
+    assert text_method == "sendMessage"
+    assert text["text"] == "Текст"
+    assert text["reply_markup"]["inline_keyboard"][0][0]["url"] == "https://example.test"
+    assert message.cost == 3
+
+
+@pytest.mark.parametrize(
+    "types, ok",
+    [
+        ([MediaType.PHOTO, MediaType.VIDEO, MediaType.PHOTO], True),
+        ([MediaType.DOCUMENT, MediaType.DOCUMENT], True),
+        ([MediaType.AUDIO, MediaType.AUDIO], True),
+        ([MediaType.PHOTO, MediaType.DOCUMENT], False),
+        ([MediaType.AUDIO, MediaType.VIDEO], False),
+        ([MediaType.PHOTO, MediaType.ANIMATION], False),
+        ([MediaType.PHOTO] * 11, False),
+    ],
+)
+def test_album_rules(types, ok):
+    assert (album_error(types) is None) == ok
+
+
+def test_album_message_id_is_first_message():
+    result = parse_response(200, {"ok": True, "result": [{"message_id": 5}, {"message_id": 6}]})
+    assert result.message_id == 5

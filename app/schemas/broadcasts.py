@@ -6,7 +6,8 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field, model_validator
 
 from services.broadcasts.audiences import find_audience
-from services.broadcasts.models import Broadcast
+from services.broadcasts.media import ALBUM_MAX, album_error
+from services.broadcasts.models import Broadcast, MediaType
 
 MediaTypeName = Literal["photo", "video", "animation", "audio", "document"]
 
@@ -40,19 +41,34 @@ class BroadcastButtonIn(BaseModel):
 
 class BroadcastMessageIn(BaseModel):
     text: str = Field("", max_length=TEXT_MAX * 4, description="HTML: <b>, <i>, <u>, <s>, <a href>, <code>")
-    media: Optional[BroadcastMediaIn] = None
+    media: Optional[BroadcastMediaIn] = Field(None, description="Один файл (старый формат; то же, что media_items из одного)")
+    media_items: list[BroadcastMediaIn] = Field(
+        default_factory=list, max_length=ALBUM_MAX, description="Файлы по порядку; 2–10 — альбом"
+    )
     button: Optional[BroadcastButtonIn] = None
     disable_notification: bool = False
     pin: bool = False
 
     @model_validator(mode="after")
-    def _check_text(self):
+    def _check(self):
+        if self.media is not None:
+            if self.media_items:
+                raise ValueError("Передайте файлы либо в media, либо в media_items")
+            self.media_items, self.media = [self.media], None
+        problem = album_error([MediaType(m.type) for m in self.media_items])
+        if problem:
+            raise ValueError(problem)
         self.text = self.text.strip()
-        if not self.text and self.media is None:
+        if not self.text and not self.media_items:
             raise ValueError("Нужен текст или файл")
-        limit = CAPTION_MAX if self.media else TEXT_MAX
+        album_with_button = len(self.media_items) > 1 and self.button is not None
+        if album_with_button and not self.text:
+            raise ValueError("К альбому кнопка уходит отдельным сообщением с текстом: напишите текст")
+        # Подпись к файлу короче; у альбома с кнопкой текст — отдельное сообщение
+        is_caption = bool(self.media_items) and not album_with_button
+        limit = CAPTION_MAX if is_caption else TEXT_MAX
         if visible_length(self.text) > limit:
-            where = "Подпись к файлу" if self.media else "Текст"
+            where = "Подпись к файлу" if is_caption else "Текст"
             raise ValueError(f"{where} длиннее {limit} символов")
         return self
 
@@ -78,6 +94,11 @@ class MediaUploadResponse(BaseModel):
     size: int
 
 
+class BroadcastMediaItemResponse(BaseModel):
+    type: MediaTypeName
+    file_name: Optional[str]
+
+
 class BroadcastProgressResponse(BaseModel):
     total: int
     pending: int
@@ -96,8 +117,9 @@ class BroadcastResponse(BaseModel):
     created_at: datetime
     finished_at: Optional[datetime]
     text: str
-    media_type: Optional[MediaTypeName]
+    media_type: Optional[MediaTypeName]  # первый файл
     media_file_name: Optional[str]
+    media_items: list[BroadcastMediaItemResponse]
     button_kind: Optional[str]
     button_text: Optional[str]
     button_url: Optional[str]
@@ -119,8 +141,9 @@ class BroadcastResponse(BaseModel):
             created_at=b.created_at,
             finished_at=b.finished_at,
             text=m.text,
-            media_type=m.media.type.value if m.media else None,
-            media_file_name=m.media.file_name if m.media else None,
+            media_type=m.media[0].type.value if m.media else None,
+            media_file_name=m.media[0].file_name if m.media else None,
+            media_items=[BroadcastMediaItemResponse(type=x.type.value, file_name=x.file_name) for x in m.media],
             button_kind=m.button.kind if m.button else None,
             button_text=m.button.text if m.button else None,
             button_url=m.button.url if m.button else None,

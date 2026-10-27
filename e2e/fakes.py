@@ -343,6 +343,15 @@ async def telegram(token: str, method: str, request: Request):
             message["photo"] = [{"file_id": file_id, "file_unique_id": "u", "width": 1, "height": 1}]
         elif kind:
             message[kind] = {"file_id": _media_file_id(kind, params.get(kind)), "file_unique_id": "u"}
+        if m == "sendmediagroup":
+            # Альбом: Telegram отвечает списком сообщений, по одному на файл
+            album = []
+            for item in params.get("media") or []:
+                S.msg_seq += 1
+                album.append({**message, "message_id": S.msg_seq,
+                              item["type"]: {"file_id": _media_file_id(item["type"], item.get("media")), "file_unique_id": "u"}})
+            _record(token, method, chat_id, params, album[0] if album else message)
+            return _ok(album)
         _record(token, method, chat_id, params, message)
         return _ok(message)
     # Неизвестный метод — пусть тест увидит, что бот звал что-то новое

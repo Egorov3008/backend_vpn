@@ -3,6 +3,7 @@
 Токен живёт только в URL запросов и никуда не пишется: в ошибки и логи
 попадают описание от Telegram или имя исключения, но не адрес.
 """
+import asyncio
 from typing import Any, BinaryIO, Optional, Protocol
 
 import httpx
@@ -22,6 +23,8 @@ _METHOD_BY_MEDIA = {
 _RESULT_ORDER = (MediaType.ANIMATION, MediaType.VIDEO, MediaType.AUDIO, MediaType.PHOTO, MediaType.DOCUMENT)
 # Пауза при сетевом сбое: отправку повторит раннер, как после 429.
 _NETWORK_RETRY_AFTER = 2.0
+# Попыток дослать текст с кнопкой после альбома (при 429 и сбоях сети)
+_FOLLOW_UP_ATTEMPTS = 3
 
 
 class BroadcastBot(Protocol):
@@ -44,22 +47,45 @@ def reply_markup(message: BroadcastMessage) -> Optional[dict]:
     return {"inline_keyboard": [[{"text": button.text, **target}]]}
 
 
-def build_request(chat_id: int, message: BroadcastMessage) -> tuple[str, dict[str, Any]]:
-    """Метод Bot API и его параметры для одного получателя."""
-    payload: dict[str, Any] = {"chat_id": chat_id, "disable_notification": message.disable_notification}
+def _album_payload(chat_id: int, message: BroadcastMessage) -> dict[str, Any]:
+    items: list[dict[str, Any]] = []
+    for i, media in enumerate(message.media):
+        item: dict[str, Any] = {"type": media.type.value, "media": media.file_id}
+        # Подпись альбома — подпись первого файла (так её показывает Telegram)
+        if i == 0 and message.text and not message.text_with_button:
+            item.update(caption=message.text, parse_mode="HTML")
+        if media.type == MediaType.VIDEO:
+            item["supports_streaming"] = True
+        items.append(item)
+    return {"chat_id": chat_id, "media": items, "disable_notification": message.disable_notification}
+
+
+def build_requests(chat_id: int, message: BroadcastMessage) -> list[tuple[str, dict[str, Any]]]:
+    """Запросы Bot API для одного получателя, по порядку.
+
+    Обычно один. Альбом с кнопкой — два: sendMediaGroup (кнопку к альбому
+    прикрепить нельзя) и следом текст с кнопкой."""
+    base: dict[str, Any] = {"chat_id": chat_id, "disable_notification": message.disable_notification}
     markup = reply_markup(message)
+    text_message = {**base, "text": message.text, "parse_mode": "HTML"}
+    if markup is not None:
+        text_message["reply_markup"] = markup
+    if not message.media:
+        return [("sendMessage", text_message)]
+    if message.is_album:
+        requests = [("sendMediaGroup", _album_payload(chat_id, message))]
+        if message.text_with_button:
+            requests.append(("sendMessage", text_message))
+        return requests
+    media = message.media[0]
+    payload = {**base, media.type.value: media.file_id}
     if markup is not None:
         payload["reply_markup"] = markup
-    media = message.media
-    if media is None:
-        payload.update(text=message.text, parse_mode="HTML")
-        return "sendMessage", payload
-    payload[media.type.value] = media.file_id
     if message.text:
         payload.update(caption=message.text, parse_mode="HTML")
     if media.type == MediaType.VIDEO:
         payload["supports_streaming"] = True
-    return _METHOD_BY_MEDIA[media.type], payload
+    return [(_METHOD_BY_MEDIA[media.type], payload)]
 
 
 def parse_response(status_code: int, body: Any) -> SendResult:
@@ -68,6 +94,8 @@ def parse_response(status_code: int, body: Any) -> SendResult:
         return SendResult(DeliveryStatus.FAILED, error=f"HTTP {status_code}")
     if body.get("ok"):
         result = body.get("result")
+        if isinstance(result, list):  # альбом: закрепляем первое сообщение
+            result = result[0] if result else None
         message_id = result.get("message_id") if isinstance(result, dict) else None
         return SendResult(DeliveryStatus.SENT, message_id=message_id)
     description = str(body.get("description") or f"HTTP {status_code}")[:500]
@@ -126,9 +154,25 @@ class TelegramBroadcastBot:
         return result, (body or {}).get("result") if result.ok else None
 
     async def send(self, chat_id: int, message: BroadcastMessage) -> SendResult:
-        method, payload = build_request(chat_id, message)
+        (method, payload), *rest = build_requests(chat_id, message)
         result, _ = await self._call(method, self._timeout, json=payload)
+        if not result.ok:
+            return result
+        # Альбом уже у человека: следующее сообщение (текст с кнопкой) досылаем здесь же,
+        # иначе повтор всей отправки продублировал бы альбом.
+        for follow_method, follow_payload in rest:
+            await self._send_follow_up(chat_id, follow_method, follow_payload)
         return result
+
+    async def _send_follow_up(self, chat_id: int, method: str, payload: dict[str, Any]) -> None:
+        for _ in range(_FOLLOW_UP_ATTEMPTS):
+            follow, _ = await self._call(method, self._timeout, json=payload)
+            if follow.ok:
+                return
+            if follow.retry_after is None:
+                break
+            await asyncio.sleep(follow.retry_after)
+        logger.warning("Рассылка: альбом ушёл, а текст с кнопкой — нет", chat_id=chat_id, error=follow.error)
 
     async def upload(
         self, chat_id: int, media_type: MediaType, file_name: str, content_type: str, file: BinaryIO
