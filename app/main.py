@@ -196,13 +196,15 @@ async def trace_id_middleware(request: Request, call_next):
     try:
         response = await call_next(request)
         response.headers["X-Trace-Id"] = trace_id
-        logger.info(
-            "HTTP request",
-            method=request.method,
-            path=request.url.path,
-            status_code=response.status_code,
-            duration_ms=round((time.monotonic() - start) * 1000, 1),
-        )
+        # /health дёргает healthcheck контейнера каждые несколько секунд — в лог не пишем
+        if request.url.path != "/health":
+            logger.info(
+                "HTTP request",
+                method=request.method,
+                path=request.url.path,
+                status_code=response.status_code,
+                duration_ms=round((time.monotonic() - start) * 1000, 1),
+            )
         return response
     except Exception:
         # Тело ошибки формирует unhandled_exception_handler ниже (всегда 500);
