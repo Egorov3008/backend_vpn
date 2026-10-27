@@ -163,6 +163,14 @@ class Fakes:
     def fail_panel(self, *paths: str) -> None:
         self._http.post("/_ctl/panel/fail", json={"paths": list(paths)}).raise_for_status()
 
+    def block_bot(self, *chat_ids: int) -> None:
+        """Эти пользователи заблокировали бота: отправка им — 403."""
+        self._http.post("/_ctl/tg/blocked", json={"chat_ids": list(chat_ids)}).raise_for_status()
+
+    def flood_once(self, *chat_ids: int, retry_after: int = 1) -> None:
+        """Следующая отправка в эти чаты получит 429 Too Many Requests."""
+        self._http.post("/_ctl/tg/flood", json={"chat_ids": list(chat_ids), "retry_after": retry_after}).raise_for_status()
+
     def set_chat_member(self, user_id: int, status: str) -> None:
         self._http.post("/_ctl/tg/chat-member", json={"chat_id": "*", "user_id": user_id, "status": status}).raise_for_status()
 

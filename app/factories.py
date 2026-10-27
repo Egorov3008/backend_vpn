@@ -150,3 +150,34 @@ def build_payment_router(
         bonus_service=bonus_svc,
         success_listeners=build_payment_success_listeners(notifier, pool),
     )
+
+
+_broadcast_jobs = None
+
+
+def broadcast_jobs():
+    """Реестр задач рассылок на процесс (их надо видеть из API и из lifespan)."""
+    global _broadcast_jobs
+    if _broadcast_jobs is None:
+        from services.broadcasts.runner import BroadcastJobs
+
+        _broadcast_jobs = BroadcastJobs()
+    return _broadcast_jobs
+
+
+def build_broadcast_bot():
+    """Рассылка идёт от пользовательского бота (BOT_TOKEN), не от админ-бота."""
+    from config import settings
+    from services.broadcasts.telegram import TelegramBroadcastBot
+
+    return TelegramBroadcastBot(settings.bot_token)
+
+
+def build_broadcast_runner(pool: asyncpg.Pool):
+    from config import settings
+    from services.broadcasts.repository import BroadcastRepository
+    from services.broadcasts.runner import BroadcastRunner
+
+    return BroadcastRunner(
+        BroadcastRepository(pool), build_broadcast_bot(), rate_per_second=settings.broadcast_rate_per_second
+    )

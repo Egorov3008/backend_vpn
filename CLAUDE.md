@@ -201,6 +201,17 @@ Both are built by one factory, `api/v1/cabinet.py::build_cabinet_router`, which 
 
 No login: the link `WEB_PUBLIC_URL/renew/<email>` goes into the 3x-ui subscription settings (Profile page `.../renew/{{EMAIL}}`), so Happ shows it as a button for each key and opens it in a browser. The email is the key's `subId`, so whoever has it can already download the subscription; the page reveals nothing new. `GET /{email}` (expiry, own tariff, tariffs allowed by the cabinet renewal rules), `POST /{email}/quotes`, `POST /{email}/payments` (always `renew_key|<email>`, billed to the key owner, YooKassa returns to `WEB_PUBLIC_URL/renew/<email>/result`), `GET /{email}/payments/{payment_id}/status` (only this key's renewal payments). The owner's balance is never spent or shown (`use_balance=False`); stocks, the referral 10%, volume discount and promo codes work as in the cabinet. Responses never include `tg_id`. Landing guest keys (`tg_id < 0`) answer 404. Rate limited per IP.
 
+#### Mass broadcast (`/api/v1/admin/broadcasts`, `api/v1/admin_broadcasts.py`, `services/broadcasts/`)
+
+From the web admin only (`verify_admin_actor`; the bot secret is not enough). Messages go from the **user bot** (`BOT_TOKEN`), since users chat with it; the admin bot only logs the admin in. Migration `db/migrations/20261027_broadcasts.sql`.
+
+- `POST /media` (multipart `file`, optional `as_document`) uploads a photo/video/GIF/audio/file once through the admin's own chat with the user bot, deletes that message and returns the user bot's `file_id`. Bot API upload limits: photo 10 MB (bigger goes as a file), anything else 50 MB (413). The admin must have pressed Start in the user bot (409 otherwise). nginx in front needs `client_max_body_size` ≥ 50m on this path.
+- `POST /preview` sends the draft to the admin only. `POST /` (`audience` + message) first sends the admin a control copy: if Telegram refuses it (bad HTML, foreign file_id) nothing is created (422). Then the recipients are snapshotted into `broadcast_recipients` (`tg_id > 0`, admin excluded) and an asyncio task sends at `BROADCAST_RATE_PER_SECOND` (default 20/s, leaves room for notifications from the same bot), retries 429 and network errors, counts 403/«chat not found» as `blocked` (does **not** touch `users.is_blocked`), stops as `failed` on 401 or 50 errors in a row. One broadcast at a time (409).
+- Message: HTML text (caption ≤ 1024 with media, text ≤ 4096), one media by `file_id`, optional button (`url`, or `miniapp` = web_app to `MINIAPP_URL`), `disable_notification`, `pin`.
+- `GET /` (history, `X-Total-Count`), `GET /{id}` (progress), `POST /{id}/cancel`, `GET /audiences` (segments with counts; one class per segment in `services/broadcasts/audiences.py`).
+- Restart-safe: `lifespan` resumes `running` broadcasts; rows left in `sending` go back to `pending`, already sent ones are not repeated. Single uvicorn process assumed for the task registry; claiming uses `FOR UPDATE SKIP LOCKED`, so a second process would not double-send.
+- Mass mailing in the bot (text-only) still exists and is untouched.
+
 #### Mobile MVP (`/api/v1/mobile`)
 
 - **GET `/shared-config`** — One shared VPN config for the MVP Android app; no per-user auth, no accounts, no per-user state.
@@ -229,7 +240,7 @@ Split into two routers with different auth (see Authentication below):
 
 Grep `api/v1/admin.py` for the current full route list rather than trusting a manually maintained enumeration here — it grows frequently (referrals, gift codes, promotions, and sync jobs were all added after this section was first written).
 
-**Admin UI:** lives in `platform-web` (`/admin`, the Mini App of the admin bot, served on its own host) and uses the session login above. The old vanilla-JS `admin_panel/` mounted at `/admin-panel` was removed after the new admin went live (2026-10-16). Mass mailing stays in the bot.
+**Admin UI:** lives in `platform-web` (`/admin`, the Mini App of the admin bot, served on its own host) and uses the session login above. The old vanilla-JS `admin_panel/` mounted at `/admin-panel` was removed after the new admin went live (2026-10-16). Mass mailing is in the web admin («Рассылка», see Mass broadcast above); the old text-only mailing in the bot still works.
 
 ### Authentication
 
