@@ -58,3 +58,13 @@ def test_payments_by_owner_and_status():
     ]
     assert filter_payments(payments, tg_id=1, status="succeeded") == [payments[0]]
     assert len(filter_payments(payments)) == 3
+
+
+def test_payments_by_part_of_id():
+    payments = [
+        SimpleNamespace(tg_id=1, status="succeeded", payment_id="2E9F0A1B-000F"),
+        SimpleNamespace(tg_id=2, status="pending", payment_id="7c11aa00-0001"),
+    ]
+    assert filter_payments(payments, q="2e9f") == [payments[0]]
+    assert filter_payments(payments, q="  ") == payments
+    assert filter_payments(payments, q="nothing") == []

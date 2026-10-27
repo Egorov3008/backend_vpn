@@ -240,7 +240,7 @@ Split into two routers with different auth (see Authentication below):
 
 **Event log (`services/user_events/`, migration `db/migrations/20261029_user_events.sql`):** table `user_events` (`tg_id` or `anon_id`, `name`, `source` = miniapp|web|renew_link|backend, `props`). Only names and props listed in `catalog.py` are stored (add an event = add a catalog entry); no IP, user agent, keys or typed text. `EventTracker` never raises. Written today: `app_opened` (cabinet `GET /me`), `trial_created`, `payment_created`, `key_deleted` (cabinet), `payment_created` from the renew link, `web_login`, `payment_succeeded` (a `PaymentSuccessListener`). `EVENTS_ENABLED` (default true), `EVENTS_RETENTION_DAYS` (default 180, a daily scheduler job deletes older rows). Client events (screens, buttons) are not collected yet.
 
-**List filters:** `GET /admin/users?q=` (part of tg_id, or username/name), `GET /admin/keys?tg_id=&q=&status=active|expiring|expired` (expiring = ≤3 days), `GET /admin/payments?tg_id=&status=`; filtering happens before `limit`/`offset` and `X-Total-Count` counts the filtered list (`services/admin_filters.py`).
+**List filters:** `GET /admin/users?q=` (part of tg_id, or username/name), `GET /admin/keys?tg_id=&q=&status=active|expiring|expired` (expiring = ≤3 days), `GET /admin/payments?tg_id=&status=&q=` (q = part of the payment ID); filtering happens before `limit`/`offset` and `X-Total-Count` counts the filtered list (`services/admin_filters.py`).
 
 Grep `api/v1/admin.py` for the current full route list rather than trusting a manually maintained enumeration here — it grows frequently (referrals, gift codes, promotions, and sync jobs were all added after this section was first written).
 

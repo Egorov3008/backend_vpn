@@ -899,10 +899,11 @@ async def admin_list_payments(
     offset: int = Query(0, ge=0),
     tg_id: Optional[int] = Query(None),
     status: Optional[str] = Query(None, max_length=32, description="pending | processing | succeeded | canceled"),
+    q: Optional[str] = Query(None, max_length=64, description="Part of the YooKassa payment ID"),
     service_data: ServiceDataModel = Depends(get_service_data),
 ):
     """Admin: list payments, optionally filtered; X-Total-Count counts the filtered list."""
-    payments = filter_payments(await service_data.payments.get_all(), tg_id=tg_id, status=status)
+    payments = filter_payments(await service_data.payments.get_all(), tg_id=tg_id, status=status, q=q)
     response.headers["X-Total-Count"] = str(len(payments))
     payments = payments[offset:offset + limit] if limit is not None else payments[offset:]
     return {"payments": [AdminPaymentItem.from_payment(p) for p in payments]}
