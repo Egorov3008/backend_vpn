@@ -173,6 +173,19 @@ def broadcast_jobs():
     return _broadcast_jobs
 
 
+_bulk_renewal_jobs = None
+
+
+def bulk_renewal_jobs():
+    """Реестр задач массового продления на процесс (один запуск одновременно)."""
+    global _bulk_renewal_jobs
+    if _bulk_renewal_jobs is None:
+        from services.core.keys.bulk_renewal import BulkRenewalJobs
+
+        _bulk_renewal_jobs = BulkRenewalJobs()
+    return _bulk_renewal_jobs
+
+
 def build_broadcast_bot():
     """Рассылка идёт от пользовательского бота (BOT_TOKEN), не от админ-бота."""
     from config import settings

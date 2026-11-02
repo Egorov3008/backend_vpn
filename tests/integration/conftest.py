@@ -309,6 +309,10 @@ async def backend(pool, fakes, monkeypatch):
     from services.core.data.service import ServiceDataModel
 
     _configure_backend(monkeypatch, fakes.url)
+    # In-memory реестр задач продления переживает тест — гасим хвосты прошлого.
+    from app.factories import bulk_renewal_jobs
+
+    await bulk_renewal_jobs().reset()
     await _seed(pool, fakes.url)
 
     # То же, что lifespan в app/main.py, без планировщика

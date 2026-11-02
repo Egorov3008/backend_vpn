@@ -15,8 +15,12 @@ from services.system.maintenance import PanelMaintenanceError, maintenance_mode
 _renewal_locks: dict[str, asyncio.Lock] = {}
 
 
-def _renewal_lock(email: str) -> asyncio.Lock:
-    """Лок продления одного ключа в пределах процесса (приложение запускается одним воркером)."""
+def renewal_lock(email: str) -> asyncio.Lock:
+    """Лок продления одного ключа в пределах процесса (приложение запускается одним воркером).
+
+    Публичный: его же берёт bulk-продление (services/core/keys/bulk_renewal.py),
+    чтобы не конкурировать с PATCH /keys/{email} и платежами.
+    """
     return _renewal_locks.setdefault(email, asyncio.Lock())
 
 
@@ -66,7 +70,7 @@ class KeyRenewal:
         # одного и того же снимка и второй период теряется. Лок на email покрывает весь путь
         # от чтения до записи в БД/кеш. Процессы не покрывает: scripts/sweep_pending_payments.py
         # в отдельном процессе этим локом не защищён.
-        async with _renewal_lock(key.email):
+        async with renewal_lock(key.email):
             # Перечитываем ключ уже под замком: переданный снимок мог устареть, пока ждали
             # предыдущее продление того же ключа.
             current = await self.key_data.get_data(key.email, conn) or key

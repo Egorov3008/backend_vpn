@@ -75,6 +75,29 @@ async def test_mass_renew_accepts_api_key(
 
 
 @pytest.mark.asyncio
+async def test_bulk_renew_rejects_bot_secret(
+    mock_service_data, mock_pool, mock_cache, monkeypatch
+):
+    """Bulk-renew — деструктивный эндпоинт: X-Bot-Secret без X-API-Key → 401."""
+    monkeypatch.setattr(settings, "bot_secret_key", "bot-secret-only")
+    app.dependency_overrides[get_service_data] = lambda: mock_service_data
+    app.dependency_overrides[get_pool] = lambda: mock_pool
+    app.dependency_overrides[get_cache] = lambda: mock_cache
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.post(
+                "/api/v1/admin/keys/bulk-renewals",
+                json={"days": 3},
+                headers={"X-Bot-Secret": "bot-secret-only"},
+            )
+        assert resp.status_code == 401
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
 async def test_delete_key_rejects_bot_secret_via_subrouter(
     mock_service_data, mock_pool, mock_cache, monkeypatch
 ):

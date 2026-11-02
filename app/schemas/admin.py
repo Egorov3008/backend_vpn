@@ -1,4 +1,6 @@
-from pydantic import BaseModel
+from datetime import datetime
+
+from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional
 
 from app.schemas.users import UserResponse
@@ -13,7 +15,7 @@ class AdminGenerateKeyRequest(BaseModel):
 
 class AdminMassRenewRequest(BaseModel):
     emails: List[str]
-    days: int = 30
+    days: int = Field(default=30, gt=0, le=3650)
 
 
 class AdminChangeDateRequest(BaseModel):
@@ -226,6 +228,65 @@ class AdminMassRenewResponse(BaseModel):
     success: int
     failed: int
     results: List[AdminMassRenewResultItem]
+
+
+# ── Массовое продление действующих платных ключей ────────────────────────
+
+
+class AdminBulkRenewPreviewRequest(BaseModel):
+    days: int = Field(default=30, gt=0, le=3650)
+
+
+class AdminBulkRenewTariffCount(BaseModel):
+    tariff_id: int
+    name_tariff: Optional[str] = None
+    keys: int
+    users: int
+
+
+class AdminBulkRenewPreviewResponse(BaseModel):
+    days: int
+    total_keys: int
+    total_users: int
+    by_tariff: List[AdminBulkRenewTariffCount]
+    min_expiry_time: Optional[int] = None
+    max_expiry_time: Optional[int] = None
+    new_expiry_min: Optional[int] = None
+    new_expiry_max: Optional[int] = None
+
+
+class AdminBulkRenewRequest(BaseModel):
+    days: int = Field(..., gt=0, le=3650)
+    # Защита от изменения набора между preview и запуском: если передан и не
+    # совпал с фактическим числом ключей — 409.
+    expected_total: Optional[int] = Field(default=None, ge=0)
+
+
+class AdminBulkRenewStartedResponse(BaseModel):
+    job_id: str
+    status: str
+    total_keys: int
+    days: int
+
+
+class AdminBulkRenewErrorItem(BaseModel):
+    email: str
+    error: str
+
+
+class AdminBulkRenewStatusResponse(BaseModel):
+    job_id: str
+    status: str  # running | done | cancelled | error
+    days: int
+    total_keys: int
+    processed: int
+    success: int
+    failed: int
+    cancelled: bool
+    started_at: datetime
+    finished_at: Optional[datetime] = None
+    # Только выборка ошибок (не более 20), чтобы ответ не разрастался.
+    errors: List[AdminBulkRenewErrorItem]
 
 
 class AdminChangeDateResponse(BaseModel):

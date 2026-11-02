@@ -12,7 +12,7 @@ from services.user_events import EventCatalog, UserEventRepository
 from app.schemas.behavior import AdminBehaviorResponse, AdminUserEvent
 from services.admin_filters import KeyStatus, filter_keys, filter_payments, filter_users
 from app.dependencies import get_service_data, get_pool, get_cache
-from app.factories import build_key_services
+from app.factories import build_key_services, bulk_renewal_jobs
 from services.admin_audit import AuditLogger
 from app.schemas.users import UserResponse, UserUpdateRequest, UserRegisterRequest
 from app.schemas.admin import (
@@ -33,6 +33,11 @@ from app.schemas.admin import (
     AdminDeleteCountResponse,
     AdminGenerateKeyResponse,
     AdminMassRenewResponse,
+    AdminBulkRenewPreviewRequest,
+    AdminBulkRenewPreviewResponse,
+    AdminBulkRenewRequest,
+    AdminBulkRenewStartedResponse,
+    AdminBulkRenewStatusResponse,
     AdminChangeDateResponse,
     AdminChangeTariffResponse,
     AdminPanelMetaResponse,
@@ -62,6 +67,7 @@ from services.core.data.service import ServiceDataModel
 from services.core.keys.admin_report import KeyAdminReport
 from services.core.referral.link_generator import ReferralLinkGenerator, referral_share_url
 from services.core.keys.utils.reset import KeyResetter
+from services.core.keys.bulk_renewal import DAY_MS, KeyNotFoundError, renew_key_by_days
 from services.core.keys.utils.inbounds import paid_inbound_ids
 from services.system.maintenance import maintenance_mode
 from app.schemas.api_clients import (
@@ -471,52 +477,145 @@ async def admin_mass_renew(
     service_data: ServiceDataModel = Depends(get_service_data),
     cache: CacheService = Depends(get_cache),
 ):
-    """Admin: mass-renew keys by email list."""
-    from datetime import datetime, timezone
-
+    """Admin: mass-renew keys by email list (синхронно, по явному списку)."""
     data_service = DataService()
     _, _, xui = build_key_services(pool, service_data, cache, data_service)
-    resetter = KeyResetter(cache_service=cache)
 
+    # Дубликат email продлил бы один и тот же ключ дважды.
+    emails = list(dict.fromkeys(body.emails))
     results = []
-    for email in body.emails:
-        key = await service_data.keys.get_data(email)
-        if not key:
-            key = await service_data.data_service.keys.get(pool, email=email)
-        if not key:
-            results.append({"email": email, "success": False, "error": "Key not found"})
-            continue
-
+    for email in emails:
         try:
-            now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-            old_expiry = key.expiry_time
-            base_expiry = max(old_expiry, now_ms)
-            new_expiry = base_expiry + (body.days * 24 * 3600 * 1000)
-
-            inbound_ok = await xui.set_inbounds(key.email, paid_inbound_ids())
-            if not inbound_ok:
-                logger.warning(
-                    "Не удалось синхронизировать inbound-набор перед mass-renew; продолжаем best-effort",
-                    email=key.email,
-                    operation="mass_renew",
-                    admin_tg_id=principal.admin_tg_id,
-                )
-            key.expiry_time = new_expiry
-            await xui.extend_client_key(key)
-
-            await service_data.keys.update(pool, key, {"email": key.email})
-            await resetter.reset_key_after_renewal(pool, key)
-
+            new_expiry = await renew_key_by_days(pool, service_data, cache, xui, email, body.days)
             results.append({"email": email, "success": True, "new_expiry": new_expiry})
+        except KeyNotFoundError:
+            results.append({"email": email, "success": False, "error": "Key not found"})
         except Exception as e:
             logger.error("Mass renew failed for key", email=email, error=str(e))
             results.append({"email": email, "success": False, "error": str(e)})
 
     success_count = sum(1 for r in results if r["success"])
     await AuditLogger(pool).record(
-        principal.admin_tg_id, "mass_renew", f"{success_count}/{len(body.emails)}"
+        principal.admin_tg_id, "mass_renew", f"{success_count}/{len(emails)}"
     )
-    return {"total": len(body.emails), "success": success_count, "failed": len(body.emails) - success_count, "results": results}
+    return {
+        "total": len(emails),
+        "success": success_count,
+        "failed": len(emails) - success_count,
+        "results": results,
+    }
+
+
+@destructive_router.post(
+    "/keys/bulk-renewals/preview", response_model=AdminBulkRenewPreviewResponse
+)
+async def admin_bulk_renew_preview(
+    body: AdminBulkRenewPreviewRequest,
+    principal: AdminPrincipal = Depends(verify_admin_actor),
+    pool=Depends(get_pool),
+    service_data: ServiceDataModel = Depends(get_service_data),
+):
+    """Admin: сколько действующих платных ключей затронет продление (ничего не меняет)."""
+    now_ms = int(time.time() * 1000)
+    stats = await service_data.data_service.keys.preview_active_paid(pool, now_ms)
+    delta = body.days * DAY_MS
+    return {
+        "days": body.days,
+        **stats,
+        "new_expiry_min": (
+            stats["min_expiry_time"] + delta if stats["min_expiry_time"] is not None else None
+        ),
+        "new_expiry_max": (
+            stats["max_expiry_time"] + delta if stats["max_expiry_time"] is not None else None
+        ),
+    }
+
+
+@destructive_router.post(
+    "/keys/bulk-renewals",
+    response_model=AdminBulkRenewStartedResponse,
+    status_code=202,
+)
+async def admin_bulk_renew_start(
+    body: AdminBulkRenewRequest,
+    principal: AdminPrincipal = Depends(verify_admin_actor),
+    pool=Depends(get_pool),
+    service_data: ServiceDataModel = Depends(get_service_data),
+    cache: CacheService = Depends(get_cache),
+):
+    """Admin: продлить все действующие платные ключи на N дней фоновой задачей."""
+    now_ms = int(time.time() * 1000)
+    emails = await service_data.data_service.keys.list_active_paid_emails(pool, now_ms)
+    if not emails:
+        raise HTTPException(status_code=409, detail="No active paid keys")
+    if body.expected_total is not None and body.expected_total != len(emails):
+        raise HTTPException(
+            status_code=409,
+            detail={"message": "Active paid key set changed", "total_keys": len(emails)},
+        )
+
+    data_service = DataService()
+    _, _, xui = build_key_services(pool, service_data, cache, data_service)
+    job_id, existing = await bulk_renewal_jobs().start(
+        emails,
+        body.days,
+        principal.admin_tg_id,
+        pool=pool,
+        service_data=service_data,
+        cache=cache,
+        xui=xui,
+    )
+    if job_id is None:
+        raise HTTPException(
+            status_code=409,
+            detail={"message": "bulk renewal already running", "job_id": existing},
+        )
+
+    await AuditLogger(pool).record(
+        principal.admin_tg_id, "bulk_renew_start", f"{len(emails)} keys, {body.days}d"
+    )
+    return {
+        "job_id": job_id,
+        "status": "running",
+        "total_keys": len(emails),
+        "days": body.days,
+    }
+
+
+@destructive_router.get(
+    "/keys/bulk-renewals/{job_id}", response_model=AdminBulkRenewStatusResponse
+)
+async def admin_bulk_renew_status(
+    job_id: str,
+    principal: AdminPrincipal = Depends(verify_admin_actor),
+):
+    """Admin: прогресс фоновой задачи массового продления (состояние в памяти процесса)."""
+    state = await bulk_renewal_jobs().get(job_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="Bulk renewal job not found")
+    return state.as_dict()
+
+
+@destructive_router.post(
+    "/keys/bulk-renewals/{job_id}/cancel",
+    response_model=AdminBulkRenewStatusResponse,
+)
+async def admin_bulk_renew_cancel(
+    job_id: str,
+    principal: AdminPrincipal = Depends(verify_admin_actor),
+    pool=Depends(get_pool),
+):
+    """Admin: остановить выполняющуюся задачу (уже обработанные ключи остаются продлены)."""
+    state = await bulk_renewal_jobs().cancel(job_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="Bulk renewal job not found")
+    if state.status != "running":
+        raise HTTPException(
+            status_code=409,
+            detail={"message": "Job already finished", "status": state.status},
+        )
+    await AuditLogger(pool).record(principal.admin_tg_id, "bulk_renew_cancel", job_id)
+    return state.as_dict()
 
 
 @destructive_router.patch("/keys/{email}/expiry", response_model=AdminChangeDateResponse)
