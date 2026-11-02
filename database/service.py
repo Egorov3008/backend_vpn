@@ -1,5 +1,5 @@
 import uuid
-from typing import Optional
+from typing import List, Optional
 
 from database.base import BaseRepository
 from database.protocols import DatabaseProtocol
@@ -148,6 +148,77 @@ class PaymentRepository(BaseRepository[PaymentModel]):
             return canceled is not None
 
 
+class KeyRepository(BaseRepository[Key]):
+    """Ключи + выборки для массового продления.
+
+    Действующий платный ключ: срок ещё не истёк, владелец — реальный
+    Telegram-пользователь, тариф существует и стоит больше нуля. Так
+    исключаются trial (`tariff.amount = 0`), лендинговые ключи (`tg_id < 0`,
+    виртуальный tariff_id без строки в tariff) и истёкшие ключи. Тариф,
+    снятый с продажи, по-прежнему продлевается — ключ на нём действующий.
+    """
+
+    _ACTIVE_PAID = """
+        k.expiry_time > $1
+        AND k.tg_id > 0
+        AND k.tariff_id IS NOT NULL
+        AND EXISTS (SELECT 1 FROM tariff t WHERE t.id = k.tariff_id AND t.amount > 0)
+    """
+
+    async def list_active_paid_emails(self, pool, now_ms: int) -> List[str]:
+        """Email всех действующих платных ключей (без загрузки полных моделей)."""
+        query = f"SELECT k.email FROM keys k WHERE {self._ACTIVE_PAID} ORDER BY k.email"
+        async with await self._acquire(pool) as conn:
+            records = await conn.fetch(query, now_ms)
+        return [r["email"] for r in records]
+
+    async def preview_active_paid(self, pool, now_ms: int) -> dict:
+        """Сколько ключей затронет продление и как они распределены по тарифам."""
+        totals_query = f"""
+            SELECT COUNT(*)::int AS total_keys,
+                   COUNT(DISTINCT k.tg_id)::int AS total_users,
+                   MIN(k.expiry_time) AS min_expiry_time,
+                   MAX(k.expiry_time) AS max_expiry_time
+            FROM keys k
+            WHERE {self._ACTIVE_PAID}
+        """
+        # total_users считается глобально: у одного пользователя могут быть
+        # ключи на разных тарифах, сумма по группам была бы завышена.
+        by_tariff_query = f"""
+            SELECT k.tariff_id,
+                   t.name_tariff,
+                   COUNT(*)::int AS keys_count,
+                   COUNT(DISTINCT k.tg_id)::int AS users_count
+            FROM keys k
+            JOIN tariff t ON t.id = k.tariff_id
+            WHERE {self._ACTIVE_PAID}
+            GROUP BY k.tariff_id, t.name_tariff
+            ORDER BY keys_count DESC, k.tariff_id
+        """
+        async with await self._acquire(pool) as conn:
+            totals = await conn.fetchrow(totals_query, now_ms)
+            rows = await conn.fetch(by_tariff_query, now_ms)
+        return {
+            "total_keys": int(totals["total_keys"]),
+            "total_users": int(totals["total_users"]),
+            "min_expiry_time": (
+                int(totals["min_expiry_time"]) if totals["min_expiry_time"] is not None else None
+            ),
+            "max_expiry_time": (
+                int(totals["max_expiry_time"]) if totals["max_expiry_time"] is not None else None
+            ),
+            "by_tariff": [
+                {
+                    "tariff_id": r["tariff_id"],
+                    "name_tariff": r["name_tariff"],
+                    "keys": int(r["keys_count"]),
+                    "users": int(r["users_count"]),
+                }
+                for r in rows
+            ],
+        }
+
+
 class DataService:
     """Основной сервис"""
 
@@ -155,7 +226,7 @@ class DataService:
         self.users: DatabaseProtocol[User] = BaseRepository[User](
             table_name="users", model=User
         )
-        self.keys: DatabaseProtocol[Key] = BaseRepository[Key](
+        self.keys: DatabaseProtocol[Key] = KeyRepository(
             table_name="keys", model=Key
         )
         self.servers: DatabaseProtocol[Server] = BaseRepository[Server](

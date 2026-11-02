@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from api.v1.router import api_router
-from app.factories import broadcast_jobs, build_broadcast_runner
+from app.factories import broadcast_jobs, build_broadcast_runner, bulk_renewal_jobs
 from background.scheduler import create_scheduler
 from config import settings  # noqa: F401
 from database.base import create_db_pool
@@ -74,6 +74,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # Teardown (reverse order)
+    await bulk_renewal_jobs().shutdown()
     await broadcast_jobs().shutdown()
     scheduler.shutdown()
     await storage.stop()

@@ -240,6 +240,14 @@ Split into two routers with different auth (see Authentication below):
 
 Grep `api/v1/admin.py` for the current full route list rather than trusting a manually maintained enumeration here — it grows frequently (referrals, gift codes, promotions, and sync jobs were all added after this section was first written).
 
+**Bulk renew (`services/core/keys/bulk_renewal.py`):** extends every **active paid** key by N days (1..3650). The selection is `keys.expiry_time > now AND keys.tg_id > 0 AND EXISTS (SELECT 1 FROM tariff t WHERE t.id = keys.tariff_id AND t.amount > 0)` — this excludes trial (`amount = 0`), landing keys (`tg_id < 0`, virtual `tariff_id` 999) and expired keys; a key on an off-sale tariff is still renewed. New expiry = `max(expiry_time, now) + days * 86_400_000`; tariff and `limit_ip` are unchanged.
+- `POST /admin/keys/bulk-renewals/preview {days}` — counts and per-tariff split (keys/users), min/max current and resulting expiry; changes nothing.
+- `POST /admin/keys/bulk-renewals {days, expected_total?}` — `202` + `job_id`; `409` when there are no active paid keys, a job is already running (the detail carries its `job_id`), or `expected_total` differs from a fresh count.
+- `GET /admin/keys/bulk-renewals/{job_id}` — progress (`running | done | cancelled | error`, processed/success/failed, at most 20 errors); `404` for an unknown id.
+- `POST /admin/keys/bulk-renewals/{job_id}/cancel` — cooperative stop; the in-flight key may already be renewed in the panel (same risk as a process crash). `404` unknown, `409` already finished.
+
+State lives **in memory of the single uvicorn process** (like broadcasts/sync jobs): a restart loses the job and a repeated run extends the same keys again — there is no per-key idempotency, hence preview, `expected_total` and one run at a time. Five workers run concurrently; the process-wide `renewal_lock` (`services/core/keys/utils/renewal.py`) serializes each key against `PATCH /keys/{email}` and payment renewals. The panel is updated before the DB; if the panel refuses, nothing is written locally and the key counts as failed. The old synchronous `POST /admin/keys/renewals` now calls the same `renew_key_by_days`, dedups emails, and reports a panel failure instead of writing a DB expiry the panel doesn't have.
+
 **Admin UI:** lives in `platform-web` (`/admin`, the Mini App of the admin bot, served on its own host) and uses the session login above. The old vanilla-JS `admin_panel/` mounted at `/admin-panel` was removed after the new admin went live (2026-10-16). Mass mailing is in the web admin («Рассылка», see Mass broadcast above); the old text-only mailing in the bot still works.
 
 ### Authentication
