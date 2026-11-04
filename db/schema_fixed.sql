@@ -393,6 +393,22 @@ CREATE INDEX IF NOT EXISTS idx_referral_redemptions_link ON referral_redemptions
 CREATE INDEX IF NOT EXISTS idx_referral_rewards_referrer ON referral_rewards(referrer_tg_id);
 
 -- ============================================================================
+-- 10a. Approved inbounds — утверждённый набор inbound'ов панели 3x-UI
+-- ============================================================================
+-- См. миграцию db/migrations/20261104_approved_inbounds.sql.
+-- AVAILABLE_CONNECTIONS из .env — только первичный seed, когда таблица пуста.
+CREATE TABLE IF NOT EXISTS approved_inbounds
+(
+    inbound_id       INTEGER     PRIMARY KEY,
+    sort_order       INTEGER     NOT NULL DEFAULT 0,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by_tg_id BIGINT
+);
+
+CREATE INDEX IF NOT EXISTS idx_approved_inbounds_order
+    ON approved_inbounds (sort_order, inbound_id);
+
+-- ============================================================================
 -- 11. Self-healing: убрать ВСЕ внешние ключи (single-panel / loose schema mode)
 -- Текущая рабочая БД не содержит FK; init-скрипт тоже их не объявляет выше.
 -- Этот блок гарантированно удаляет любые FK, оставшиеся от старой «строгой»

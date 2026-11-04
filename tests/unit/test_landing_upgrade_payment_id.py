@@ -25,6 +25,7 @@ def _deps():
     model_data.keys.update = AsyncMock()
     cache = MagicMock()
     cache.keys.set = AsyncMock()
+    cache.approved_inbounds.all = AsyncMock(return_value=[])
     tariff = MagicMock(id=10, period=30, amount=99.0, name_tariff="paid", limit_ip=1)
     return xui, model_data, cache, tariff
 

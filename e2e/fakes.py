@@ -80,6 +80,14 @@ async def ctl_reset(request: Request) -> dict:
     return {"ok": True}
 
 
+@app.post("/_ctl/panel/inbounds")
+async def ctl_panel_inbounds(request: Request) -> dict:
+    """Подменить набор inbound'ов панели (inbounds/list)."""
+    body = await request.json()
+    S.inbounds = [int(i) for i in (body.get("inbounds") or [])]
+    return {"ok": True, "inbounds": S.inbounds}
+
+
 @app.get("/_ctl/state")
 async def ctl_state() -> dict:
     return {
@@ -88,6 +96,7 @@ async def ctl_state() -> dict:
         "payments": S.payments,
         "yk_requests": S.yk_requests,
         "clients": S.clients,
+        "inbounds": list(S.inbounds),
         "panel_calls": S.panel_calls,
         "pending_updates": len(S.updates),
     }

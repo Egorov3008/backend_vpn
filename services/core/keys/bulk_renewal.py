@@ -20,7 +20,7 @@ from client import XUIAPIError
 from logger import logger
 from services.admin_audit import AuditLogger
 from services.core.data.service import ServiceDataModel
-from services.core.keys.utils.inbounds import paid_inbound_ids
+from services.core.keys.utils.inbounds import approved_inbound_ids
 from services.core.keys.utils.renewal import renewal_lock
 from services.core.keys.utils.reset import KeyResetter
 
@@ -74,7 +74,9 @@ async def renew_key_by_days(
         renewed = copy.copy(current)
         renewed.expiry_time = max(renewed.expiry_time, now_ms) + days * DAY_MS
 
-        inbound_ok = await xui.set_inbounds(renewed.email, paid_inbound_ids())
+        inbound_ok = await xui.set_inbounds(
+            renewed.email, await approved_inbound_ids(cache)
+        )
         if not inbound_ok:
             logger.warning(
                 "Не удалось синхронизировать inbound-набор перед продлением; продолжаем best-effort",

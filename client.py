@@ -295,7 +295,7 @@ class _StandaloneClientAPI:
             json={"inboundIds": inbound_ids},
         )
         resp.raise_for_status()
-        return resp.json()
+        return self._check_success(resp.json(), "attach")
 
     async def detach(self, email: str, inbound_ids: list[int]) -> dict:
         """POST /api/clients/{email}/detach"""
@@ -305,7 +305,7 @@ class _StandaloneClientAPI:
             json={"inboundIds": inbound_ids},
         )
         resp.raise_for_status()
-        return resp.json()
+        return self._check_success(resp.json(), "detach")
 
     async def delete(self, email: str, keep_traffic: bool = False) -> dict:
         """POST /api/clients/del/{email}"""
@@ -703,11 +703,15 @@ class XUISession:
                 time.monotonic() - t0
             )
 
-    async def set_inbounds(self, email: str, target_inbound_ids: list) -> bool:
+    async def set_inbounds(
+        self, email: str, target_inbound_ids: list, *, verify: bool = False
+    ) -> bool:
         """Idempotently converge a client's inbound set to target_inbound_ids.
 
         Attaches missing inbounds, detaches extra ones. Returns False if the
         client is missing or any panel op fails (logs, does not raise).
+        ``verify=True`` re-reads the client afterwards and returns False if the
+        panel's inbound set still differs (one extra GET per changed client).
         """
         try:
             await self.ensure_auth()
@@ -728,7 +732,14 @@ class XUISession:
             )
             return False
 
-        target = [int(i) for i in (target_inbound_ids or [])]
+        target: list[int] = []
+        for raw_id in target_inbound_ids or []:
+            try:
+                ib_id = int(raw_id)
+            except (TypeError, ValueError):
+                continue
+            if ib_id not in target:
+                target.append(ib_id)
         current_i = [int(i) for i in current]
         to_attach = [i for i in target if i not in current_i]
         to_detach = [i for i in current_i if i not in target]
@@ -751,6 +762,25 @@ class XUISession:
                 logger.error("set_inbounds: detach провален",
                              extra={"email": email, "inbound_id": i, "error": str(e)})
                 ok = False
+
+        if not verify:
+            return ok
+
+        # Проверка сходимости: панель могла принять запрос, но не применить его.
+        try:
+            raw = await self._standalone.get(email)
+            obj = raw.get("obj", {}) if isinstance(raw, dict) else {}
+            actual = {int(i) for i in (obj.get("inboundIds", []) or [])}
+        except Exception as e:
+            logger.error("set_inbounds: проверка набора невозможна",
+                         extra={"email": email, "error": str(e)})
+            return False
+        if actual != set(target):
+            logger.error(
+                "set_inbounds: набор inbound'ов не сошёлся",
+                extra={"email": email, "expected": sorted(target), "actual": sorted(actual)},
+            )
+            return False
         return ok
 
     @filter_by_method_signature
@@ -795,14 +825,20 @@ class XUISession:
                 time.monotonic() - t0
             )
 
-    async def get_inbounds(self) -> list[dict]:
-        """Получает список инбаундов через standalone API (v3.2.0)."""
+    async def get_inbounds(self, *, strict: bool = False) -> list[dict]:
+        """Получает список инбаундов через standalone API (v3.2.0).
+
+        ``strict=True`` — пробросить ошибку панели вместо пустого списка
+        (нужно, чтобы отличить «панель недоступна» от «инбаундов нет»).
+        """
         t0 = time.monotonic()
         xui_api_calls_total.labels(method="get_inbounds").inc()
         try:
             await self.ensure_auth()
             await self._ensure_standalone()
             result = await self._standalone.list_inbounds()
+            if strict:
+                self._standalone._check_success(result, "list_inbounds")
             inbounds = result.get("obj", []) if isinstance(result, dict) else result
             return list(inbounds) if inbounds else []
 
@@ -814,6 +850,8 @@ class XUISession:
                 "Ошибка при получении списка подключений",
                 extra={"error_type": type(e).__name__, "error_message": str(e)}
             )
+            if strict:
+                raise
             return []
         finally:
             xui_api_duration.labels(method="get_inbounds").observe(

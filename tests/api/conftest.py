@@ -59,7 +59,10 @@ async def api_client(mock_service_data, monkeypatch):
 
     app.dependency_overrides[get_service_data] = lambda: mock_service_data
     app.dependency_overrides[get_pool] = lambda: AsyncMock()
-    app.dependency_overrides[get_cache] = lambda: MagicMock()
+    # Пустой approved namespace → approved_inbound_ids(cache) отдаёт env-набор.
+    mock_cache = MagicMock()
+    mock_cache.approved_inbounds.all = AsyncMock(return_value=[])
+    app.dependency_overrides[get_cache] = lambda: mock_cache
     app.dependency_overrides[verify_bot_secret] = lambda: None
     app.dependency_overrides[verify_api_key] = lambda: None
     app.dependency_overrides[verify_admin_or_bot] = lambda: None

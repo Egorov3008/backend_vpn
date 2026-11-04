@@ -1,9 +1,10 @@
 from typing import Dict, Any, Optional, List
 
-from config import LIST_AVAILABLE_CONNECTIONS, settings
+from config import settings
 from logger import logger
 from services.cache.service import CacheService
 from services.core.data.service import ServiceDataModel
+from services.core.keys.utils.inbounds import approved_inbound_ids
 
 
 class FormConnectionData:
@@ -19,7 +20,7 @@ class FormConnectionData:
         self._xui = xui
 
     async def _get_available_inbound_ids_from_panel(self) -> List[int]:
-        """Получает список inbound IDs из 3x-UI панели и фильтрует по .env"""
+        """Получает inbound IDs из 3x-UI панели и фильтрует по утверждённому списку."""
         if not self._xui:
             logger.error(
                 "XUISession не установлен для получения inbounds из панели",
@@ -37,18 +38,28 @@ class FormConnectionData:
             )
             return []
 
-        available = []
+        approved = await approved_inbound_ids(self.cache)
+        approved_set = set(approved)
+        # Сохраняем порядок утверждённого списка (первый — primary inbound).
+        present: set[int] = set()
         for ib in inbounds:
             # 3x-ui API возвращает inbound с полем 'id'
             ib_id = ib.get("id")
-            if ib_id is not None and ib_id in LIST_AVAILABLE_CONNECTIONS:
-                available.append(ib_id)
+            if ib_id is None:
+                continue
+            try:
+                ib_id = int(ib_id)
+            except (TypeError, ValueError):
+                continue
+            if ib_id in approved_set:
+                present.add(ib_id)
+        available = [i for i in approved if i in present]
 
         logger.debug(
             "Доступные inbounds из панели",
             total_inbounds=len(inbounds),
             available_count=len(available),
-            list_available_connections=LIST_AVAILABLE_CONNECTIONS,
+            approved_inbound_ids=approved,
         )
         return available
 
@@ -59,13 +70,14 @@ class FormConnectionData:
         if panel_inbounds:
             return panel_inbounds
 
-        # 2. Fallback: direct .env list
-        if LIST_AVAILABLE_CONNECTIONS:
+        # 2. Fallback: утверждённый список из БД (или .env, если БД пуста)
+        approved = await approved_inbound_ids(self.cache)
+        if approved:
             logger.warning(
-                "Используем LIST_AVAILABLE_CONNECTIONS из .env напрямую",
-                list_available_connections=LIST_AVAILABLE_CONNECTIONS,
+                "Используем утверждённый список inbound'ов напрямую",
+                approved_inbound_ids=approved,
             )
-            return LIST_AVAILABLE_CONNECTIONS
+            return approved
 
         logger.error(
             "Нет доступных inbounds",

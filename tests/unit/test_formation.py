@@ -1,13 +1,17 @@
 import pytest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 from services.core.keys.utils.formtion import FormationKey
-from services.core.keys.utils.inbounds import paid_inbound_ids
+
+APPROVED_ROWS = [SimpleNamespace(inbound_id=21, sort_order=0), SimpleNamespace(inbound_id=22, sort_order=1)]
+APPROVED_IDS = [21, 22]
 
 
 def _formation(cache_all_keys=()):
     cache = MagicMock()
     cache.keys.all = AsyncMock(return_value=list(cache_all_keys))
+    cache.approved_inbounds.all = AsyncMock(return_value=list(APPROVED_ROWS))
     connected_data = MagicMock()
     connected_data.data = AsyncMock(return_value={
         "subscription_url": "https://sub.example",
@@ -24,7 +28,7 @@ async def test_subscription_key_gets_paid_inbounds():
     f, _, expiry = _formation()
     paid_tariff = MagicMock(id=5, amount=100.0, period=30, limit_ip=3)
     key = await f.form_new_key(tg_id=1, tariff=paid_tariff, server_id=1, number_of_months=1)
-    assert key.inbound_ids == paid_inbound_ids()
+    assert key.inbound_ids == APPROVED_IDS
     expiry.key_duration_new_key.assert_called_once_with(30, 1)
 
 

@@ -4,6 +4,7 @@ from typing import List, Optional
 from database.base import BaseRepository
 from database.protocols import DatabaseProtocol
 from models import (
+    ApprovedInbound,
     GiftLink,
     Key,
     LoginCode,
@@ -172,6 +173,17 @@ class KeyRepository(BaseRepository[Key]):
             records = await conn.fetch(query, now_ms)
         return [r["email"] for r in records]
 
+    async def list_all_emails(self, pool) -> List[str]:
+        """Email всех ключей БД — цель массовой синхронизации inbound-набора."""
+        async with await self._acquire(pool) as conn:
+            records = await conn.fetch("SELECT email FROM keys ORDER BY email")
+        return [r["email"] for r in records]
+
+    async def count_all(self, pool) -> int:
+        """Сколько ключей БД затронет массовая синхронизация."""
+        async with await self._acquire(pool) as conn:
+            return int(await conn.fetchval("SELECT COUNT(*) FROM keys"))
+
     async def preview_active_paid(self, pool, now_ms: int) -> dict:
         """Сколько ключей затронет продление и как они распределены по тарифам."""
         totals_query = f"""
@@ -219,6 +231,80 @@ class KeyRepository(BaseRepository[Key]):
         }
 
 
+class ApprovedInboundRepository(BaseRepository[ApprovedInbound]):
+    """Утверждённый набор inbound'ов панели (источник истины после первого seed).
+
+    Порядок задаётся ``sort_order``: первый inbound используется как
+    ``keys.inbound_id`` при создании ключа.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(table_name="approved_inbounds", model=ApprovedInbound)
+
+    async def get_all(self, pool) -> List[ApprovedInbound]:
+        return await self.list_ordered(pool)
+
+    async def list_ordered(self, pool) -> List[ApprovedInbound]:
+        query = (
+            "SELECT * FROM approved_inbounds ORDER BY sort_order, inbound_id"
+        )
+        async with await self._acquire(pool) as conn:
+            records = await conn.fetch(query)
+        return [self.model(**self._adapt(r)) for r in records]
+
+    async def count(self, pool) -> int:
+        async with await self._acquire(pool) as conn:
+            return int(await conn.fetchval("SELECT COUNT(*) FROM approved_inbounds"))
+
+    async def add(
+        self, pool, inbound_id: int, created_by_tg_id: Optional[int] = None
+    ) -> tuple[Optional[ApprovedInbound], bool]:
+        """Добавить inbound в конец набора. Возвращает ``(model, created)``."""
+        insert = """
+            INSERT INTO approved_inbounds (inbound_id, sort_order, created_by_tg_id)
+            SELECT $1, COALESCE(MAX(sort_order), -1) + 1, $2::bigint
+            FROM approved_inbounds
+            ON CONFLICT (inbound_id) DO NOTHING
+            RETURNING *
+        """
+        async with await self._acquire(pool) as conn:
+            record = await conn.fetchrow(insert, inbound_id, created_by_tg_id)
+            if record is not None:
+                return self.model(**self._adapt(record)), True
+            record = await conn.fetchrow(
+                "SELECT * FROM approved_inbounds WHERE inbound_id = $1", inbound_id
+            )
+        if record is None:
+            return None, False
+        return self.model(**self._adapt(record)), False
+
+    async def remove_if_not_last(self, pool, inbound_id: int) -> bool:
+        """Удалить inbound, только если в наборе останется хотя бы один."""
+        query = """
+            DELETE FROM approved_inbounds
+            WHERE inbound_id = $1
+              AND (SELECT COUNT(*) FROM approved_inbounds) > 1
+            RETURNING inbound_id
+        """
+        async with await self._acquire(pool) as conn:
+            return await conn.fetchval(query, inbound_id) is not None
+
+    async def seed_if_empty(self, pool, inbound_ids: List[int]) -> int:
+        """Первичный seed из AVAILABLE_CONNECTIONS: только для пустой таблицы."""
+        if await self.count(pool) > 0 or not inbound_ids:
+            return 0
+        query = """
+            INSERT INTO approved_inbounds (inbound_id, sort_order)
+            SELECT id, ord - 1
+            FROM unnest($1::int[]) WITH ORDINALITY AS t(id, ord)
+            ON CONFLICT (inbound_id) DO NOTHING
+            RETURNING inbound_id
+        """
+        async with await self._acquire(pool) as conn:
+            records = await conn.fetch(query, [int(i) for i in inbound_ids])
+        return len(records)
+
+
 class DataService:
     """Основной сервис"""
 
@@ -229,6 +315,7 @@ class DataService:
         self.keys: DatabaseProtocol[Key] = KeyRepository(
             table_name="keys", model=Key
         )
+        self.approved_inbounds = ApprovedInboundRepository()
         self.servers: DatabaseProtocol[Server] = BaseRepository[Server](
             table_name="servers", model=Server
         )

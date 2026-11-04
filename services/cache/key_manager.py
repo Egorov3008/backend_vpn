@@ -73,6 +73,11 @@ class CacheKeyManager:
         """Ключ реферальной награды по id"""
         return f"referral_reward_{reward_id}"
 
+    @staticmethod
+    def approved_inbound(inbound_id: Union[int, str]) -> str:
+        """Ключ утверждённого inbound'а панели по его id"""
+        return f"approved_inbound_{inbound_id}"
+
     # === СПЕЦИАЛЬНЫЕ КЛЮЧИ ===
 
     @staticmethod

@@ -10,7 +10,7 @@ from models import Key, Tariff
 from services.cache.key_manager import CacheKeyManager
 from services.cache.service import CacheService
 from services.core.data.service import ServiceDataModel
-from services.core.keys.utils.inbounds import paid_inbound_ids
+from services.core.keys.utils.inbounds import approved_inbound_ids
 
 
 async def upgrade_landing_key(
@@ -32,7 +32,9 @@ async def upgrade_landing_key(
     в ключ, чтобы уникальный индекс keys.payment_id и предохранитель в creation_service
     покрывали и апгрейд, а не только новый ключ.
     """
-    if not await xui_session.set_inbounds(key.email, paid_inbound_ids()):
+    if not await xui_session.set_inbounds(
+        key.email, await approved_inbound_ids(cache)
+    ):
         logger.error("upgrade_landing_key: set_inbounds провален", extra={"email": key.email})
         return None
 
