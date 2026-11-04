@@ -8,6 +8,7 @@ from services.cache.factory import LoaderFactory
 from services.cache.key_manager import CacheKeyManager
 from services.cache.service import CacheService
 from services.cache.storage import CacheStorage
+from services.core.keys.utils.inbounds import env_inbound_ids
 
 
 class LoadingService(LoaderFactory):
@@ -26,10 +27,33 @@ class LoadingService(LoaderFactory):
         self.payments = data_service.payments
         self.referral_links = data_service.referral_links
         self.stock_srv = data_service.stocks
+        self.approved_inbounds = data_service.approved_inbounds
         self.keys = CacheKeyManager()
 
     async def loading(self):
         """Загрузить все данные в кеш с единообразными ключами"""
+        # Утверждённый набор inbound'ов: первичный seed из .env только для пустой
+        # таблицы, затем БД — источник истины. reload сам очищает namespace,
+        # чтобы отозванные inbound'ы не оставались в кеше.
+        # Импорт локальный: panel.approved тянет модули, которые сами зависят от
+        # services.cache (иначе получился бы цикл на уровне пакета).
+        # Сбой не роняет загрузку остального кеша: approved_inbound_ids(cache)
+        # тогда отдаёт набор из .env, как до появления таблицы.
+        from services.core.panel.approved import reload_approved_inbounds
+
+        try:
+            pool = await self.ensure_pool()
+            await self.approved_inbounds.seed_if_empty(pool, env_inbound_ids())
+            await reload_approved_inbounds(
+                self.cache, self.approved_inbounds, pool
+            )
+        except Exception as e:
+            logger.error(
+                "Не удалось загрузить утверждённый набор inbound'ов; используем .env",
+                error_type=type(e).__name__,
+                error=str(e),
+            )
+
         await self.load_all(
             (
                 self.server_srv,

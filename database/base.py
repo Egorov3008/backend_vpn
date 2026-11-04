@@ -52,6 +52,7 @@ class BaseRepository(Generic[T]):
     # Маппинг таблиц и их bigint-полей для явного приведения типов в запросах
     # Нужно потому что asyncpg по умолчанию использует int32 для параметров
     BIGINT_FIELDS: Dict[str, set] = {
+        "approved_inbounds": {"created_by_tg_id"},
         "referral_redemptions": {"referred_tg_id"},
         "referral_links": {"referrer_tg_id"},
         "referral_rewards": {"referrer_tg_id"},

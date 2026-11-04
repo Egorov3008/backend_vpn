@@ -14,7 +14,6 @@ from fastapi.testclient import TestClient
 from app.auth import AdminPrincipal
 from app.dependencies import get_cache, get_pool, get_service_data
 from app.main import app
-from services.cache.service import CacheService
 from services.core.keys.utils.inbounds import paid_inbound_ids
 
 
@@ -67,7 +66,10 @@ def client_ctx():
     pool.execute = AsyncMock()
     pool.fetchrow = AsyncMock()
     pool.fetch = AsyncMock()
-    cache = MagicMock(spec=CacheService)
+    cache = MagicMock()
+    # Пустой утверждённый namespace → approved_inbound_ids(cache) отдаёт env-набор
+    # (AVAILABLE_CONNECTIONS), как раньше отдавал paid_inbound_ids().
+    cache.approved_inbounds.all = AsyncMock(return_value=[])
     # Без spec: ServiceDataModel задаёт keys/users/... в __init__, и при
     # spec= их не видно. Существующие admin-тесты используют обычный MagicMock.
     service_data = MagicMock()

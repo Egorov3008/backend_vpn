@@ -17,14 +17,47 @@ PAID_OVERLAY_INBOUNDS: list[int] = list(LIST_AVAILABLE_CONNECTIONS)
 _TRIAL_TARIFF_ID = int(DEFAULT_PRICING_PLAN)
 
 
-def paid_inbound_ids() -> list[int]:
-    """active/trial: AVAILABLE_CONNECTIONS (dedup, preserve order)."""
+def env_inbound_ids() -> list[int]:
+    """AVAILABLE_CONNECTIONS из .env: seed для пустой таблицы и fallback.
+
+    Читает ``PAID_OVERLAY_INBOUNDS`` в момент вызова (тесты подменяют его).
+    """
     seen = set()
     out = []
     for i in PAID_OVERLAY_INBOUNDS:
         if i not in seen:
             seen.add(i)
             out.append(int(i))
+    return out
+
+
+def paid_inbound_ids() -> list[int]:
+    """Legacy-алиас env-набора. В продакшене используйте approved_inbound_ids(cache)."""
+    return env_inbound_ids()
+
+
+async def approved_inbound_ids(cache) -> list[int]:
+    """Утверждённый набор из кеша БД; env — только если кеш пуст.
+
+    Порядок задаёт ``sort_order`` (первый inbound — primary для ``keys.inbound_id``).
+    """
+    rows = await cache.approved_inbounds.all()
+    if not rows:
+        return env_inbound_ids()
+    ordered = sorted(
+        rows,
+        key=lambda r: (
+            int(getattr(r, "sort_order", 0) or 0),
+            int(r.inbound_id),
+        ),
+    )
+    seen = set()
+    out = []
+    for row in ordered:
+        ib_id = int(row.inbound_id)
+        if ib_id not in seen:
+            seen.add(ib_id)
+            out.append(ib_id)
     return out
 
 

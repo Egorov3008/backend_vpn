@@ -12,6 +12,7 @@ from .referrals.referral_link import ReferralLink
 from .referrals.referral_redemption import ReferralRedemption
 from .referrals.referral_reward import ReferralReward
 from .gifts.gift_link import GiftLink
+from .inbounds.approved_inbound import ApprovedInbound
 from .login_code import LoginCode
 from .api_clients.api_client import ApiClient
 

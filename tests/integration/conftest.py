@@ -163,6 +163,10 @@ class Fakes:
     def fail_panel(self, *paths: str) -> None:
         self._http.post("/_ctl/panel/fail", json={"paths": list(paths)}).raise_for_status()
 
+    def set_panel_inbounds(self, *inbound_ids: int) -> None:
+        """Подменить набор inbound'ов, который отдаёт панель (inbounds/list)."""
+        self._http.post("/_ctl/panel/inbounds", json={"inbounds": list(inbound_ids)}).raise_for_status()
+
     def block_bot(self, *chat_ids: int) -> None:
         """Эти пользователи заблокировали бота: отправка им — 403."""
         self._http.post("/_ctl/tg/blocked", json={"chat_ids": list(chat_ids)}).raise_for_status()
@@ -229,7 +233,6 @@ def _configure_backend(monkeypatch, fakes_url: str) -> None:
     from app import factories, rate_limit
     from client import _xui_circuit_breaker
     from config import settings
-    from services.core.connect_module.repositories import form_data
     from services.core.keys.utils import inbounds
     from services.core.tariff import data as tariff_data
 
@@ -247,7 +250,8 @@ def _configure_backend(monkeypatch, fakes_url: str) -> None:
 
     monkeypatch.setattr(inbounds, "PAID_OVERLAY_INBOUNDS", list(PAID_INBOUNDS))
     monkeypatch.setattr(inbounds, "_TRIAL_TARIFF_ID", TRIAL_TARIFF_ID)
-    monkeypatch.setattr(form_data, "LIST_AVAILABLE_CONNECTIONS", list(PAID_INBOUNDS))
+    # form_data больше не читает LIST_AVAILABLE_CONNECTIONS: он фильтрует панель
+    # по утверждённому набору из кеша, который сидируется из PAID_OVERLAY_INBOUNDS.
     monkeypatch.setattr(tariff_data, "AVAILABLE_RATES_LIST", list(PAID_TARIFF_IDS))
     monkeypatch.setattr(landing, "DEFAULT_PRICING_PLAN", str(TRIAL_TARIFF_ID))
     monkeypatch.setattr(payments._NOTIFIER, "_bot_token", BOT_TOKEN)
@@ -309,10 +313,11 @@ async def backend(pool, fakes, monkeypatch):
     from services.core.data.service import ServiceDataModel
 
     _configure_backend(monkeypatch, fakes.url)
-    # In-memory реестр задач продления переживает тест — гасим хвосты прошлого.
-    from app.factories import bulk_renewal_jobs
+    # In-memory реестры задач переживают тест — гасим хвосты прошлого.
+    from app.factories import bulk_renewal_jobs, inbound_sync_jobs
 
     await bulk_renewal_jobs().reset()
+    await inbound_sync_jobs().reset()
     await _seed(pool, fakes.url)
 
     # То же, что lifespan в app/main.py, без планировщика

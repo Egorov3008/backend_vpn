@@ -186,6 +186,32 @@ def bulk_renewal_jobs():
     return _bulk_renewal_jobs
 
 
+_inbound_sync_jobs = None
+
+
+def inbound_sync_jobs():
+    """Реестр задач синхронизации inbound'ов на процесс (один запуск одновременно)."""
+    global _inbound_sync_jobs
+    if _inbound_sync_jobs is None:
+        from services.core.panel.sync_jobs import InboundSyncJobs
+
+        _inbound_sync_jobs = InboundSyncJobs()
+    return _inbound_sync_jobs
+
+
+def build_approved_inbounds_service(
+    pool: asyncpg.Pool,
+    service_data: ServiceDataModel,
+    cache: CacheService,
+    data_service: DataService,
+):
+    """Сервис утверждённых inbound'ов: репозиторий БД + панельный клиент."""
+    from services.core.panel.approved import ApprovedInboundsService
+
+    _, _, xui = build_key_services(pool, service_data, cache, data_service)
+    return ApprovedInboundsService(data_service.approved_inbounds, xui)
+
+
 def build_broadcast_bot():
     """Рассылка идёт от пользовательского бота (BOT_TOKEN), не от админ-бота."""
     from config import settings

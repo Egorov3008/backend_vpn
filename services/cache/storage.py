@@ -92,3 +92,7 @@ class CacheStorage:
                 result.append(item.value)
 
         return result
+
+    async def clear(self, namespace: str) -> None:
+        """Полностью очистить пространство имён (например, перед перезагрузкой из БД)."""
+        self._storage.pop(namespace, None)

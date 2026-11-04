@@ -68,7 +68,7 @@ from services.core.keys.admin_report import KeyAdminReport
 from services.core.referral.link_generator import ReferralLinkGenerator, referral_share_url
 from services.core.keys.utils.reset import KeyResetter
 from services.core.keys.bulk_renewal import DAY_MS, KeyNotFoundError, renew_key_by_days
-from services.core.keys.utils.inbounds import paid_inbound_ids
+from services.core.keys.utils.inbounds import approved_inbound_ids
 from services.system.maintenance import maintenance_mode
 from app.schemas.api_clients import (
     ApiClientCreateRequest,
@@ -639,9 +639,11 @@ async def admin_change_key_date(
         raise HTTPException(status_code=404, detail="Key not found")
 
     key.expiry_time = body.expiry_time
-    # Синхронизируем inbound-набор с .env перед сменой даты.
+    # Синхронизируем inbound-набор с утверждённым списком (БД/кеш) перед сменой даты.
     # Best-effort: ошибка set_inbounds логируется и не блокирует операцию.
-    inbound_ok = await xui.set_inbounds(key.email, paid_inbound_ids())
+    inbound_ok = await xui.set_inbounds(
+        key.email, await approved_inbound_ids(cache)
+    )
     if not inbound_ok:
         logger.warning(
             "Не удалось синхронизировать inbound-набор перед change-date; продолжаем best-effort",
@@ -689,9 +691,11 @@ async def admin_change_key_tariff(
     key.limit_ip = tariff.limit_ip
     key.name_tariff = tariff.name_tariff
 
-    # Синхронизируем inbound-набор с .env перед сменой тарифа.
+    # Синхронизируем inbound-набор с утверждённым списком (БД/кеш) перед сменой тарифа.
     # Best-effort: ошибка set_inbounds логируется и не блокирует операцию.
-    inbound_ok = await xui.set_inbounds(key.email, paid_inbound_ids())
+    inbound_ok = await xui.set_inbounds(
+        key.email, await approved_inbound_ids(cache)
+    )
     if not inbound_ok:
         logger.warning(
             "Не удалось синхронизировать inbound-набор перед change-tariff; продолжаем best-effort",

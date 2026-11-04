@@ -33,6 +33,7 @@ async def test_upgrade_success_updates_key_and_persists():
     model_data.keys.update = AsyncMock()
     cache = MagicMock()
     cache.keys.set = AsyncMock()
+    cache.approved_inbounds.all = AsyncMock(return_value=[])
     pool = MagicMock()
     tariff = _tariff()
 
@@ -76,6 +77,7 @@ async def test_upgrade_no_transfer_tg_keeps_original_tg_id():
     model_data.keys.update = AsyncMock()
     cache = MagicMock()
     cache.keys.set = AsyncMock()
+    cache.approved_inbounds.all = AsyncMock(return_value=[])
 
     result = await upgrade_landing_key(
         xui_session=xui,
@@ -103,6 +105,7 @@ async def test_upgrade_set_inbounds_failure_returns_none_and_preserves_expiry():
     model_data.keys.update = AsyncMock()
     cache = MagicMock()
     cache.keys.set = AsyncMock()
+    cache.approved_inbounds.all = AsyncMock(return_value=[])
 
     result = await upgrade_landing_key(
         xui_session=xui,
@@ -134,6 +137,7 @@ async def test_upgrade_extend_client_key_failure_restores_expiry():
     model_data.keys.update = AsyncMock()
     cache = MagicMock()
     cache.keys.set = AsyncMock()
+    cache.approved_inbounds.all = AsyncMock(return_value=[])
 
     result = await upgrade_landing_key(
         xui_session=xui,
@@ -164,6 +168,7 @@ async def test_upgrade_no_converted_tg_id_does_not_transfer():
     model_data.keys.update = AsyncMock()
     cache = MagicMock()
     cache.keys.set = AsyncMock()
+    cache.approved_inbounds.all = AsyncMock(return_value=[])
 
     result = await upgrade_landing_key(
         xui_session=xui,

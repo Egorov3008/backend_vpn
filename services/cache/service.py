@@ -4,7 +4,7 @@ from datetime import timedelta
 from models.stocks.stock import Stock
 from services.cache.storage import CacheStorage
 from services.cache.protocols import CacheProtocol
-from models import User, Key, Server, Tariff, GiftLink, PaymentModel, ReferralLink
+from models import User, Key, Server, Tariff, GiftLink, PaymentModel, ReferralLink, ApprovedInbound
 
 T = TypeVar("T")
 
@@ -46,6 +46,10 @@ class ModelCache(Generic[T]):
 
     async def keys(self) -> List[str]:
         return await self.storage.keys(self.namespace)
+
+    async def clear(self) -> None:
+        """Очистить namespace (перед полной перезагрузкой из БД)."""
+        await self.storage.clear(self.namespace)
 
     async def temporary_set(self, key: str | int, ttl: timedelta, **kwargs) -> None:
 
@@ -101,6 +105,10 @@ class CacheService:
         self.referral_links: CacheProtocol[ReferralLink] = ModelCache[ReferralLink](
             storage, "referral_links"
         )
+        # Утверждённый набор inbound'ов панели: порядок задаётся sort_order.
+        self.approved_inbounds: CacheProtocol[ApprovedInbound] = ModelCache[
+            ApprovedInbound
+        ](storage, "approved_inbounds")
 
     async def start(self):
         await self.storage.start()

@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from api.v1 import (
     admin,
     admin_broadcasts,
+    admin_inbounds,
     admin_promo,
     admin_session,
     app_distribution,
@@ -30,6 +31,8 @@ api_router.include_router(admin.router)
 api_router.include_router(admin.destructive_router)
 api_router.include_router(admin_promo.router)
 api_router.include_router(admin_promo.destructive_router)
+api_router.include_router(admin_inbounds.router)
+api_router.include_router(admin_inbounds.destructive_router)
 api_router.include_router(admin_broadcasts.router)
 api_router.include_router(landing.router)
 api_router.include_router(mobile_mvp.router)

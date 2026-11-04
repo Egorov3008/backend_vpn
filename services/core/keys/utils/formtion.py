@@ -7,7 +7,7 @@ from models import Tariff, Key
 from services.cache.service import CacheService
 from services.core.connect_module.repositories.form_data import FormConnectionData
 from services.core.keys.utils.calculator import ExpiryCalculator
-from services.core.keys.utils.inbounds import paid_inbound_ids, is_subscription
+from services.core.keys.utils.inbounds import approved_inbound_ids, is_subscription
 
 
 class FormationKey:
@@ -65,8 +65,11 @@ class FormationKey:
 
         subscription_url = f"{server_data.get('subscription_url')}/{email}"
 
-        inbound_ids = paid_inbound_ids() if is_subscription(tariff) else (
-            server_data.get("inbound_ids", []))
+        inbound_ids = (
+            await approved_inbound_ids(self.cache)
+            if is_subscription(tariff)
+            else server_data.get("inbound_ids", [])
+        )
         primary_inbound_id = inbound_ids[0] if inbound_ids else 0
 
         key = Key(
