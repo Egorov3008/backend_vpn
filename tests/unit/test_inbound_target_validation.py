@@ -78,10 +78,7 @@ async def test_empty_target_rejected():
 
 
 @pytest.mark.asyncio
-async def test_no_approved_inbounds_rejected(monkeypatch):
-    from services.core.keys.utils import inbounds
-
-    monkeypatch.setattr(inbounds, "PAID_OVERLAY_INBOUNDS", [])
+async def test_no_approved_inbounds_rejected():
     service, cache = _service(approved_ids=())
     with pytest.raises(NoApprovedInbounds):
         await service.resolve_target(cache, None)

@@ -70,7 +70,7 @@ class FormConnectionData:
         if panel_inbounds:
             return panel_inbounds
 
-        # 2. Fallback: утверждённый список из БД (или .env, если БД пуста)
+        # 2. Fallback: утверждённый список из БД
         approved = await approved_inbound_ids(self.cache)
         if approved:
             logger.warning(

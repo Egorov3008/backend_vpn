@@ -519,7 +519,7 @@ class TestXUISessionStandaloneMethods:
     ):
         """Логический провал панели (success:false) — НЕ проблема доступности:
         не должен выбивать общий circuit breaker, иначе одно неверное
-        AVAILABLE_CONNECTIONS ломает renewal/delete для существующих юзеров."""
+        утверждённый набор inbound'ов ломает renewal/delete для существующих юзеров."""
         mock_server = MagicMock()
         mock_server.api_url = "http://localhost:8000"
         mock_server.login = "admin"

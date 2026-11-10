@@ -1,8 +1,16 @@
-import pytest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from services.core.keys.utils.landing_upgrade import upgrade_landing_key
-from services.core.keys.utils.inbounds import paid_inbound_ids
+
+# Утверждённый набор, который тест кладёт в кеш.
+APPROVED_INBOUND_IDS = [11, 12]
+APPROVED_ROWS = [
+    SimpleNamespace(inbound_id=i, sort_order=n)
+    for n, i in enumerate(APPROVED_INBOUND_IDS)
+]
 
 
 def _key(expiry_time=1000, converted_tg_id=None, tg_id=-1):
@@ -33,7 +41,7 @@ async def test_upgrade_success_updates_key_and_persists():
     model_data.keys.update = AsyncMock()
     cache = MagicMock()
     cache.keys.set = AsyncMock()
-    cache.approved_inbounds.all = AsyncMock(return_value=[])
+    cache.approved_inbounds.all = AsyncMock(return_value=APPROVED_ROWS)
     pool = MagicMock()
     tariff = _tariff()
 
@@ -49,7 +57,7 @@ async def test_upgrade_success_updates_key_and_persists():
     )
 
     assert result is key
-    xui.set_inbounds.assert_awaited_once_with(key.email, paid_inbound_ids())
+    xui.set_inbounds.assert_awaited_once_with(key.email, APPROVED_INBOUND_IDS)
     xui.extend_client_key.assert_awaited_once()
     assert key.expiry_time == 8000
     assert key.tariff_id == tariff.id
@@ -77,7 +85,7 @@ async def test_upgrade_no_transfer_tg_keeps_original_tg_id():
     model_data.keys.update = AsyncMock()
     cache = MagicMock()
     cache.keys.set = AsyncMock()
-    cache.approved_inbounds.all = AsyncMock(return_value=[])
+    cache.approved_inbounds.all = AsyncMock(return_value=APPROVED_ROWS)
 
     result = await upgrade_landing_key(
         xui_session=xui,
@@ -95,6 +103,39 @@ async def test_upgrade_no_transfer_tg_keeps_original_tg_id():
 
 
 @pytest.mark.asyncio
+async def test_upgrade_without_approved_inbounds_returns_none_without_panel_calls():
+    """Пустой утверждённый набор: панель и БД не трогаем (иначе detach всех inbound'ов)."""
+    key = _key(expiry_time=1000, converted_tg_id=42)
+    xui = MagicMock()
+    xui.set_inbounds = AsyncMock(return_value=True)
+    xui.extend_client_key = AsyncMock(return_value=True)
+
+    model_data = MagicMock()
+    model_data.keys.update = AsyncMock()
+    cache = MagicMock()
+    cache.keys.set = AsyncMock()
+    cache.approved_inbounds.all = AsyncMock(return_value=[])
+
+    result = await upgrade_landing_key(
+        xui_session=xui,
+        model_data=model_data,
+        cache=cache,
+        pool=MagicMock(),
+        key=key,
+        tariff=_tariff(),
+        new_expiry=8000,
+        transfer_tg=True,
+    )
+
+    assert result is None
+    xui.set_inbounds.assert_not_awaited()
+    xui.extend_client_key.assert_not_awaited()
+    model_data.keys.update.assert_not_awaited()
+    cache.keys.set.assert_not_awaited()
+    assert key.expiry_time == 1000
+
+
+@pytest.mark.asyncio
 async def test_upgrade_set_inbounds_failure_returns_none_and_preserves_expiry():
     key = _key(expiry_time=1000, converted_tg_id=42)
     xui = MagicMock()
@@ -105,7 +146,7 @@ async def test_upgrade_set_inbounds_failure_returns_none_and_preserves_expiry():
     model_data.keys.update = AsyncMock()
     cache = MagicMock()
     cache.keys.set = AsyncMock()
-    cache.approved_inbounds.all = AsyncMock(return_value=[])
+    cache.approved_inbounds.all = AsyncMock(return_value=APPROVED_ROWS)
 
     result = await upgrade_landing_key(
         xui_session=xui,
@@ -137,7 +178,7 @@ async def test_upgrade_extend_client_key_failure_restores_expiry():
     model_data.keys.update = AsyncMock()
     cache = MagicMock()
     cache.keys.set = AsyncMock()
-    cache.approved_inbounds.all = AsyncMock(return_value=[])
+    cache.approved_inbounds.all = AsyncMock(return_value=APPROVED_ROWS)
 
     result = await upgrade_landing_key(
         xui_session=xui,
@@ -168,7 +209,7 @@ async def test_upgrade_no_converted_tg_id_does_not_transfer():
     model_data.keys.update = AsyncMock()
     cache = MagicMock()
     cache.keys.set = AsyncMock()
-    cache.approved_inbounds.all = AsyncMock(return_value=[])
+    cache.approved_inbounds.all = AsyncMock(return_value=APPROVED_ROWS)
 
     result = await upgrade_landing_key(
         xui_session=xui,

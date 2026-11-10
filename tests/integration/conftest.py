@@ -248,10 +248,9 @@ def _configure_backend(monkeypatch, fakes_url: str) -> None:
     }.items():
         monkeypatch.setattr(settings, attr, value)
 
-    monkeypatch.setattr(inbounds, "PAID_OVERLAY_INBOUNDS", list(PAID_INBOUNDS))
     monkeypatch.setattr(inbounds, "_TRIAL_TARIFF_ID", TRIAL_TARIFF_ID)
-    # form_data больше не читает LIST_AVAILABLE_CONNECTIONS: он фильтрует панель
-    # по утверждённому набору из кеша, который сидируется из PAID_OVERLAY_INBOUNDS.
+    # form_data фильтрует панель по утверждённому набору из кеша; на стенде
+    # таблица approved_inbounds сидируется в _seed ниже.
     monkeypatch.setattr(tariff_data, "AVAILABLE_RATES_LIST", list(PAID_TARIFF_IDS))
     monkeypatch.setattr(landing, "DEFAULT_PRICING_PLAN", str(TRIAL_TARIFF_ID))
     monkeypatch.setattr(payments._NOTIFIER, "_bot_token", BOT_TOKEN)
@@ -276,6 +275,11 @@ async def _seed(pool, fakes_url: str) -> None:
         TARIFFS,
     )
     await pool.execute("SELECT setval('tariff_id_seq', (SELECT max(id) FROM tariff))")
+    await pool.execute(
+        "INSERT INTO approved_inbounds (inbound_id, sort_order)"
+        " SELECT id, ord - 1 FROM unnest($1::int[]) WITH ORDINALITY AS t(id, ord)",
+        PAID_INBOUNDS,
+    )
     await pool.execute(
         "INSERT INTO servers (id, cluster_name, server_name, api_url, subscription_url, login, password)"
         " VALUES ($1, 'test', 'main', $2, $3, 'test', 'test')",

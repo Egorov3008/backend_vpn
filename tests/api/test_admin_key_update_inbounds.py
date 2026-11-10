@@ -1,11 +1,12 @@
-"""Tests: admin destructive endpoints must sync inbound set to .env before extend.
+"""Tests: admin destructive endpoints must sync the approved inbound set before extend.
 
 admin_mass_renew, admin_change_key_date, admin_change_key_tariff must call
-xui.set_inbounds(key.email, paid_inbound_ids()) before xui.extend_client_key,
+xui.set_inbounds(key.email, <approved inbound ids>) before xui.extend_client_key,
 and must continue best-effort if set_inbounds returns False. This is now the
 single unconditional code path (the old grace_expiry conditional branching
 was removed along with the grace-period model).
 """
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -14,7 +15,9 @@ from fastapi.testclient import TestClient
 from app.auth import AdminPrincipal
 from app.dependencies import get_cache, get_pool, get_service_data
 from app.main import app
-from services.core.keys.utils.inbounds import paid_inbound_ids
+
+# Утверждённый набор, который тест кладёт в кеш.
+APPROVED_INBOUND_IDS = [11, 12]
 
 
 def _make_key(email: str = "user@example.com", expiry_ms: int = 1_700_000_000_000):
@@ -67,9 +70,12 @@ def client_ctx():
     pool.fetchrow = AsyncMock()
     pool.fetch = AsyncMock()
     cache = MagicMock()
-    # Пустой утверждённый namespace → approved_inbound_ids(cache) отдаёт env-набор
-    # (AVAILABLE_CONNECTIONS), как раньше отдавал paid_inbound_ids().
-    cache.approved_inbounds.all = AsyncMock(return_value=[])
+    cache.approved_inbounds.all = AsyncMock(
+        return_value=[
+            SimpleNamespace(inbound_id=i, sort_order=n)
+            for n, i in enumerate(APPROVED_INBOUND_IDS)
+        ]
+    )
     # Без spec: ServiceDataModel задаёт keys/users/... в __init__, и при
     # spec= их не видно. Существующие admin-тесты используют обычный MagicMock.
     service_data = MagicMock()
@@ -106,7 +112,7 @@ def test_mass_renew_calls_set_inbounds_with_paid_before_extend(client_ctx):
     xui.extend_client_key.assert_awaited_once()
     args, _ = xui.set_inbounds.call_args
     assert args[0] == "user@example.com"
-    assert args[1] == paid_inbound_ids()
+    assert args[1] == APPROVED_INBOUND_IDS
     # set_inbounds must be awaited BEFORE extend_client_key
     assert xui.set_inbounds.call_args is not None
     assert xui.extend_client_key.call_args is not None
@@ -140,7 +146,7 @@ def test_change_date_calls_set_inbounds_with_paid_before_extend(client_ctx):
     xui.extend_client_key.assert_awaited_once()
     args, _ = xui.set_inbounds.call_args
     assert args[0] == "user@example.com"
-    assert args[1] == paid_inbound_ids()
+    assert args[1] == APPROVED_INBOUND_IDS
 
 
 def test_change_date_continues_when_set_inbounds_fails(client_ctx):
@@ -171,7 +177,7 @@ def test_change_tariff_calls_set_inbounds_with_paid_before_extend(client_ctx):
     xui.extend_client_key.assert_awaited_once()
     args, _ = xui.set_inbounds.call_args
     assert args[0] == "user@example.com"
-    assert args[1] == paid_inbound_ids()
+    assert args[1] == APPROVED_INBOUND_IDS
 
 
 def test_change_tariff_continues_when_set_inbounds_fails(client_ctx):

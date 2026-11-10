@@ -32,9 +32,15 @@ async def upgrade_landing_key(
     в ключ, чтобы уникальный индекс keys.payment_id и предохранитель в creation_service
     покрывали и апгрейд, а не только новый ключ.
     """
-    if not await xui_session.set_inbounds(
-        key.email, await approved_inbound_ids(cache)
-    ):
+    target_inbounds = await approved_inbound_ids(cache)
+    # Пустой target в set_inbounds отсоединил бы клиента от всех inbound'ов.
+    if not target_inbounds:
+        logger.error(
+            "upgrade_landing_key: нет утверждённых inbound'ов",
+            extra={"email": key.email},
+        )
+        return None
+    if not await xui_session.set_inbounds(key.email, target_inbounds):
         logger.error("upgrade_landing_key: set_inbounds провален", extra={"email": key.email})
         return None
 

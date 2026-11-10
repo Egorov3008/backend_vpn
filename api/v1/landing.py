@@ -605,7 +605,7 @@ async def create_quick_key(
         )
         raise HTTPException(status_code=500, detail="Failed to create anonymous user")
 
-    # 4. Создаём ключ через стандартный пайплайн (inbounds из AVAILABLE_CONNECTIONS)
+    # 4. Создаём ключ через стандартный пайплайн (inbounds из утверждённого набора)
     data_service = DataService()
     create_key_svc, _, _ = build_key_services(pool, service_data, cache, data_service)
 
@@ -885,7 +885,7 @@ async def claim_key(
     if not user:
         raise HTTPException(status_code=404, detail="User not registered")
 
-    # Апгрейд того же клиента: inbounds AVAILABLE_CONNECTIONS, trial expiry, перенос tg_id
+    # Апгрейд того же клиента: утверждённые inbounds, trial expiry, перенос tg_id
     # на реальный. Happ-URL (key.key) сохраняется. converted_tg_id ставится
     # до вызова — upgrade_landing_key читает его, чтобы перенести tg_id
     # (transfer_tg). При провале откатываем, иначе key_obj (живой объект

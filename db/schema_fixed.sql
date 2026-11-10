@@ -396,7 +396,7 @@ CREATE INDEX IF NOT EXISTS idx_referral_rewards_referrer ON referral_rewards(ref
 -- 10a. Approved inbounds — утверждённый набор inbound'ов панели 3x-UI
 -- ============================================================================
 -- См. миграцию db/migrations/20261104_approved_inbounds.sql.
--- AVAILABLE_CONNECTIONS из .env — только первичный seed, когда таблица пуста.
+-- Набор наполняется через админские эндпоинты (/admin/inbounds/{id}/approve).
 CREATE TABLE IF NOT EXISTS approved_inbounds
 (
     inbound_id       INTEGER     PRIMARY KEY,

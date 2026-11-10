@@ -1,10 +1,13 @@
 """Апгрейд лендинг-ключа записывает payment_id, если апгрейд выполнен по платежу."""
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from services.core.keys.utils.landing_upgrade import upgrade_landing_key
+
+APPROVED_ROWS = [SimpleNamespace(inbound_id=11, sort_order=0)]
 
 
 def _key():
@@ -25,7 +28,7 @@ def _deps():
     model_data.keys.update = AsyncMock()
     cache = MagicMock()
     cache.keys.set = AsyncMock()
-    cache.approved_inbounds.all = AsyncMock(return_value=[])
+    cache.approved_inbounds.all = AsyncMock(return_value=APPROVED_ROWS)
     tariff = MagicMock(id=10, period=30, amount=99.0, name_tariff="paid", limit_ip=1)
     return xui, model_data, cache, tariff
 
@@ -51,9 +54,10 @@ async def test_upgrade_without_payment_keeps_payment_id_unset():
     key = _key()
     xui, model_data, cache, tariff = _deps()
 
-    await upgrade_landing_key(
+    result = await upgrade_landing_key(
         xui_session=xui, model_data=model_data, cache=cache, pool=MagicMock(),
         key=key, tariff=tariff, new_expiry=8000,
     )
 
+    assert result is key
     assert key.payment_id is None
