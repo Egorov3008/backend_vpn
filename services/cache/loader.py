@@ -8,7 +8,6 @@ from services.cache.factory import LoaderFactory
 from services.cache.key_manager import CacheKeyManager
 from services.cache.service import CacheService
 from services.cache.storage import CacheStorage
-from services.core.keys.utils.inbounds import env_inbound_ids
 
 
 class LoadingService(LoaderFactory):
@@ -32,24 +31,33 @@ class LoadingService(LoaderFactory):
 
     async def loading(self):
         """Загрузить все данные в кеш с единообразными ключами"""
-        # Утверждённый набор inbound'ов: первичный seed из .env только для пустой
-        # таблицы, затем БД — источник истины. reload сам очищает namespace,
-        # чтобы отозванные inbound'ы не оставались в кеше.
+        # Утверждённый набор inbound'ов: источник истины — таблица
+        # approved_inbounds. reload сам очищает namespace, чтобы отозванные
+        # inbound'ы не оставались в кеше.
         # Импорт локальный: panel.approved тянет модули, которые сами зависят от
         # services.cache (иначе получился бы цикл на уровне пакета).
         # Сбой не роняет загрузку остального кеша: approved_inbound_ids(cache)
-        # тогда отдаёт набор из .env, как до появления таблицы.
+        # тогда вернёт пустой набор, и создание ключей останется недоступным,
+        # пока набор не загрузится.
         from services.core.panel.approved import reload_approved_inbounds
 
         try:
             pool = await self.ensure_pool()
-            await self.approved_inbounds.seed_if_empty(pool, env_inbound_ids())
             await reload_approved_inbounds(
                 self.cache, self.approved_inbounds, pool
             )
+            if not await self.cache.approved_inbounds.all():
+                # Без утверждённого набора создание ключей (триал, платёж,
+                # лендинг) недоступно. env-сида больше нет, набор наполняется
+                # только через админку — оператор должен увидеть это сразу.
+                logger.critical(
+                    "Утверждённый набор inbound'ов пуст — создание ключей недоступно. "
+                    "Утвердите inbound'ы: POST /api/v1/admin/inbounds/{id}/approve"
+                )
         except Exception as e:
             logger.error(
-                "Не удалось загрузить утверждённый набор inbound'ов; используем .env",
+                "Не удалось загрузить утверждённый набор inbound'ов; "
+                "создание ключей будет недоступно, пока набор не загрузится",
                 error_type=type(e).__name__,
                 error=str(e),
             )

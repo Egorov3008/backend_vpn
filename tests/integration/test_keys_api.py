@@ -4,7 +4,15 @@ import time
 import pytest
 
 from tests.integration.conftest import PAID_INBOUNDS, TRIAL_TARIFF_ID
-from tests.integration.helpers import db_key, db_keys_of, db_user, insert_key, issue_trial, register_user
+from tests.integration.helpers import (
+    db_key,
+    db_keys_of,
+    db_user,
+    insert_key,
+    issue_trial,
+    register_user,
+    set_approved_inbounds,
+)
 
 DAY_MS = 24 * 3600 * 1000
 
@@ -24,6 +32,20 @@ async def test_trial_key_is_created_in_db_and_panel(backend):
     assert sorted(panel["inboundIds"]) == PAID_INBOUNDS
 
     assert (await db_user(backend, 1001))["trial"] == 1
+
+
+async def test_trial_without_approved_inbounds_writes_nothing(backend):
+    """Пустой утверждённый набор — 500, ни ключа в БД, ни клиента в панели."""
+    await register_user(backend, 1015)
+    await set_approved_inbounds(backend)
+
+    resp = await backend.client.post("/api/v1/keys/trial", params={"tg_id": 1015})
+
+    assert resp.status_code == 500
+    assert await db_keys_of(backend, 1015) == []
+    assert backend.fakes.state()["clients"] == {}
+    # Неудачная выдача не расходует триал.
+    assert (await db_user(backend, 1015))["trial"] == 0
 
 
 async def test_second_trial_is_refused(backend):

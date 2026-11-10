@@ -587,7 +587,7 @@ class XUISession:
                     # Логический провал панели (success:false, напр. несуществующий
                     # inbound) — НЕ проблема доступности панели. Не позволяем
                     # этому выбить общий circuit breaker: иначе неверное
-                    # AVAILABLE_CONNECTIONS ломает renewal/delete для всех юзеров.
+                    # утверждённый набор inbound'ов ломает renewal/delete для всех юзеров.
                     xui_api_errors_total.labels(
                         method="add_client", error_type="XUIAPIError"
                     ).inc()
@@ -713,6 +713,15 @@ class XUISession:
         ``verify=True`` re-reads the client afterwards and returns False if the
         panel's inbound set still differs (one extra GET per changed client).
         """
+        if not target_inbound_ids:
+            # Пустой target отсоединил бы клиента от всех inbound'ов — для
+            # рабочего ключа это никогда не валидная операция (пустой набор
+            # бывает только при сбое загрузки кеша или до первого approve).
+            logger.error(
+                "set_inbounds: пустой target — операция отклонена",
+                extra={"email": email},
+            )
+            return False
         try:
             await self.ensure_auth()
             await self._ensure_standalone()
@@ -723,7 +732,7 @@ class XUISession:
             # Reading from obj.client.inboundIds left `current` always empty,
             # so to_detach was always [] and nothing was ever detached — the
             # paid overlay stayed attached through grace, and stale inbounds
-            # (e.g. after AVAILABLE_CONNECTIONS changes) lingered forever.
+            # (e.g. after the approved inbound set changed) lingered forever.
             current = list(obj.get("inboundIds", []) or []) if isinstance(obj, dict) else []
         except Exception as e:
             logger.warning(

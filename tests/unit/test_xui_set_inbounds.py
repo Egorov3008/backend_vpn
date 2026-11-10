@@ -40,6 +40,16 @@ async def test_attaches_missing_and_detaches_extra():
 
 
 @pytest.mark.asyncio
+async def test_empty_target_rejected_without_touching_client():
+    """Пустой набор не должен отсоединять клиента от всех inbound'ов."""
+    xui = _xui_with_panel([7, 11])
+    ok = await xui.set_inbounds("a@b.c", [])
+    assert ok is False
+    xui._standalone.get.assert_not_called()
+    xui._standalone.detach.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_returns_false_when_client_missing():
     xui = _xui_with_panel([7])
     xui._standalone.get = AsyncMock(side_effect=Exception("not found"))

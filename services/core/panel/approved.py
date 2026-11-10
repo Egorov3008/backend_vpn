@@ -1,9 +1,9 @@
 """Управление утверждённым набором inbound'ов панели 3x-UI.
 
-Источник истины после первого запуска — таблица ``approved_inbounds``; кеш
+Источник истины — таблица ``approved_inbounds``; кеш
 ``CacheService.approved_inbounds`` читается на горячем пути (создание ключа,
-продление). AVAILABLE_CONNECTIONS из .env используется только для первичного
-seed'а пустой таблицы.
+продление). Набор наполняется только через админские эндпоинты
+(``POST /admin/inbounds/{id}/approve``).
 """
 import asyncio
 from typing import TYPE_CHECKING, Iterable, List, Optional

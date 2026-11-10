@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 from httpx import AsyncClient, ASGITransport
 from unittest.mock import AsyncMock, MagicMock
@@ -59,9 +61,14 @@ async def api_client(mock_service_data, monkeypatch):
 
     app.dependency_overrides[get_service_data] = lambda: mock_service_data
     app.dependency_overrides[get_pool] = lambda: AsyncMock()
-    # Пустой approved namespace → approved_inbound_ids(cache) отдаёт env-набор.
+    # Утверждённый набор inbound'ов, который видят хендлеры в тестах.
     mock_cache = MagicMock()
-    mock_cache.approved_inbounds.all = AsyncMock(return_value=[])
+    mock_cache.approved_inbounds.all = AsyncMock(
+        return_value=[
+            SimpleNamespace(inbound_id=i, sort_order=n)
+            for n, i in enumerate([11, 12])
+        ]
+    )
     app.dependency_overrides[get_cache] = lambda: mock_cache
     app.dependency_overrides[verify_bot_secret] = lambda: None
     app.dependency_overrides[verify_api_key] = lambda: None

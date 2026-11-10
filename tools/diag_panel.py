@@ -16,7 +16,6 @@ async def main():
     token = os.environ.get("XUI_TOKEN") or os.environ.get("XUI_API_TOKEN")
     c = _StandaloneClientAPI(base_url=base, username=user, password=pwd, token=token)
 
-    print("=== RUNTIME AVAILABLE_CONNECTIONS:", os.environ.get("AVAILABLE_CONNECTIONS"))
     print("=== XUI_API_URL:", base)
 
     # 1) inbounds list

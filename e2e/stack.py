@@ -169,7 +169,6 @@ class Stack:
             XUI_PASSWORD=secrets.token_hex(8),
             XUI_SUB=f"{c.fakes_url}/sub",
             EXTERNAL_SUB_URL="",
-            AVAILABLE_CONNECTIONS=json.dumps(PAID_INBOUNDS),
             AVAILABLE_RATES=json.dumps(PAID_TARIFF_IDS),
             DEFAULT_PRICING_PLAN=str(TRIAL_TARIFF_ID),
             YOOKASSA_SHOP_ID="000000",
@@ -201,6 +200,8 @@ class Stack:
             BOT_TOKEN=s.bot_token,
             BOT_NAME="",
             ADMIN_ID=json.dumps([ADMIN_TG_ID]),
+            # Бот (внешний репозиторий) пока сам требует эту переменную; backend
+            # её больше не читает.
             AVAILABLE_CONNECTIONS=json.dumps(PAID_INBOUNDS),
             AVAILABLE_RATES=json.dumps(PAID_TARIFF_IDS),
             DEFAULT_PRICING_PLAN=str(TRIAL_TARIFF_ID),
@@ -294,6 +295,13 @@ class Stack:
                     TARIFFS,
                 )
                 await conn.execute("SELECT setval('tariff_id_seq', (SELECT max(id) FROM tariff))")
+                # Утверждённый набор inbound'ов: в проде его наполняет админ, на
+                # стенде сидируем сразу — без него создание ключей недоступно.
+                await conn.execute(
+                    "INSERT INTO approved_inbounds (inbound_id, sort_order)"
+                    " SELECT id, ord - 1 FROM unnest($1::int[]) WITH ORDINALITY AS t(id, ord)",
+                    PAID_INBOUNDS,
+                )
             finally:
                 await conn.close()
 

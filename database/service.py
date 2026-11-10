@@ -232,7 +232,7 @@ class KeyRepository(BaseRepository[Key]):
 
 
 class ApprovedInboundRepository(BaseRepository[ApprovedInbound]):
-    """Утверждённый набор inbound'ов панели (источник истины после первого seed).
+    """Утверждённый набор inbound'ов панели (единственный источник истины).
 
     Порядок задаётся ``sort_order``: первый inbound используется как
     ``keys.inbound_id`` при создании ключа.
@@ -288,21 +288,6 @@ class ApprovedInboundRepository(BaseRepository[ApprovedInbound]):
         """
         async with await self._acquire(pool) as conn:
             return await conn.fetchval(query, inbound_id) is not None
-
-    async def seed_if_empty(self, pool, inbound_ids: List[int]) -> int:
-        """Первичный seed из AVAILABLE_CONNECTIONS: только для пустой таблицы."""
-        if await self.count(pool) > 0 or not inbound_ids:
-            return 0
-        query = """
-            INSERT INTO approved_inbounds (inbound_id, sort_order)
-            SELECT id, ord - 1
-            FROM unnest($1::int[]) WITH ORDINALITY AS t(id, ord)
-            ON CONFLICT (inbound_id) DO NOTHING
-            RETURNING inbound_id
-        """
-        async with await self._acquire(pool) as conn:
-            records = await conn.fetch(query, [int(i) for i in inbound_ids])
-        return len(records)
 
 
 class DataService:

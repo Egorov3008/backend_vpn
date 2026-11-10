@@ -35,7 +35,9 @@ async def main():
     client_id = str(uuid.uuid4())
     expiry_time = int((time.time() + 5 * 60) * 1000)  # +5 минут
 
-    inbound_ids = json.loads(os.environ["AVAILABLE_CONNECTIONS"])
+    inbound_ids = [int(x) for x in sys.argv[1:]]
+    if not inbound_ids:
+        sys.exit("Укажите inbound id аргументами: python tools/diag_external_sub_test.py 14 36")
 
     print("=== email:", email)
     print("=== inbound_ids:", inbound_ids)

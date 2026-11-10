@@ -124,7 +124,6 @@ class Settings(BaseSettings):
     # Bot behaviour
     admin_id_raw: str = Field(default="[0]", alias="ADMIN_ID")
     available_rates_raw: str = Field(default="[9, 8, 7]", alias="AVAILABLE_RATES")
-    available_connections_raw: str = Field(default="[11, 12]", alias="AVAILABLE_CONNECTIONS")
     default_pricing_plan: str = "10"
     trial_time: int = 30
     discounts: int = 3
@@ -248,7 +247,6 @@ PAYMENT_SWEEP_EXCLUDE_IDS: list = [
 
 ADMIN_ID: list = _parse_list(settings.admin_id_raw, [0])
 AVAILABLE_RATES_LIST: list = _parse_list(settings.available_rates_raw, [])
-LIST_AVAILABLE_CONNECTIONS: list = _parse_list(settings.available_connections_raw, [])
 
 # Referral bonus percentages — single source of truth in shared.config
 REFERRAL_BONUS_PERCENTAGES: dict = REFERRAL_BONUS_PERCENTAGES

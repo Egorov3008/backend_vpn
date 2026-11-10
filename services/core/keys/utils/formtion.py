@@ -65,12 +65,25 @@ class FormationKey:
 
         subscription_url = f"{server_data.get('subscription_url')}/{email}"
 
+        subscription = is_subscription(tariff)
         inbound_ids = (
             await approved_inbound_ids(self.cache)
-            if is_subscription(tariff)
+            if subscription
             else server_data.get("inbound_ids", [])
         )
-        primary_inbound_id = inbound_ids[0] if inbound_ids else 0
+        # Пустой набор — не создаём ключ с inbound_id=0: панель всё равно
+        # отклонит add_client. Основная защита — проверка в
+        # FormConnectionData.data(); это подстраховка для иного источника
+        # server_data.
+        if not inbound_ids:
+            logger.error(
+                "Нет inbound'ов для создания ключа",
+                tg_id=tg_id,
+                tariff_id=tariff.id,
+                subscription=subscription,
+            )
+            return None
+        primary_inbound_id = inbound_ids[0]
 
         key = Key(
             tg_id=tg_id,
