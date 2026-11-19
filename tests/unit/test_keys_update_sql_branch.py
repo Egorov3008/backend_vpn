@@ -101,3 +101,24 @@ async def test_keys_update_by_email_includes_changed_tg_id():
     assert conn.values is not None
     assert conn.values[0] == "ov8egq"  # WHERE email = $1
     assert 7563318767 in conn.values  # SET tg_id = $N
+
+@pytest.mark.asyncio
+async def test_keys_update_by_email_writes_used_traffic():
+    """Регрессия: used_traffic должен попадать в UPDATE keys.
+
+    Корень бага: used_traffic не входил в Key._DB_FIELDS, to_dict() его
+    отбрасывал, синхронизатор выполнял UPDATE «успешно», но SET не содержал
+    used_traffic — статистика трафика в БД всегда оставалась 0.0.
+    """
+    repo = BaseRepository(table_name="keys", model=Key)
+    conn = _FakeConn()
+
+    key = _make_key()
+    key.used_traffic = 7_917_075_029  # bytes, ~7.9 GB
+
+    await repo.update(conn, {"email": key.email}, **key.to_dict())
+
+    q = conn.query.strip().upper()
+    assert q.startswith("UPDATE KEYS")
+    assert "USED_TRAFFIC" in q, f"used_traffic отсутствует в SET: {conn.query!r}"
+    assert 7_917_075_029 in conn.values
