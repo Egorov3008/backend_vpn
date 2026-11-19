@@ -57,6 +57,7 @@ class Key:
             "notified_24h",
             "tariff_id",
             "limit_ip",
+            "used_traffic",
             "notified_expired_grace",
             "converted_tg_id",
             "landing_uid",
