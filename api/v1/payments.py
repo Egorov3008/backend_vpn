@@ -634,7 +634,7 @@ async def _create_payment(
                                 "return_url": return_url,
                             },
                             "capture": True,
-                            "description": f"Помощь в ИТ {body.tg_id} {tariff.name_tariff} x{body.number_of_months}",
+                            "description": f"Доступ к сервису защищённого соединения {body.tg_id} {tariff.name_tariff} x{body.number_of_months}",
                             "metadata": {
                                 "tg_id": str(body.tg_id),
                                 "payment_type": payment_type,

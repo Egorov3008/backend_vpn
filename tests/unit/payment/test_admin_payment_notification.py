@@ -21,7 +21,7 @@ class RecordingSender:
 
 def _payment(**fields) -> PaidPayment:
     data = dict(payment_id="yk-123", amount=597.0, tg_id=42, operation="create_key",
-                description="Помощь в ИТ 42 Стандарт x3")
+                description="Доступ к сервису защищённого соединения 42 Стандарт x3")
     data.update(fields)
     return PaidPayment(**data)
 
@@ -34,7 +34,7 @@ async def test_every_admin_gets_service_id_and_amount():
     for messages in sender.sent.values():
         assert len(messages) == 1
         text = messages[0]
-        assert "Помощь в ИТ 42 Стандарт x3" in text
+        assert "Доступ к сервису защищённого соединения 42 Стандарт x3" in text
         assert "yk-123" in text
         assert "597" in text
 
@@ -89,11 +89,11 @@ async def test_router_survives_broken_listener_and_passes_description():
     recorder = RecordingListener()
     router.success_listeners = (FailingListener(), recorder)
 
-    await router.route("yk-555", description="Помощь в ИТ")
+    await router.route("yk-555", description="Доступ к сервису защищённого соединения")
 
     model_service.payments.service.complete_claim.assert_awaited_once()
     router.creation_service.send_notification.assert_awaited_once()
     router.bonus_service.process_referral_bonus.assert_awaited_once()
     assert [(p.payment_id, p.amount, p.description) for p in recorder.payments] == [
-        ("yk-555", 199.0, "Помощь в ИТ")
+        ("yk-555", 199.0, "Доступ к сервису защищённого соединения")
     ]
